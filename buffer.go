@@ -339,6 +339,63 @@ func (r *Region) DrawBorder(border BorderStyle, style Style) {
 	}
 }
 
+// String returns the buffer contents as a string (for testing/debugging).
+// Each row is separated by a newline. Trailing spaces are preserved.
+func (b *Buffer) String() string {
+	var result []byte
+	for y := 0; y < b.height; y++ {
+		for x := 0; x < b.width; x++ {
+			c := b.Get(x, y)
+			if c.Rune == 0 {
+				result = append(result, ' ')
+			} else {
+				result = append(result, string(c.Rune)...)
+			}
+		}
+		if y < b.height-1 {
+			result = append(result, '\n')
+		}
+	}
+	return string(result)
+}
+
+// StringTrimmed returns the buffer contents with trailing spaces removed per line.
+func (b *Buffer) StringTrimmed() string {
+	var lines []string
+	for y := 0; y < b.height; y++ {
+		var line []byte
+		lastNonSpace := -1
+		for x := 0; x < b.width; x++ {
+			c := b.Get(x, y)
+			r := c.Rune
+			if r == 0 {
+				r = ' '
+			}
+			line = append(line, string(r)...)
+			if r != ' ' {
+				lastNonSpace = len(line)
+			}
+		}
+		if lastNonSpace >= 0 {
+			lines = append(lines, string(line[:lastNonSpace]))
+		} else {
+			lines = append(lines, "")
+		}
+	}
+	// Trim trailing empty lines
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	result := ""
+	for i, line := range lines {
+		result += line
+		if i < len(lines)-1 {
+			result += "\n"
+		}
+	}
+	return result
+}
+
 // Resize resizes the buffer to new dimensions.
 // Existing content is preserved where it fits.
 func (b *Buffer) Resize(width, height int) {

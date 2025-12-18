@@ -179,8 +179,11 @@ func (s *Screen) handleSignals() {
 			s.height = height
 			s.front.Resize(width, height)
 			s.back.Resize(width, height)
-			// Clear front buffer to force full redraw
+			// Clear BOTH buffers to avoid stale content
 			s.front.Clear()
+			s.back.Clear()
+			// Clear the actual terminal screen
+			s.writeString("\x1b[2J")
 			// Non-blocking send
 			select {
 			case s.resizeChan <- Size{Width: width, Height: height}:
