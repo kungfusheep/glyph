@@ -2,10 +2,14 @@ package tui
 
 // Buffer is a 2D grid of cells representing a drawable surface.
 type Buffer struct {
-	cells  []Cell
-	width  int
-	height int
+	cells     []Cell
+	width     int
+	height    int
+	dirtyMaxY int // highest row written to (for partial clear)
 }
+
+// emptyBufferCache is a pre-filled buffer of empty cells for fast clearing via copy()
+var emptyBufferCache []Cell
 
 // NewBuffer creates a new buffer with the given dimensions.
 func NewBuffer(width, height int) *Buffer {
@@ -71,6 +75,84 @@ func (b *Buffer) Set(x, y int, c Cell) {
 	}
 
 	b.cells[idx] = c
+
+	// Track dirty region
+	if y > b.dirtyMaxY {
+		b.dirtyMaxY = y
+	}
+}
+
+// SetFast sets a cell without border merging. Use for text/progress where
+// you know the content isn't a border character.
+func (b *Buffer) SetFast(x, y int, c Cell) {
+	if y < 0 || y >= b.height || x < 0 || x >= b.width {
+		return
+	}
+	b.cells[y*b.width+x] = c
+	if y > b.dirtyMaxY {
+		b.dirtyMaxY = y
+	}
+}
+
+// WriteProgressBar writes a progress bar directly to the buffer.
+// Batch write - much faster than per-cell Set calls.
+func (b *Buffer) WriteProgressBar(x, y, width int, ratio float32, style Style) {
+	if y < 0 || y >= b.height {
+		return
+	}
+	if y > b.dirtyMaxY {
+		b.dirtyMaxY = y
+	}
+
+	filled := int(float32(width) * ratio)
+	if filled > width {
+		filled = width
+	}
+
+	// Direct slice access - no bounds check per cell, no border merge
+	base := y * b.width
+	filledCell := Cell{Rune: '█', Style: style}
+	emptyCell := Cell{Rune: '░', Style: style}
+
+	end := x + width
+	if end > b.width {
+		end = b.width
+	}
+	if x < 0 {
+		x = 0
+	}
+
+	for i := x; i < end; i++ {
+		if i-x < filled {
+			b.cells[base+i] = filledCell
+		} else {
+			b.cells[base+i] = emptyCell
+		}
+	}
+}
+
+// WriteStringFast writes a string without border merging.
+// Direct slice access for maximum speed.
+func (b *Buffer) WriteStringFast(x, y int, s string, style Style, maxWidth int) {
+	if y < 0 || y >= b.height {
+		return
+	}
+	if y > b.dirtyMaxY {
+		b.dirtyMaxY = y
+	}
+
+	base := y * b.width
+	written := 0
+	for _, r := range s {
+		if written >= maxWidth || x >= b.width {
+			break
+		}
+		if x >= 0 {
+			b.cells[base+x] = Cell{Rune: r, Style: style}
+		}
+		x++
+		written++
+	}
 }
 
 // SetRune sets just the rune at the given coordinates, preserving style.
@@ -99,8 +181,48 @@ func (b *Buffer) Fill(c Cell) {
 }
 
 // Clear clears the buffer to empty cells with default style.
+// Uses copy() from a cached empty buffer for speed (memmove vs scalar loop).
 func (b *Buffer) Clear() {
-	b.Fill(EmptyCell())
+	size := len(b.cells)
+
+	// Grow cache if needed (one-time cost)
+	if len(emptyBufferCache) < size {
+		emptyBufferCache = make([]Cell, size)
+		empty := EmptyCell()
+		for i := range emptyBufferCache {
+			emptyBufferCache[i] = empty
+		}
+	}
+
+	// Fast path: copy uses optimized memmove
+	copy(b.cells, emptyBufferCache[:size])
+	b.dirtyMaxY = 0
+}
+
+// ClearDirty clears only the rows that were written to since last clear.
+// Much faster than Clear() when content doesn't fill the buffer.
+func (b *Buffer) ClearDirty() {
+	if b.dirtyMaxY < 0 {
+		return
+	}
+
+	// Only clear rows 0..dirtyMaxY
+	size := (b.dirtyMaxY + 1) * b.width
+	if size > len(b.cells) {
+		size = len(b.cells)
+	}
+
+	// Ensure cache is big enough
+	if len(emptyBufferCache) < size {
+		emptyBufferCache = make([]Cell, len(b.cells))
+		empty := EmptyCell()
+		for i := range emptyBufferCache {
+			emptyBufferCache[i] = empty
+		}
+	}
+
+	copy(b.cells[:size], emptyBufferCache[:size])
+	b.dirtyMaxY = 0
 }
 
 // FillRect fills a rectangular region with the given cell.
@@ -140,6 +262,27 @@ func (b *Buffer) WriteStringClipped(x, y int, s string, style Style, maxWidth in
 		written++
 	}
 	return written
+}
+
+// WriteStringPadded writes a string and pads with spaces to fill width.
+// This allows skipping Clear() when UI structure is stable.
+func (b *Buffer) WriteStringPadded(x, y int, s string, style Style, width int) {
+	written := 0
+	for _, r := range s {
+		if written >= width || !b.InBounds(x, y) {
+			break
+		}
+		b.Set(x, y, NewCell(r, style))
+		x++
+		written++
+	}
+	// Pad with spaces
+	space := NewCell(' ', style)
+	for written < width && b.InBounds(x, y) {
+		b.Set(x, y, space)
+		x++
+		written++
+	}
 }
 
 // HLine draws a horizontal line of the given rune.
@@ -185,53 +328,70 @@ const (
 	BoxCross    = '┼' // all four directions
 )
 
-// borderEdges maps border runes to which edges they connect (top, right, bottom, left)
+// Box drawing range constants for fast rejection
+const (
+	boxDrawingMin = 0x2500
+	boxDrawingMax = 0x257F
+)
+
+// borderEdgesArray provides O(1) lookup for border edge bits
+// Index = rune - boxDrawingMin, value = edge bits (0 = not a border char)
 // Using bits: 1=top, 2=right, 4=bottom, 8=left
-var borderEdges = map[rune]uint8{
-	BoxHorizontal:  0b1010, // left + right
-	BoxVertical:    0b0101, // top + bottom
-	BoxTopLeft:     0b0110, // right + bottom
-	BoxTopRight:    0b1100, // left + bottom
-	BoxBottomLeft:  0b0011, // top + right
-	BoxBottomRight: 0b1001, // top + left
-	BoxTeeDown:     0b1110, // left + right + bottom
-	BoxTeeUp:       0b1011, // left + right + top
-	BoxTeeRight:    0b0111, // top + bottom + right
-	BoxTeeLeft:     0b1101, // top + bottom + left
-	BoxCross:       0b1111, // all
-	// Rounded corners - same edges as regular
-	BoxRoundedTopLeft:     0b0110,
-	BoxRoundedTopRight:    0b1100,
-	BoxRoundedBottomLeft:  0b0011,
-	BoxRoundedBottomRight: 0b1001,
+var borderEdgesArray = [128]uint8{
+	0x00: 0b1010, // ─ BoxHorizontal (0x2500)
+	0x02: 0b0101, // │ BoxVertical (0x2502)
+	0x0C: 0b0110, // ┌ BoxTopLeft (0x250C)
+	0x10: 0b1100, // ┐ BoxTopRight (0x2510)
+	0x14: 0b0011, // └ BoxBottomLeft (0x2514)
+	0x18: 0b1001, // ┘ BoxBottomRight (0x2518)
+	0x1C: 0b0111, // ├ BoxTeeRight (0x251C)
+	0x24: 0b1101, // ┤ BoxTeeLeft (0x2524)
+	0x2C: 0b1110, // ┬ BoxTeeDown (0x252C)
+	0x34: 0b1011, // ┴ BoxTeeUp (0x2534)
+	0x3C: 0b1111, // ┼ BoxCross (0x253C)
+	0x6D: 0b0110, // ╭ BoxRoundedTopLeft (0x256D)
+	0x6E: 0b1100, // ╮ BoxRoundedTopRight (0x256E)
+	0x6F: 0b1001, // ╯ BoxRoundedBottomRight (0x256F)
+	0x70: 0b0011, // ╰ BoxRoundedBottomLeft (0x2570)
 }
 
-// edgesToBorder maps edge combinations back to border runes
-var edgesToBorder = map[uint8]rune{
-	0b1010: BoxHorizontal,
+// edgesToBorderArray provides O(1) lookup from edge bits to border rune
+// Index = edge bits (0-15), value = border rune (0 = invalid)
+var edgesToBorderArray = [16]rune{
+	0b0011: BoxBottomLeft,
 	0b0101: BoxVertical,
 	0b0110: BoxTopLeft,
-	0b1100: BoxTopRight,
-	0b0011: BoxBottomLeft,
-	0b1001: BoxBottomRight,
-	0b1110: BoxTeeDown,
-	0b1011: BoxTeeUp,
 	0b0111: BoxTeeRight,
+	0b1001: BoxBottomRight,
+	0b1010: BoxHorizontal,
+	0b1011: BoxTeeUp,
+	0b1100: BoxTopRight,
 	0b1101: BoxTeeLeft,
+	0b1110: BoxTeeDown,
 	0b1111: BoxCross,
 }
 
 // mergeBorders combines two border characters into one.
 // Returns the merged rune and true if both were border chars, otherwise false.
 func mergeBorders(existing, new rune) (rune, bool) {
-	existingEdges, ok1 := borderEdges[existing]
-	newEdges, ok2 := borderEdges[new]
-	if !ok1 || !ok2 {
+	// Fast path: reject non-border characters immediately (99% of calls)
+	if existing < boxDrawingMin || existing > boxDrawingMax {
+		return new, false
+	}
+	if new < boxDrawingMin || new > boxDrawingMax {
 		return new, false
 	}
 
+	// Array lookup for edge bits
+	existingEdges := borderEdgesArray[existing-boxDrawingMin]
+	newEdges := borderEdgesArray[new-boxDrawingMin]
+	if existingEdges == 0 || newEdges == 0 {
+		return new, false
+	}
+
+	// Merge and lookup result
 	merged := existingEdges | newEdges
-	if result, ok := edgesToBorder[merged]; ok {
+	if result := edgesToBorderArray[merged]; result != 0 {
 		return result, true
 	}
 	return new, false
