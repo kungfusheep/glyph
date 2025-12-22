@@ -57,11 +57,20 @@ func (b *Buffer) Get(x, y int) Cell {
 
 // Set sets the cell at the given coordinates.
 // Does nothing if out of bounds.
+// When drawing border characters, automatically merges with existing borders.
 func (b *Buffer) Set(x, y int, c Cell) {
 	if !b.InBounds(x, y) {
 		return
 	}
-	b.cells[b.index(x, y)] = c
+	idx := b.index(x, y)
+	existing := b.cells[idx]
+
+	// Merge border characters
+	if merged, ok := mergeBorders(existing.Rune, c.Rune); ok {
+		c.Rune = merged
+	}
+
+	b.cells[idx] = c
 }
 
 // SetRune sets just the rune at the given coordinates, preserving style.
@@ -166,6 +175,67 @@ const (
 	BoxDoubleBottomLeft  = '╚'
 	BoxDoubleBottomRight = '╝'
 )
+
+// Box junction characters for merged borders
+const (
+	BoxTeeDown  = '┬' // ─ meets │ from below
+	BoxTeeUp    = '┴' // ─ meets │ from above
+	BoxTeeRight = '├' // │ meets ─ from right
+	BoxTeeLeft  = '┤' // │ meets ─ from left
+	BoxCross    = '┼' // all four directions
+)
+
+// borderEdges maps border runes to which edges they connect (top, right, bottom, left)
+// Using bits: 1=top, 2=right, 4=bottom, 8=left
+var borderEdges = map[rune]uint8{
+	BoxHorizontal:  0b1010, // left + right
+	BoxVertical:    0b0101, // top + bottom
+	BoxTopLeft:     0b0110, // right + bottom
+	BoxTopRight:    0b1100, // left + bottom
+	BoxBottomLeft:  0b0011, // top + right
+	BoxBottomRight: 0b1001, // top + left
+	BoxTeeDown:     0b1110, // left + right + bottom
+	BoxTeeUp:       0b1011, // left + right + top
+	BoxTeeRight:    0b0111, // top + bottom + right
+	BoxTeeLeft:     0b1101, // top + bottom + left
+	BoxCross:       0b1111, // all
+	// Rounded corners - same edges as regular
+	BoxRoundedTopLeft:     0b0110,
+	BoxRoundedTopRight:    0b1100,
+	BoxRoundedBottomLeft:  0b0011,
+	BoxRoundedBottomRight: 0b1001,
+}
+
+// edgesToBorder maps edge combinations back to border runes
+var edgesToBorder = map[uint8]rune{
+	0b1010: BoxHorizontal,
+	0b0101: BoxVertical,
+	0b0110: BoxTopLeft,
+	0b1100: BoxTopRight,
+	0b0011: BoxBottomLeft,
+	0b1001: BoxBottomRight,
+	0b1110: BoxTeeDown,
+	0b1011: BoxTeeUp,
+	0b0111: BoxTeeRight,
+	0b1101: BoxTeeLeft,
+	0b1111: BoxCross,
+}
+
+// mergeBorders combines two border characters into one.
+// Returns the merged rune and true if both were border chars, otherwise false.
+func mergeBorders(existing, new rune) (rune, bool) {
+	existingEdges, ok1 := borderEdges[existing]
+	newEdges, ok2 := borderEdges[new]
+	if !ok1 || !ok2 {
+		return new, false
+	}
+
+	merged := existingEdges | newEdges
+	if result, ok := edgesToBorder[merged]; ok {
+		return result, true
+	}
+	return new, false
+}
 
 // BorderStyle defines the characters used for drawing borders.
 type BorderStyle struct {
@@ -337,6 +407,30 @@ func (r *Region) DrawBorder(border BorderStyle, style Style) {
 		r.Set(0, i, NewCell(border.Vertical, style))
 		r.Set(r.width-1, i, NewCell(border.Vertical, style))
 	}
+}
+
+// GetLine returns the content of a single line as a string (trimmed).
+func (b *Buffer) GetLine(y int) string {
+	if y < 0 || y >= b.height {
+		return ""
+	}
+	var line []byte
+	lastNonSpace := -1
+	for x := 0; x < b.width; x++ {
+		c := b.Get(x, y)
+		r := c.Rune
+		if r == 0 {
+			r = ' '
+		}
+		line = append(line, string(r)...)
+		if r != ' ' {
+			lastNonSpace = len(line)
+		}
+	}
+	if lastNonSpace >= 0 {
+		return string(line[:lastNonSpace])
+	}
+	return ""
 }
 
 // String returns the buffer contents as a string (for testing/debugging).
