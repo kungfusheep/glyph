@@ -2,205 +2,198 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"math/rand"
+	"os"
 	"time"
 
-	"riffkey"
-	. "tui"
+	"tui"
+
+	"golang.org/x/term"
 )
 
-var (
-	tick     int
-	gridSize = 4 // Start with 4x4
-	mode     = "grid"
-)
-
-func buildGridUI() Component {
-	count := gridSize * gridSize
-	children := make([]ChildItem, count)
-
-	for i := 0; i < count; i++ {
-		val := (tick + i*7) % 100
-		children[i] = Fragment(
-			Textf("Cell %d", i).Bold(),
-			Textf("Val: %d%%", val),
-			Progress(val, 100),
-		)
-	}
-
-	return VStack(
-		Title(
-			fmt.Sprintf("Grid %dx%d (%d fragments) [mode: %s]", gridSize, gridSize, count, mode),
-			Text(time.Now().Format("15:04:05")),
-		),
-		Textf("Keys: a=2x2 | s=4x4 | d=6x6 | f=8x8 | m=next mode | q=quit"),
-		Text(TimingString()).Dim(),
-		Grid(gridSize, children...).Grow(1),
-	).Padding(1)
+// Live data that updates each frame
+var liveData = struct {
+	Title     string
+	Time      string
+	FrameTime string
+	FPS       string
+	Processes []Process
+	CPUCores  []Core
+}{
+	Title: "Serial Template Stress Test",
 }
 
-func buildDenseList() Component {
-	items := make([]int, 200)
-	for i := range items {
-		items[i] = i
-	}
-
-	return VStack(
-		Title("Stress Test: 200 item DataList", Text(time.Now().Format("15:04:05"))),
-		Text("Keys: 1-4 grid size | m=mode | q=quit"),
-		Fragment(
-			DataList(items, func(i int, idx int) Component {
-				val := (tick + i*3) % 100
-				return HStack(
-					Textf("%4d", i),
-					Progress(val, 100).Width(20).Chars('>', '.'),
-					Textf("%3d%%", val),
-				).Gap(2)
-			}),
-		).Grow(1),
-	).Padding(1)
+type Process struct {
+	Name string
+	CPU  float32
+	Mem  float32
 }
 
-func buildNestedUI() Component {
-	// Deep nesting stress test
-	var inner Component = Text(fmt.Sprintf("Tick: %d", tick)).Bold()
-
-	depth := 20
-	for i := 0; i < depth; i++ {
-		val := (tick + i*5) % 100
-		inner = VStack(
-			Textf("Level %d", depth-i),
-			Progress(val, 100).Width(15),
-			inner,
-		)
-	}
-
-	return VStack(
-		Title("Stress Test: Deep Nesting (20 levels)", Text(time.Now().Format("15:04:05"))),
-		Text("Keys: a/s/d/f=grid size | m=next mode | q=quit"),
-		Text(TimingString()).Dim(),
-		Fragment(inner).Grow(1),
-	).Padding(1)
+type Core struct {
+	Name string
+	Load float32
 }
 
-func buildComplexUI() Component {
-	// Everything combined
-	procs := make([]struct {
-		Name string
-		CPU  int
-	}, 30)
-	for i := range procs {
-		procs[i].Name = fmt.Sprintf("proc-%d", i)
-		procs[i].CPU = (tick + i*10) % 100
+func init() {
+	// Initialize processes
+	liveData.Processes = make([]Process, 30)
+	for i := range liveData.Processes {
+		liveData.Processes[i] = Process{
+			Name: fmt.Sprintf("proc-%02d", i),
+			CPU:  rand.Float32(),
+			Mem:  rand.Float32(),
+		}
 	}
 
-	return VStack(
-		Title("Stress Test: Complex Dashboard", Text(time.Now().Format("15:04:05"))),
-		Text("Keys: 1-4 grid size | m=mode | q=quit"),
-		Cols2(
-			VStack(
-				Fragment(
-					Text("CPU Cores").Bold(),
-					Textf("Core 0: %d%%", (tick+0)%100),
-					Progress((tick+0)%100, 100),
-					Textf("Core 1: %d%%", (tick+10)%100),
-					Progress((tick+10)%100, 100),
-					Textf("Core 2: %d%%", (tick+20)%100),
-					Progress((tick+20)%100, 100),
-					Textf("Core 3: %d%%", (tick+30)%100),
-					Progress((tick+30)%100, 100),
-					Textf("Core 4: %d%%", (tick+40)%100),
-					Progress((tick+40)%100, 100),
-					Textf("Core 5: %d%%", (tick+50)%100),
-					Progress((tick+50)%100, 100),
-					Textf("Core 6: %d%%", (tick+60)%100),
-					Progress((tick+60)%100, 100),
-					Textf("Core 7: %d%%", (tick+70)%100),
-					Progress((tick+70)%100, 100),
-				),
-				Fragment(
-					Text("Memory").Bold(),
-					Textf("RAM: %d%%", (tick*2)%100),
-					Progress((tick*2)%100, 100),
-					Textf("Swap: %d%%", (tick*3)%100),
-					Progress((tick*3)%100, 100),
-				),
-				Fragment(
-					Text("Disk").Bold(),
-					Textf("Read: %d MB/s", tick%500),
-					Textf("Write: %d MB/s", (tick*2)%300),
-				),
-			).Grow(1),
-			Fragment(
-				Text("Processes (30)").Bold(),
-				DataList(procs, func(p struct {
-					Name string
-					CPU  int
-				}, i int) Component {
-					return HStack(
-						Textf("%-10s", p.Name),
-						Progress(p.CPU, 100).Width(15),
-						Textf("%3d%%", p.CPU),
-					).Gap(1)
-				}),
-			),
-		).Grow(1),
-	).Padding(1)
+	// Initialize CPU cores
+	liveData.CPUCores = make([]Core, 8)
+	for i := range liveData.CPUCores {
+		liveData.CPUCores[i] = Core{
+			Name: fmt.Sprintf("Core %d", i),
+			Load: rand.Float32(),
+		}
+	}
 }
 
-func buildUI() Component {
-	switch mode {
-	case "grid":
-		return buildGridUI()
-	case "list":
-		return buildDenseList()
-	case "nested":
-		return buildNestedUI()
-	case "complex":
-		return buildComplexUI()
-	default:
-		return buildGridUI()
+func updateData() {
+	liveData.Time = time.Now().Format("15:04:05.000")
+
+	// Randomly update some processes
+	for i := range liveData.Processes {
+		liveData.Processes[i].CPU += (rand.Float32() - 0.5) * 0.1
+		if liveData.Processes[i].CPU < 0 {
+			liveData.Processes[i].CPU = 0
+		}
+		if liveData.Processes[i].CPU > 1 {
+			liveData.Processes[i].CPU = 1
+		}
+
+		liveData.Processes[i].Mem += (rand.Float32() - 0.5) * 0.05
+		if liveData.Processes[i].Mem < 0 {
+			liveData.Processes[i].Mem = 0
+		}
+		if liveData.Processes[i].Mem > 1 {
+			liveData.Processes[i].Mem = 1
+		}
+	}
+
+	// Update CPU cores
+	for i := range liveData.CPUCores {
+		liveData.CPUCores[i].Load += (rand.Float32() - 0.5) * 0.2
+		if liveData.CPUCores[i].Load < 0 {
+			liveData.CPUCores[i].Load = 0
+		}
+		if liveData.CPUCores[i].Load > 1 {
+			liveData.CPUCores[i].Load = 1
+		}
 	}
 }
 
 func main() {
-	DebugTiming = true // Enable timing display
-
-	app, err := NewApp()
+	// Get terminal size
+	width, height, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
-		log.Fatal(err)
+		width, height = 120, 40
 	}
 
-	app.SetBuildFunc(buildUI)
+	// Build the UI template once
+	ui := tui.DCol{
+		Children: []any{
+			tui.DText{Content: &liveData.Title},
+			tui.DRow{Children: []any{
+				tui.DText{Content: "Time: "},
+				tui.DText{Content: &liveData.Time},
+				tui.DText{Content: "  Frame: "},
+				tui.DText{Content: &liveData.FrameTime},
+				tui.DText{Content: "  "},
+				tui.DText{Content: &liveData.FPS},
+			}},
+			tui.DText{Content: ""},
+			tui.DText{Content: "═══ CPU Cores ═══════════════════════════════════════════════════"},
+			tui.DForEach(&liveData.CPUCores, func(core *Core) any {
+				return tui.DRow{Children: []any{
+					tui.DText{Content: &core.Name},
+					tui.DText{Content: ": "},
+					tui.DProgress{Value: &core.Load, Width: 50},
+				}}
+			}),
+			tui.DText{Content: ""},
+			tui.DText{Content: "═══ Processes ═══════════════════════════════════════════════════"},
+			tui.DForEach(&liveData.Processes, func(proc *Process) any {
+				return tui.DRow{Children: []any{
+					tui.DText{Content: &proc.Name},
+					tui.DText{Content: " CPU:"},
+					tui.DProgress{Value: &proc.CPU, Width: 25},
+					tui.DText{Content: " MEM:"},
+					tui.DProgress{Value: &proc.Mem, Width: 25},
+				}}
+			}),
+		},
+	}
 
-	// Update at 20 FPS
-	go func() {
-		for {
-			time.Sleep(50 * time.Millisecond)
-			tick++
-			app.RequestRender()
+	serial := tui.BuildSerial(ui)
+	buf := tui.NewBuffer(width, height)
+
+	// Hide cursor
+	fmt.Print("\033[?25l")
+	defer fmt.Print("\033[?25h")
+
+	// Clear screen
+	fmt.Print("\033[2J")
+
+	frameCount := 0
+	lastFPSUpdate := time.Now()
+	var totalFrameTime time.Duration
+
+	for {
+		frameStart := time.Now()
+
+		// Update data
+		updateData()
+
+		// Render
+		buf.ClearDirty()
+		serial.ExecuteSimple(buf, int16(width), int16(height), nil)
+
+		// Output to terminal
+		fmt.Print("\033[H") // Move to top-left
+		output := renderBuffer(buf)
+		fmt.Print(output)
+
+		frameTime := time.Since(frameStart)
+		totalFrameTime += frameTime
+		frameCount++
+
+		// Update FPS every second
+		if time.Since(lastFPSUpdate) >= time.Second {
+			avgFrame := totalFrameTime / time.Duration(frameCount)
+			liveData.FrameTime = fmt.Sprintf("%v", avgFrame.Round(time.Microsecond))
+			liveData.FPS = fmt.Sprintf("(%d FPS)", frameCount)
+			frameCount = 0
+			totalFrameTime = 0
+			lastFPSUpdate = time.Now()
 		}
-	}()
 
-	// Grid size controls (a/s/d/f for 2/4/6/8 columns)
-	app.Handle("a", func(m riffkey.Match) { gridSize = 2; app.RequestRender() })
-	app.Handle("s", func(m riffkey.Match) { gridSize = 4; app.RequestRender() })
-	app.Handle("d", func(m riffkey.Match) { gridSize = 6; app.RequestRender() })
-	app.Handle("f", func(m riffkey.Match) { gridSize = 8; app.RequestRender() })
-
-	// Mode switching
-	modes := []string{"grid", "list", "nested", "complex"}
-	modeIdx := 0
-	app.Handle("m", func(m riffkey.Match) {
-		modeIdx = (modeIdx + 1) % len(modes)
-		mode = modes[modeIdx]
-		app.RequestRender()
-	})
-
-	app.Handle("q", func(m riffkey.Match) { app.Stop() })
-	app.Handle("<C-c>", func(m riffkey.Match) { app.Stop() })
-
-	if err := app.Run(); err != nil {
-		log.Fatal(err)
+		// Target ~60 FPS
+		sleepTime := (16 * time.Millisecond) - frameTime
+		if sleepTime > 0 {
+			time.Sleep(sleepTime)
+		}
 	}
+}
+
+func renderBuffer(buf *tui.Buffer) string {
+	w, h := buf.Size()
+	// Pre-allocate roughly enough space
+	result := make([]byte, 0, w*h*4)
+
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			cell := buf.Get(x, y)
+			// Simple render - just the rune
+			result = append(result, string(cell.Rune)...)
+		}
+		result = append(result, '\n')
+	}
+	return string(result)
 }
