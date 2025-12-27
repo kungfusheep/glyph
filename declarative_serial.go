@@ -147,26 +147,26 @@ func (t *SerialTemplate) compile(node any, parentIdx int16, level int, elemBase 
 	}
 
 	switch v := node.(type) {
-	case DText:
+	case Text:
 		return t.compileText(v, parentIdx, level, elemBase, elemSize)
-	case DProgress:
+	case Progress:
 		return t.compileProgress(v, parentIdx, level, elemBase, elemSize)
-	case DRow:
+	case Row:
 		return t.compileContainer(v.Gap, v.Children, parentIdx, level, true, elemBase, elemSize)
-	case DCol:
+	case Col:
 		return t.compileContainer(v.Gap, v.Children, parentIdx, level, false, elemBase, elemSize)
-	case DIfNode:
+	case IfNode:
 		return t.compileIf(v, parentIdx, level, elemBase, elemSize)
-	case DElseNode:
+	case ElseNode:
 		return t.compileElse(v, parentIdx, level, elemBase, elemSize)
-	case DForEachNode:
+	case ForEachNode:
 		return t.compileForEach(v, parentIdx, level)
 	}
 
 	return -1
 }
 
-func (t *SerialTemplate) compileText(v DText, parentIdx int16, level int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *SerialTemplate) compileText(v Text, parentIdx int16, level int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	op := SerialOp{
 		Parent: parentIdx,
 		Bold:   v.Bold || v.Style.Bold,
@@ -207,7 +207,7 @@ func (t *SerialTemplate) compileText(v DText, parentIdx int16, level int, elemBa
 	return t.addOp(op, level)
 }
 
-func (t *SerialTemplate) compileProgress(v DProgress, parentIdx int16, level int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *SerialTemplate) compileProgress(v Progress, parentIdx int16, level int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	width := v.Width
 	if width == 0 {
 		width = 20
@@ -270,7 +270,7 @@ func (t *SerialTemplate) compileContainer(gap int8, children []any, parentIdx in
 	return startIdx
 }
 
-func (t *SerialTemplate) compileIf(v DIfNode, parentIdx int16, level int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *SerialTemplate) compileIf(v IfNode, parentIdx int16, level int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	op := SerialOp{
 		Kind:   SerialOpIf,
 		Parent: parentIdx,
@@ -305,7 +305,7 @@ func (t *SerialTemplate) compileIf(v DIfNode, parentIdx int16, level int, elemBa
 	return t.addOp(op, level)
 }
 
-func (t *SerialTemplate) compileElse(v DElseNode, parentIdx int16, level int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *SerialTemplate) compileElse(v ElseNode, parentIdx int16, level int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	op := SerialOp{
 		Kind:   SerialOpElse,
 		Parent: parentIdx,
@@ -329,7 +329,7 @@ func (t *SerialTemplate) compileElse(v DElseNode, parentIdx int16, level int, el
 	return t.addOp(op, level)
 }
 
-func (t *SerialTemplate) compileForEach(v DForEachNode, parentIdx int16, level int) int16 {
+func (t *SerialTemplate) compileForEach(v ForEachNode, parentIdx int16, level int) int16 {
 	// Analyze slice
 	sliceRV := reflect.ValueOf(v.Items)
 	if sliceRV.Kind() != reflect.Ptr {

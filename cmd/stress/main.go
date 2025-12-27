@@ -97,35 +97,35 @@ func main() {
 	}
 
 	// Build the UI template once
-	ui := tui.DCol{
+	ui := tui.Col{
 		Children: []any{
-			tui.DText{Content: &liveData.Title},
-			tui.DRow{Children: []any{
-				tui.DText{Content: "Time: "},
-				tui.DText{Content: &liveData.Time},
-				tui.DText{Content: "  Frame: "},
-				tui.DText{Content: &liveData.FrameTime},
-				tui.DText{Content: "  "},
-				tui.DText{Content: &liveData.FPS},
+			tui.Text{Content: &liveData.Title},
+			tui.Row{Children: []any{
+				tui.Text{Content: "Time: "},
+				tui.Text{Content: &liveData.Time},
+				tui.Text{Content: "  Frame: "},
+				tui.Text{Content: &liveData.FrameTime},
+				tui.Text{Content: "  "},
+				tui.Text{Content: &liveData.FPS},
 			}},
-			tui.DText{Content: ""},
-			tui.DText{Content: "═══ CPU Cores ═══════════════════════════════════════════════════"},
-			tui.DForEach(&liveData.CPUCores, func(core *Core) any {
-				return tui.DRow{Children: []any{
-					tui.DText{Content: &core.Name},
-					tui.DText{Content: ": "},
-					tui.DProgress{Value: &core.Load, Width: 50},
+			tui.Text{Content: ""},
+			tui.Text{Content: "═══ CPU Cores ═══════════════════════════════════════════════════"},
+			tui.ForEach(&liveData.CPUCores, func(core *Core) any {
+				return tui.Row{Children: []any{
+					tui.Text{Content: &core.Name},
+					tui.Text{Content: ": "},
+					tui.Progress{Value: &core.Load, Width: 50},
 				}}
 			}),
-			tui.DText{Content: ""},
-			tui.DText{Content: "═══ Processes ═══════════════════════════════════════════════════"},
-			tui.DForEach(&liveData.Processes, func(proc *Process) any {
-				return tui.DRow{Children: []any{
-					tui.DText{Content: &proc.Name},
-					tui.DText{Content: " CPU:"},
-					tui.DProgress{Value: &proc.CPU, Width: 25},
-					tui.DText{Content: " MEM:"},
-					tui.DProgress{Value: &proc.Mem, Width: 25},
+			tui.Text{Content: ""},
+			tui.Text{Content: "═══ Processes ═══════════════════════════════════════════════════"},
+			tui.ForEach(&liveData.Processes, func(proc *Process) any {
+				return tui.Row{Children: []any{
+					tui.Text{Content: &proc.Name},
+					tui.Text{Content: " CPU:"},
+					tui.Progress{Value: &proc.CPU, Width: 25},
+					tui.Text{Content: " MEM:"},
+					tui.Progress{Value: &proc.Mem, Width: 25},
 				}}
 			}),
 		},

@@ -21,21 +21,25 @@ var (
 // App is a TUI application with integrated input handling via riffkey.
 type App struct {
 	screen *Screen
-	root   Component
 
 	// riffkey integration
 	router *riffkey.Router
 	input  *riffkey.Input
 	reader *riffkey.Reader
 
-	// Build function - called before each render to rebuild UI
-	buildFunc func() Component
+	// SerialTemplate + BufferPool (for SetView single-view mode)
+	template *SerialTemplate
+	pool     *BufferPool
+
+	// Multi-view routing
+	viewTemplates map[string]*SerialTemplate
+	viewRouters   map[string]*riffkey.Router
+	currentView   string
 
 	// State
-	running     bool
-	needsRender bool
-	renderMu    sync.Mutex
-	renderChan  chan struct{}
+	running    bool
+	renderMu   sync.Mutex
+	renderChan chan struct{}
 }
 
 // NewApp creates a new TUI application.
@@ -60,22 +64,104 @@ func NewApp() (*App, error) {
 	return app, nil
 }
 
-// SetBuildFunc sets a function that rebuilds the UI tree before each render.
-// This enables the "rebuild everything" pattern for reactive UIs.
-func (a *App) SetBuildFunc(fn func() Component) *App {
-	a.buildFunc = fn
+// SetView sets a declarative view for fast rendering.
+// This uses SerialTemplate + BufferPool for maximum performance.
+// Pointers in the view are captured at compile time - just mutate your state.
+//
+// Example:
+//
+//	state := &MyState{Title: "Hello", Progress: 50}
+//	app.SetView(
+//	    DCol{Children: []any{
+//	        DText{Content: &state.Title},
+//	        DProgress{Value: &state.Progress},
+//	    }},
+//	)
+func (a *App) SetView(view any) *App {
+	a.template = BuildSerial(view)
+	// Create buffer pool for async clearing
+	size := a.screen.Size()
+	a.pool = NewBufferPool(size.Width, size.Height)
 	return a
 }
 
-// SetRoot sets the root component of the application.
-func (a *App) SetRoot(root Component) *App {
-	a.root = root
-	return a
+// ViewBuilder allows chaining Handle() calls after View().
+type ViewBuilder struct {
+	app    *App
+	name   string
+	router *riffkey.Router
 }
 
-// Root returns the root component.
-func (a *App) Root() Component {
-	return a.root
+// View registers a named view for multi-view routing.
+// Returns a builder for chaining Handle() calls.
+//
+// Example:
+//
+//	app.View("home", homeView).
+//	    Handle("j", moveDown).
+//	    Handle("s", func(_ riffkey.Match) { app.Go("settings") })
+func (a *App) View(name string, view any) *ViewBuilder {
+	// Initialize maps if needed
+	if a.viewTemplates == nil {
+		a.viewTemplates = make(map[string]*SerialTemplate)
+		a.viewRouters = make(map[string]*riffkey.Router)
+	}
+
+	// Create buffer pool if not exists (shared across all views)
+	if a.pool == nil {
+		size := a.screen.Size()
+		a.pool = NewBufferPool(size.Width, size.Height)
+	}
+
+	// Compile template and create router for this view
+	a.viewTemplates[name] = BuildSerial(view)
+	router := riffkey.NewRouter()
+	a.viewRouters[name] = router
+
+	return &ViewBuilder{
+		app:    a,
+		name:   name,
+		router: router,
+	}
+}
+
+// Handle registers a key handler for this view.
+func (vb *ViewBuilder) Handle(pattern string, handler func(riffkey.Match)) *ViewBuilder {
+	vb.router.Handle(pattern, handler)
+	return vb
+}
+
+// Go switches to a different view.
+// Swaps the template and input handlers.
+func (a *App) Go(name string) {
+	if _, ok := a.viewTemplates[name]; !ok {
+		return // View doesn't exist
+	}
+	a.currentView = name
+	a.input.SetRouter(a.viewRouters[name])
+	a.RequestRender()
+}
+
+// Back returns to the previous view.
+// Currently an alias for Pop() - may add history later.
+func (a *App) Back() {
+	a.input.Pop()
+	a.RequestRender()
+}
+
+// PushView pushes a view as a modal overlay.
+// The modal's handlers take precedence until Pop() is called.
+func (a *App) PushView(name string) {
+	if router, ok := a.viewRouters[name]; ok {
+		a.input.Push(router)
+		a.RequestRender()
+	}
+}
+
+// PopView removes the top modal overlay.
+func (a *App) PopView() {
+	a.input.Pop()
+	a.RequestRender()
 }
 
 // Screen returns the screen.
@@ -131,43 +217,53 @@ func (a *App) render() {
 	a.renderMu.Lock()
 	defer a.renderMu.Unlock()
 
-	var t0, t1, t2, t3 time.Time
+	var t0, t1 time.Time
 	if DebugTiming {
 		t0 = time.Now()
 	}
 
-	// Rebuild UI if we have a build function
-	if a.buildFunc != nil {
-		a.root = a.buildFunc()
+	// Fast path: use SerialTemplate + BufferPool
+	// Check for multi-view mode first, then single-view mode
+	var tmpl *SerialTemplate
+	if a.currentView != "" && a.viewTemplates != nil {
+		tmpl = a.viewTemplates[a.currentView]
+	} else if a.template != nil {
+		tmpl = a.template
 	}
+
+	if tmpl == nil || a.pool == nil {
+		return // No view set
+	}
+
+	size := a.screen.Size()
+	buf := a.pool.Current()
+	tmpl.ExecuteSimple(buf, int16(size.Width), int16(size.Height), nil)
 
 	if DebugTiming {
 		t1 = time.Now()
-		lastBuildTime = t1.Sub(t0)
+		lastBuildTime = 0
+		lastLayoutTime = 0
+		lastRenderTime = t1.Sub(t0)
 	}
 
-	if a.root != nil {
-		size := a.screen.Size()
-		a.screen.Clear()
-		a.root.SetConstraints(size.Width, size.Height)
-
-		if DebugTiming {
-			t2 = time.Now()
-			lastLayoutTime = t2.Sub(t1)
-		}
-
-		a.root.Render(a.screen.Buffer(), 0, 0)
-
-		if DebugTiming {
-			t3 = time.Now()
-			lastRenderTime = t3.Sub(t2)
-		}
-	}
-
+	// Copy to screen's back buffer for flush
+	a.copyToScreen(buf)
 	a.screen.Flush()
+	a.pool.Swap() // Queue async clear
 
-	if DebugTiming && !t3.IsZero() {
-		lastFlushTime = time.Since(t3)
+	if DebugTiming {
+		lastFlushTime = time.Since(t1)
+	}
+}
+
+// copyToScreen copies pool buffer to screen's back buffer.
+func (a *App) copyToScreen(src *Buffer) {
+	dst := a.screen.Buffer()
+	size := a.screen.Size()
+	for y := 0; y < size.Height; y++ {
+		for x := 0; x < size.Width; x++ {
+			dst.Set(x, y, src.Get(x, y))
+		}
 	}
 }
 
@@ -181,8 +277,32 @@ func TimingString() string {
 }
 
 // Run starts the application. Blocks until Stop is called.
+// For multi-view apps, use RunFrom(startView) instead.
 func (a *App) Run() error {
+	return a.run("")
+}
+
+// RunFrom starts the application on the specified view.
+// Use this for multi-view apps.
+func (a *App) RunFrom(startView string) error {
+	return a.run(startView)
+}
+
+func (a *App) run(startView string) error {
 	a.running = true
+
+	// Set up starting view if specified
+	if startView != "" && a.viewTemplates != nil {
+		a.currentView = startView
+		if router, ok := a.viewRouters[startView]; ok {
+			a.input.SetRouter(router)
+		}
+	}
+
+	// Clean up buffer pool on exit if using fast path
+	if a.pool != nil {
+		defer a.pool.Stop()
+	}
 
 	// Enter raw mode
 	if err := a.screen.EnterRawMode(); err != nil {

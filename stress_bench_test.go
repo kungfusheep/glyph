@@ -44,13 +44,13 @@ func init() {
 func BenchmarkStress100Items(b *testing.B) {
 	buf := NewBuffer(80, 120)
 
-	ui := DCol{
+	ui := Col{
 		Children: []any{
-			DText{Content: &stressData.Title},
-			DForEach(&stressData.Items, func(item *StressItem) any {
-				return DRow{Children: []any{
-					DText{Content: &item.Name},
-					DProgress{Value: &item.CPU, Width: 30},
+			Text{Content: &stressData.Title},
+			ForEach(&stressData.Items, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 30},
 				}}
 			}),
 		},
@@ -82,13 +82,13 @@ func BenchmarkStressWideProgress(b *testing.B) {
 		}
 	}
 
-	ui := DCol{
+	ui := Col{
 		Children: []any{
-			DText{Content: "Wide Progress Bars"},
-			DForEach(&items, func(item *StressItem) any {
-				return DRow{Children: []any{
-					DText{Content: &item.Name},
-					DProgress{Value: &item.CPU, Width: 100},
+			Text{Content: "Wide Progress Bars"},
+			ForEach(&items, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 100},
 				}}
 			}),
 		},
@@ -123,13 +123,13 @@ func BenchmarkStressDenseGrid(b *testing.B) {
 		}
 	}
 
-	ui := DCol{
+	ui := Col{
 		Children: []any{
-			DText{Content: "Dense Grid"},
-			DForEach(&rows, func(row *[]StressItem) any {
-				return DRow{Children: []any{
-					DForEach(row, func(item *StressItem) any {
-						return DProgress{Value: &item.CPU, Width: 8}
+			Text{Content: "Dense Grid"},
+			ForEach(&rows, func(row *[]StressItem) any {
+				return Row{Children: []any{
+					ForEach(row, func(item *StressItem) any {
+						return Progress{Value: &item.CPU, Width: 8}
 					}),
 				}}
 			}),
@@ -159,31 +159,31 @@ func BenchmarkStressHeavyDashboard(b *testing.B) {
 	memBanks := stressData.Items[8:16]
 	procList := stressData.Items[16:50]
 
-	ui := DCol{
+	ui := Col{
 		Children: []any{
-			DText{Content: &stressData.Title},
-			DText{Content: "═══════════════════════════════════════════════════════════════"},
-			DText{Content: "CPU Cores"},
-			DForEach(&cpuCores, func(item *StressItem) any {
-				return DRow{Children: []any{
-					DText{Content: &item.Name},
-					DProgress{Value: &item.CPU, Width: 50},
+			Text{Content: &stressData.Title},
+			Text{Content: "═══════════════════════════════════════════════════════════════"},
+			Text{Content: "CPU Cores"},
+			ForEach(&cpuCores, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 50},
 				}}
 			}),
-			DText{Content: ""},
-			DText{Content: "Memory Banks"},
-			DForEach(&memBanks, func(item *StressItem) any {
-				return DRow{Children: []any{
-					DText{Content: &item.Name},
-					DProgress{Value: &item.CPU, Width: 50},
+			Text{Content: ""},
+			Text{Content: "Memory Banks"},
+			ForEach(&memBanks, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 50},
 				}}
 			}),
-			DText{Content: ""},
-			DText{Content: "Process List"},
-			DForEach(&procList, func(item *StressItem) any {
-				return DRow{Children: []any{
-					DText{Content: &item.Name},
-					DProgress{Value: &item.CPU, Width: 40},
+			Text{Content: ""},
+			Text{Content: "Process List"},
+			ForEach(&procList, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 40},
 				}}
 			}),
 		},
@@ -212,11 +212,11 @@ func BenchmarkStressTextHeavy(b *testing.B) {
 		lines[i] = "This is line number " + string(rune('0'+i/10)) + string(rune('0'+i%10)) + " with some extra text to make it longer and stress the text rendering path"
 	}
 
-	ui := DCol{
+	ui := Col{
 		Children: []any{
-			DText{Content: "Text Heavy Benchmark"},
-			DForEach(&lines, func(line *string) any {
-				return DText{Content: line}
+			Text{Content: "Text Heavy Benchmark"},
+			ForEach(&lines, func(line *string) any {
+				return Text{Content: line}
 			}),
 		},
 	}
@@ -232,5 +232,175 @@ func BenchmarkStressTextHeavy(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		buf.ClearDirty()
 		serial.ExecuteSimple(buf, 100, 60, nil)
+	}
+}
+
+// === Async Clear Benchmarks ===
+
+// BenchmarkAsyncClearHeavy - Heavy dashboard with async buffer pool
+func BenchmarkAsyncClearHeavy(b *testing.B) {
+	pool := NewBufferPool(120, 80)
+	defer pool.Stop()
+
+	cpuCores := stressData.Items[:8]
+	memBanks := stressData.Items[8:16]
+	procList := stressData.Items[16:50]
+
+	ui := Col{
+		Children: []any{
+			Text{Content: &stressData.Title},
+			Text{Content: "═══════════════════════════════════════════════════════════════"},
+			Text{Content: "CPU Cores"},
+			ForEach(&cpuCores, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 50},
+				}}
+			}),
+			Text{Content: ""},
+			Text{Content: "Memory Banks"},
+			ForEach(&memBanks, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 50},
+				}}
+			}),
+			Text{Content: ""},
+			Text{Content: "Process List"},
+			ForEach(&procList, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 40},
+				}}
+			}),
+		},
+	}
+
+	serial := BuildSerial(ui)
+
+	// Warm up
+	buf := pool.Current()
+	serial.ExecuteSimple(buf, 120, 80, nil)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		buf := pool.Swap()  // async clear of old buffer
+		serial.ExecuteSimple(buf, 120, 80, nil)
+	}
+}
+
+// BenchmarkSyncClearHeavy - Same but with sync clear for comparison
+func BenchmarkSyncClearHeavy(b *testing.B) {
+	buf := NewBuffer(120, 80)
+
+	cpuCores := stressData.Items[:8]
+	memBanks := stressData.Items[8:16]
+	procList := stressData.Items[16:50]
+
+	ui := Col{
+		Children: []any{
+			Text{Content: &stressData.Title},
+			Text{Content: "═══════════════════════════════════════════════════════════════"},
+			Text{Content: "CPU Cores"},
+			ForEach(&cpuCores, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 50},
+				}}
+			}),
+			Text{Content: ""},
+			Text{Content: "Memory Banks"},
+			ForEach(&memBanks, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 50},
+				}}
+			}),
+			Text{Content: ""},
+			Text{Content: "Process List"},
+			ForEach(&procList, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 40},
+				}}
+			}),
+		},
+	}
+
+	serial := BuildSerial(ui)
+
+	// Warm up
+	serial.ExecuteSimple(buf, 120, 80, nil)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		buf.ClearDirty()  // sync clear
+		serial.ExecuteSimple(buf, 120, 80, nil)
+	}
+}
+
+// BenchmarkAsyncClear100Items - 100 items with async clear
+func BenchmarkAsyncClear100Items(b *testing.B) {
+	pool := NewBufferPool(80, 120)
+	defer pool.Stop()
+
+	ui := Col{
+		Children: []any{
+			Text{Content: &stressData.Title},
+			ForEach(&stressData.Items, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 30},
+				}}
+			}),
+		},
+	}
+
+	serial := BuildSerial(ui)
+
+	// Warm up
+	buf := pool.Current()
+	serial.ExecuteSimple(buf, 80, 120, nil)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		buf := pool.Swap()
+		serial.ExecuteSimple(buf, 80, 120, nil)
+	}
+}
+
+// BenchmarkSyncClear100Items - 100 items with sync clear for comparison  
+func BenchmarkSyncClear100Items(b *testing.B) {
+	buf := NewBuffer(80, 120)
+
+	ui := Col{
+		Children: []any{
+			Text{Content: &stressData.Title},
+			ForEach(&stressData.Items, func(item *StressItem) any {
+				return Row{Children: []any{
+					Text{Content: &item.Name},
+					Progress{Value: &item.CPU, Width: 30},
+				}}
+			}),
+		},
+	}
+
+	serial := BuildSerial(ui)
+
+	// Warm up
+	serial.ExecuteSimple(buf, 80, 120, nil)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		buf.ClearDirty()
+		serial.ExecuteSimple(buf, 80, 120, nil)
 	}
 }
