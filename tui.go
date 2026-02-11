@@ -533,8 +533,8 @@ func (r HBoxNode) Margin(all int16) HBoxNode {
 	return r
 }
 
-// MarginXY sets vertical and horizontal margin.
-func (r HBoxNode) MarginXY(vertical, horizontal int16) HBoxNode {
+// MarginVH sets vertical and horizontal margin.
+func (r HBoxNode) MarginVH(vertical, horizontal int16) HBoxNode {
 	r.margin = [4]int16{vertical, horizontal, vertical, horizontal}
 	return r
 }
@@ -574,8 +574,8 @@ func (c VBoxNode) Margin(all int16) VBoxNode {
 	return c
 }
 
-// MarginXY sets vertical and horizontal margin.
-func (c VBoxNode) MarginXY(vertical, horizontal int16) VBoxNode {
+// MarginVH sets vertical and horizontal margin.
+func (c VBoxNode) MarginVH(vertical, horizontal int16) VBoxNode {
 	c.margin = [4]int16{vertical, horizontal, vertical, horizontal}
 	return c
 }

@@ -40,9 +40,9 @@ func TestMarginUniform_HBox(t *testing.T) {
 	}
 }
 
-func TestMarginXY(t *testing.T) {
+func TestMarginVH(t *testing.T) {
 	// vertical=0, horizontal=3
-	tmpl := Build(VBox.MarginXY(0, 3)(
+	tmpl := Build(VBox.MarginVH(0, 3)(
 		Text("Hi"),
 	))
 
@@ -348,7 +348,7 @@ func TestMarginTextAsymmetric(t *testing.T) {
 func TestMarginTextXY(t *testing.T) {
 	// vertical=2, horizontal=0 — text pushed down by 2 rows
 	tmpl := Build(VBox(
-		Text("Go").MarginXY(2, 0),
+		Text("Go").MarginVH(2, 0),
 	))
 
 	buf := NewBuffer(20, 10)

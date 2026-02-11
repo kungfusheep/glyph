@@ -186,7 +186,7 @@ func (f VBoxFn) Margin(all int16) VBoxFn {
 	}
 }
 
-func (f VBoxFn) MarginXY(vertical, horizontal int16) VBoxFn {
+func (f VBoxFn) MarginVH(vertical, horizontal int16) VBoxFn {
 	return func(children ...any) VBoxC {
 		v := f(children...)
 		v.margin = [4]int16{vertical, horizontal, vertical, horizontal}
@@ -343,7 +343,7 @@ func (f HBoxFn) Margin(all int16) HBoxFn {
 	}
 }
 
-func (f HBoxFn) MarginXY(vertical, horizontal int16) HBoxFn {
+func (f HBoxFn) MarginVH(vertical, horizontal int16) HBoxFn {
 	return func(children ...any) HBoxC {
 		h := f(children...)
 		h.margin = [4]int16{vertical, horizontal, vertical, horizontal}
@@ -467,7 +467,7 @@ func (t TextC) Width(w int16) TextC {
 }
 
 func (t TextC) Margin(all int16) TextC            { t.margin = [4]int16{all, all, all, all}; return t }
-func (t TextC) MarginXY(v, h int16) TextC         { t.margin = [4]int16{v, h, v, h}; return t }
+func (t TextC) MarginVH(v, h int16) TextC         { t.margin = [4]int16{v, h, v, h}; return t }
 func (t TextC) MarginTRBL(a, b, c, d int16) TextC { t.margin = [4]int16{a, b, c, d}; return t }
 
 // ============================================================================
@@ -521,7 +521,7 @@ func (s SpacerC) Grow(g float32) SpacerC {
 }
 
 func (s SpacerC) Margin(all int16) SpacerC            { s.margin = [4]int16{all, all, all, all}; return s }
-func (s SpacerC) MarginXY(v, h int16) SpacerC         { s.margin = [4]int16{v, h, v, h}; return s }
+func (s SpacerC) MarginVH(v, h int16) SpacerC         { s.margin = [4]int16{v, h, v, h}; return s }
 func (s SpacerC) MarginTRBL(a, b, c, d int16) SpacerC { s.margin = [4]int16{a, b, c, d}; return s }
 
 // ============================================================================
@@ -549,7 +549,7 @@ func (h HRuleC) Style(s Style) HRuleC {
 }
 
 func (h HRuleC) Margin(all int16) HRuleC            { h.margin = [4]int16{all, all, all, all}; return h }
-func (h HRuleC) MarginXY(v, hz int16) HRuleC        { h.margin = [4]int16{v, hz, v, hz}; return h }
+func (h HRuleC) MarginVH(v, hz int16) HRuleC        { h.margin = [4]int16{v, hz, v, hz}; return h }
 func (h HRuleC) MarginTRBL(a, b, c, d int16) HRuleC { h.margin = [4]int16{a, b, c, d}; return h }
 
 // ============================================================================
@@ -583,7 +583,7 @@ func (v VRuleC) Height(h int16) VRuleC {
 }
 
 func (v VRuleC) Margin(all int16) VRuleC            { v.margin = [4]int16{all, all, all, all}; return v }
-func (v VRuleC) MarginXY(vt, hz int16) VRuleC       { v.margin = [4]int16{vt, hz, vt, hz}; return v }
+func (v VRuleC) MarginVH(vt, hz int16) VRuleC       { v.margin = [4]int16{vt, hz, vt, hz}; return v }
 func (v VRuleC) MarginTRBL(a, b, c, d int16) VRuleC { v.margin = [4]int16{a, b, c, d}; return v }
 
 // ============================================================================
@@ -612,7 +612,7 @@ func (p ProgressC) Style(s Style) ProgressC {
 }
 
 func (p ProgressC) Margin(all int16) ProgressC            { p.margin = [4]int16{all, all, all, all}; return p }
-func (p ProgressC) MarginXY(v, h int16) ProgressC         { p.margin = [4]int16{v, h, v, h}; return p }
+func (p ProgressC) MarginVH(v, h int16) ProgressC         { p.margin = [4]int16{v, h, v, h}; return p }
 func (p ProgressC) MarginTRBL(a, b, c, d int16) ProgressC { p.margin = [4]int16{a, b, c, d}; return p }
 
 // ============================================================================
@@ -641,7 +641,7 @@ func (s SpinnerC) Style(st Style) SpinnerC {
 }
 
 func (s SpinnerC) Margin(all int16) SpinnerC            { s.margin = [4]int16{all, all, all, all}; return s }
-func (s SpinnerC) MarginXY(v, h int16) SpinnerC         { s.margin = [4]int16{v, h, v, h}; return s }
+func (s SpinnerC) MarginVH(v, h int16) SpinnerC         { s.margin = [4]int16{v, h, v, h}; return s }
 func (s SpinnerC) MarginTRBL(a, b, c, d int16) SpinnerC { s.margin = [4]int16{a, b, c, d}; return s }
 
 // ============================================================================
@@ -677,7 +677,7 @@ func (l LeaderC) Style(s Style) LeaderC {
 }
 
 func (l LeaderC) Margin(all int16) LeaderC            { l.margin = [4]int16{all, all, all, all}; return l }
-func (l LeaderC) MarginXY(v, h int16) LeaderC         { l.margin = [4]int16{v, h, v, h}; return l }
+func (l LeaderC) MarginVH(v, h int16) LeaderC         { l.margin = [4]int16{v, h, v, h}; return l }
 func (l LeaderC) MarginTRBL(a, b, c, d int16) LeaderC { l.margin = [4]int16{a, b, c, d}; return l }
 
 // ============================================================================
@@ -714,7 +714,7 @@ func (s SparklineC) Style(st Style) SparklineC {
 }
 
 func (s SparklineC) Margin(all int16) SparklineC    { s.margin = [4]int16{all, all, all, all}; return s }
-func (s SparklineC) MarginXY(v, h int16) SparklineC { s.margin = [4]int16{v, h, v, h}; return s }
+func (s SparklineC) MarginVH(v, h int16) SparklineC { s.margin = [4]int16{v, h, v, h}; return s }
 func (s SparklineC) MarginTRBL(a, b, c, d int16) SparklineC {
 	s.margin = [4]int16{a, b, c, d}
 	return s
@@ -741,7 +741,7 @@ func (j JumpC) Style(s Style) JumpC {
 }
 
 func (j JumpC) Margin(all int16) JumpC            { j.margin = [4]int16{all, all, all, all}; return j }
-func (j JumpC) MarginXY(v, h int16) JumpC         { j.margin = [4]int16{v, h, v, h}; return j }
+func (j JumpC) MarginVH(v, h int16) JumpC         { j.margin = [4]int16{v, h, v, h}; return j }
 func (j JumpC) MarginTRBL(a, b, c, d int16) JumpC { j.margin = [4]int16{a, b, c, d}; return j }
 
 // ============================================================================
@@ -776,7 +776,7 @@ func (l LayerViewC) Grow(g float32) LayerViewC {
 }
 
 func (l LayerViewC) Margin(all int16) LayerViewC    { l.margin = [4]int16{all, all, all, all}; return l }
-func (l LayerViewC) MarginXY(v, h int16) LayerViewC { l.margin = [4]int16{v, h, v, h}; return l }
+func (l LayerViewC) MarginVH(v, h int16) LayerViewC { l.margin = [4]int16{v, h, v, h}; return l }
 func (l LayerViewC) MarginTRBL(a, b, c, d int16) LayerViewC {
 	l.margin = [4]int16{a, b, c, d}
 	return l
@@ -1123,7 +1123,7 @@ func (t TabsC) InactiveStyle(s Style) TabsC {
 }
 
 func (t TabsC) Margin(all int16) TabsC            { t.margin = [4]int16{all, all, all, all}; return t }
-func (t TabsC) MarginXY(v, h int16) TabsC         { t.margin = [4]int16{v, h, v, h}; return t }
+func (t TabsC) MarginVH(v, h int16) TabsC         { t.margin = [4]int16{v, h, v, h}; return t }
 func (t TabsC) MarginTRBL(a, b, c, d int16) TabsC { t.margin = [4]int16{a, b, c, d}; return t }
 
 // ============================================================================
@@ -1185,7 +1185,7 @@ func (s ScrollbarC) ThumbStyle(st Style) ScrollbarC {
 }
 
 func (s ScrollbarC) Margin(all int16) ScrollbarC    { s.margin = [4]int16{all, all, all, all}; return s }
-func (s ScrollbarC) MarginXY(v, h int16) ScrollbarC { s.margin = [4]int16{v, h, v, h}; return s }
+func (s ScrollbarC) MarginVH(v, h int16) ScrollbarC { s.margin = [4]int16{v, h, v, h}; return s }
 func (s ScrollbarC) MarginTRBL(a, b, c, d int16) ScrollbarC {
 	s.margin = [4]int16{a, b, c, d}
 	return s
@@ -1311,7 +1311,7 @@ func (t AutoTableC) Border(b BorderStyle) AutoTableC {
 }
 
 func (t AutoTableC) Margin(all int16) AutoTableC    { t.margin = [4]int16{all, all, all, all}; return t }
-func (t AutoTableC) MarginXY(v, h int16) AutoTableC { t.margin = [4]int16{v, h, v, h}; return t }
+func (t AutoTableC) MarginVH(v, h int16) AutoTableC { t.margin = [4]int16{v, h, v, h}; return t }
 func (t AutoTableC) MarginTRBL(a, b, c, d int16) AutoTableC {
 	t.margin = [4]int16{a, b, c, d}
 	return t
@@ -1928,6 +1928,10 @@ type InputC struct {
 	mask        rune
 	style       Style
 	declaredTIB *textInputBinding
+
+	// focus management
+	focused bool
+	manager *FocusManager
 }
 
 // Input creates a text input with internal state.
@@ -1970,6 +1974,34 @@ func (i *InputC) Bind() *InputC {
 
 func (i *InputC) textBinding() *textInputBinding { return i.declaredTIB }
 
+// ManagedBy registers this input with a FocusManager.
+// This enables automatic focus cycling and keystroke routing.
+func (i *InputC) ManagedBy(fm *FocusManager) *InputC {
+	i.manager = fm
+	i.focused = false
+	i.declaredTIB = &textInputBinding{
+		value:  &i.field.Value,
+		cursor: &i.field.Cursor,
+	}
+	fm.Register(i)
+	return i
+}
+
+// focusBinding implements Focusable.
+func (i *InputC) focusBinding() *textInputBinding {
+	return i.declaredTIB
+}
+
+// setFocused implements Focusable.
+func (i *InputC) setFocused(focused bool) {
+	i.focused = focused
+}
+
+// Focused returns whether this input currently has focus.
+func (i *InputC) Focused() bool {
+	return i.focused
+}
+
 // Value returns the current text value.
 func (i *InputC) Value() string {
 	return i.field.Value
@@ -1993,11 +2025,16 @@ func (i *InputC) Field() *Field {
 
 // toTextInput converts to the underlying TextInput for rendering.
 func (i *InputC) toTextInput() TextInput {
-	return TextInput{
+	ti := TextInput{
 		Field:       &i.field,
 		Placeholder: i.placeholder,
 		Width:       i.width,
 		Mask:        i.mask,
 		Style:       i.style,
 	}
+	// if managed by focus manager, use focused state for cursor visibility
+	if i.manager != nil {
+		ti.Focused = &i.focused
+	}
+	return ti
 }
