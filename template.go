@@ -106,8 +106,10 @@ type Template struct {
 	pendingOverlays []pendingOverlay
 
 	// Declarative bindings collected during compile, wired during setup
-	pendingBindings []binding
-	pendingTIB      *textInputBinding
+	pendingBindings     []binding
+	pendingTIB          *textInputBinding
+	pendingLogs         []*LogC       // Logs that need app.RequestRender wiring
+	pendingFocusManager *FocusManager // Focus manager for multi-input routing
 }
 
 // pendingOverlay stores info needed to render an overlay after main content
@@ -129,6 +131,20 @@ func (t *Template) collectBindings(node any) {
 func (t *Template) collectTextInputBinding(node any) {
 	if tib, ok := node.(textInputBindable); ok {
 		t.pendingTIB = tib.textBinding()
+	}
+}
+
+func (t *Template) collectFocusManager(node any) {
+	// check if InputC or FilterLogC has a manager
+	switch v := node.(type) {
+	case *InputC:
+		if v.manager != nil && t.pendingFocusManager == nil {
+			t.pendingFocusManager = v.manager
+		}
+	case *FilterLogC:
+		if v.manager != nil && t.pendingFocusManager == nil {
+			t.pendingFocusManager = v.manager
+		}
 	}
 }
 
@@ -520,7 +536,14 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		return t.compileRadioC(v, parent, depth)
 	case *InputC:
 		t.collectTextInputBinding(v)
+		t.collectFocusManager(v)
 		return t.compileInputC(v, parent, depth)
+	case *LogC:
+		t.collectBindings(v)
+		return t.compileLogC(v, parent, depth)
+	case *FilterLogC:
+		t.collectFocusManager(v)
+		return t.compileFilterLogC(v, parent, depth)
 	case Custom:
 		return t.compileCustom(v, parent, depth)
 	}

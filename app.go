@@ -248,10 +248,25 @@ func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
 			router.Handle(pattern, func(_ riffkey.Match) { h(); a.RequestRender() })
 		}
 	}
-	if tmpl.pendingTIB != nil {
+	// focus manager takes precedence over single pendingTIB
+	if tmpl.pendingFocusManager != nil {
+		// wire focus manager bindings (Tab/Shift-Tab)
+		for _, b := range tmpl.pendingFocusManager.bindings() {
+			if h, ok := b.handler.(func(riffkey.Match)); ok {
+				pattern := b.pattern
+				router.Handle(pattern, func(m riffkey.Match) { h(m); a.RequestRender() })
+			}
+		}
+		// route unmatched keys to focused component
+		router.HandleUnmatched(tmpl.pendingFocusManager.HandleKey)
+	} else if tmpl.pendingTIB != nil {
 		th := riffkey.NewTextHandler(tmpl.pendingTIB.value, tmpl.pendingTIB.cursor)
 		th.OnChange = tmpl.pendingTIB.onChange
 		router.HandleUnmatched(th.HandleKey)
+	}
+	// wire Log invalidation
+	for _, lv := range tmpl.pendingLogs {
+		lv.onUpdate = a.RequestRender
 	}
 }
 
