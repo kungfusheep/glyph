@@ -1202,6 +1202,49 @@ type autoTableSortState struct {
 	asc bool // true = ascending
 }
 
+// autoTableScroll manages viewport scrolling for AutoTable.
+// renders all rows to an internal buffer, blits the visible window to screen.
+type autoTableScroll struct {
+	offset     int     // first visible data row
+	maxVisible int     // viewport height in data rows (excludes header)
+	buf        *Buffer // internal buffer for all data rows (nil until first render)
+	bufW       int     // width of internal buffer (for resize detection)
+}
+
+func (s *autoTableScroll) scrollDown(n int, total int) {
+	s.offset += n
+	if max := total - s.maxVisible; max > 0 {
+		if s.offset > max {
+			s.offset = max
+		}
+	} else {
+		s.offset = 0
+	}
+}
+
+func (s *autoTableScroll) scrollUp(n int) {
+	s.offset -= n
+	if s.offset < 0 {
+		s.offset = 0
+	}
+}
+
+func (s *autoTableScroll) pageDown(total int) { s.scrollDown(s.maxVisible, total) }
+func (s *autoTableScroll) pageUp()            { s.scrollUp(s.maxVisible) }
+
+func (s *autoTableScroll) clamp(total int) {
+	if max := total - s.maxVisible; max > 0 {
+		if s.offset > max {
+			s.offset = max
+		}
+	} else {
+		s.offset = 0
+	}
+	if s.offset < 0 {
+		s.offset = 0
+	}
+}
+
 type AutoTableC struct {
 	data        any      // slice of structs
 	columns     []string // field names to display (nil = all exported)
@@ -1213,7 +1256,9 @@ type AutoTableC struct {
 	border      BorderStyle
 	margin      [4]int16
 
-	sortState *autoTableSortState // nil unless Sortable called
+	sortState        *autoTableSortState // nil unless Sortable called
+	scroll           *autoTableScroll    // nil unless Scrollable called
+	declaredBindings []binding
 }
 
 // AutoTable creates a table from a slice of structs.
@@ -1281,6 +1326,71 @@ func (t AutoTableC) Sortable() AutoTableC {
 	}
 	return t
 }
+
+// Scrollable enables viewport scrolling with the given maximum visible rows.
+// renders all data rows to an internal buffer, blits only the visible window.
+func (t AutoTableC) Scrollable(maxVisible int) AutoTableC {
+	if t.scroll == nil {
+		t.scroll = &autoTableScroll{maxVisible: maxVisible}
+	} else {
+		t.scroll.maxVisible = maxVisible
+	}
+	return t
+}
+
+// BindNav registers key bindings for scrolling down/up by one row.
+// the closures capture the scroll pointer and data pointer, reading the
+// current slice length at invocation time for correct clamping.
+func (t AutoTableC) BindNav(down, up string) AutoTableC {
+	sc := t.scroll
+	data := t.data
+	t.declaredBindings = append(t.declaredBindings,
+		binding{pattern: down, handler: func() {
+			if sc == nil {
+				return
+			}
+			total := reflect.ValueOf(data).Elem().Len()
+			sc.scrollDown(1, total)
+		}},
+		binding{pattern: up, handler: func() {
+			if sc == nil {
+				return
+			}
+			sc.scrollUp(1)
+		}},
+	)
+	return t
+}
+
+// BindPageNav registers key bindings for page-sized scrolling.
+func (t AutoTableC) BindPageNav(pageDown, pageUp string) AutoTableC {
+	sc := t.scroll
+	data := t.data
+	t.declaredBindings = append(t.declaredBindings,
+		binding{pattern: pageDown, handler: func() {
+			if sc == nil {
+				return
+			}
+			total := reflect.ValueOf(data).Elem().Len()
+			sc.pageDown(total)
+		}},
+		binding{pattern: pageUp, handler: func() {
+			if sc == nil {
+				return
+			}
+			sc.pageUp()
+		}},
+	)
+	return t
+}
+
+// BindVimNav wires standard vim-style scroll keys:
+// j/k for line, Ctrl-d/Ctrl-u for page.
+func (t AutoTableC) BindVimNav() AutoTableC {
+	return t.BindNav("j", "k").BindPageNav("<C-d>", "<C-u>")
+}
+
+func (t AutoTableC) bindings() []binding { return t.declaredBindings }
 
 // autoTableSort sorts a *[]T slice in-place by the given struct field index.
 func autoTableSort(data any, fieldIdx int, asc bool) {

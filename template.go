@@ -243,6 +243,7 @@ type Op struct {
 	AutoTableGap      int8                // gap between columns
 	AutoTableFill     Color               // row fill for alt rows
 	AutoTableSort     *autoTableSortState // nil unless sorting enabled
+	AutoTableScroll   *autoTableScroll    // nil unless scrolling enabled
 
 	// Sparkline
 	SparkValues    []float64  // static values
@@ -509,6 +510,7 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	case ScrollbarC:
 		return t.compileScrollbarC(v, parent, depth)
 	case AutoTableC:
+		t.collectBindings(v)
 		return t.compileAutoTableC(v, parent, depth)
 	case *CheckboxC:
 		t.collectBindings(v)
@@ -1739,6 +1741,7 @@ func (t *Template) compileAutoTableReactive(v AutoTableC, rv reflect.Value, pare
 		AutoTableGap:      v.gap,
 		AutoTableFill:     altFill,
 		AutoTableSort:     v.sortState,
+		AutoTableScroll:   v.scroll,
 		Margin:            v.margin,
 	}
 
@@ -2436,11 +2439,15 @@ func (t *Template) layout(_ int16) {
 				geom.H = 1
 
 			case OpAutoTable:
-				rowCount := 1 // header row
+				dataRows := 0
 				if op.AutoTableSlicePtr != nil {
-					rowCount += reflect.ValueOf(op.AutoTableSlicePtr).Elem().Len()
+					dataRows = reflect.ValueOf(op.AutoTableSlicePtr).Elem().Len()
 				}
-				geom.H = int16(rowCount)
+				visibleRows := dataRows
+				if sc := op.AutoTableScroll; sc != nil && sc.maxVisible < visibleRows {
+					visibleRows = sc.maxVisible
+				}
+				geom.H = int16(visibleRows + 1) // +1 for header
 				if geom.H == 0 {
 					geom.H = 1
 				}
@@ -4818,33 +4825,82 @@ func (t *Template) renderAutoTable(buf *Buffer, op *Op, absX, absY, maxW int16) 
 	}
 	y++
 
-	// data rows
-	for i := 0; i < nRows; i++ {
-		elem := rv.Index(i)
-		if elem.Kind() == reflect.Ptr {
-			elem = elem.Elem()
+	// data rows -- when scrolling is enabled, render all rows to an internal
+	// buffer and blit only the visible viewport to the screen buffer.
+	sc := op.AutoTableScroll
+	if sc != nil {
+		sc.clamp(nRows)
+
+		// allocate or resize internal buffer (width = availW, height = nRows)
+		if sc.buf == nil || sc.bufW != availW || sc.buf.Height() < nRows {
+			sc.buf = NewBuffer(availW, nRows)
+			sc.bufW = availW
+		} else {
+			sc.buf.Clear()
 		}
 
-		rowStyle := t.effectiveStyle(op.AutoTableRowStyle)
-		isAlt := op.AutoTableAltStyle != nil && i%2 == 1
-		if isAlt {
-			rowStyle = t.effectiveStyle(*op.AutoTableAltStyle)
-		}
+		// render all data rows into internal buffer at y=0..nRows-1
+		for i := 0; i < nRows; i++ {
+			elem := rv.Index(i)
+			if elem.Kind() == reflect.Ptr {
+				elem = elem.Elem()
+			}
 
-		// fill entire row background for alt rows
-		if isAlt && op.AutoTableFill.Mode != ColorDefault {
-			for fx := int(absX); fx < int(maxW); fx++ {
-				buf.Set(fx, y, Cell{Rune: ' ', Style: Style{BG: op.AutoTableFill}})
+			rowStyle := t.effectiveStyle(op.AutoTableRowStyle)
+			isAlt := op.AutoTableAltStyle != nil && i%2 == 1
+			if isAlt {
+				rowStyle = t.effectiveStyle(*op.AutoTableAltStyle)
+			}
+
+			if isAlt && op.AutoTableFill.Mode != ColorDefault {
+				for fx := 0; fx < availW; fx++ {
+					sc.buf.Set(fx, i, Cell{Rune: ' ', Style: Style{BG: op.AutoTableFill}})
+				}
+			}
+
+			bx := 0
+			for j, fi := range op.AutoTableFields {
+				str := fmt.Sprintf("%v", elem.Field(fi).Interface())
+				t.writeTableCell(sc.buf, bx, i, str, widths[j], AlignLeft, rowStyle)
+				bx += widths[j] + gap
 			}
 		}
 
-		x = int(absX)
-		for j, fi := range op.AutoTableFields {
-			str := fmt.Sprintf("%v", elem.Field(fi).Interface())
-			t.writeTableCell(buf, x, y, str, widths[j], AlignLeft, rowStyle)
-			x += widths[j] + gap
+		// blit visible window from internal buffer to screen
+		visH := sc.maxVisible
+		if visH > nRows {
+			visH = nRows
 		}
-		y++
+		buf.Blit(sc.buf, 0, sc.offset, int(absX), y, availW, visH)
+	} else {
+		// no scroll -- render directly (backwards compatible)
+		for i := 0; i < nRows; i++ {
+			elem := rv.Index(i)
+			if elem.Kind() == reflect.Ptr {
+				elem = elem.Elem()
+			}
+
+			rowStyle := t.effectiveStyle(op.AutoTableRowStyle)
+			isAlt := op.AutoTableAltStyle != nil && i%2 == 1
+			if isAlt {
+				rowStyle = t.effectiveStyle(*op.AutoTableAltStyle)
+			}
+
+			// fill entire row background for alt rows
+			if isAlt && op.AutoTableFill.Mode != ColorDefault {
+				for fx := int(absX); fx < int(maxW); fx++ {
+					buf.Set(fx, y, Cell{Rune: ' ', Style: Style{BG: op.AutoTableFill}})
+				}
+			}
+
+			x = int(absX)
+			for j, fi := range op.AutoTableFields {
+				str := fmt.Sprintf("%v", elem.Field(fi).Interface())
+				t.writeTableCell(buf, x, y, str, widths[j], AlignLeft, rowStyle)
+				x += widths[j] + gap
+			}
+			y++
+		}
 	}
 }
 

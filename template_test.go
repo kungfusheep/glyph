@@ -3618,3 +3618,277 @@ func TestAutoTableSort(t *testing.T) {
 		}
 	})
 }
+
+func TestAutoTableScroll(t *testing.T) {
+	type Row struct {
+		Name string
+		Age  int
+		City string
+	}
+
+	t.Run("scrollable clamps height to maxVisible plus header", func(t *testing.T) {
+		rows := []Row{
+			{"Alpha", 20, "LA"},
+			{"Bravo", 25, "SF"},
+			{"Charlie", 30, "NYC"},
+			{"Delta", 35, "Boston"},
+			{"Echo", 40, "Denver"},
+		}
+
+		tmpl := Build(AutoTable(&rows).Scrollable(3))
+
+		buf := NewBuffer(60, 10)
+		tmpl.Execute(buf, 60, 10)
+
+		// height should be 3 data rows + 1 header = 4
+		geom := tmpl.geom[0]
+		if geom.H != 4 {
+			t.Errorf("expected height 4 (3 visible + header), got %d", geom.H)
+		}
+	})
+
+	t.Run("initial render shows first N rows", func(t *testing.T) {
+		rows := []Row{
+			{"Alpha", 20, "LA"},
+			{"Bravo", 25, "SF"},
+			{"Charlie", 30, "NYC"},
+			{"Delta", 35, "Boston"},
+			{"Echo", 40, "Denver"},
+		}
+
+		tmpl := Build(AutoTable(&rows).Scrollable(3))
+
+		buf := NewBuffer(60, 10)
+		tmpl.Execute(buf, 60, 10)
+
+		header := buf.GetLine(0)
+		if !containsSubstring(header, "Name") {
+			t.Errorf("expected header with Name, got: %q", header)
+		}
+
+		r0 := buf.GetLine(1)
+		r1 := buf.GetLine(2)
+		r2 := buf.GetLine(3)
+		if !containsSubstring(r0, "Alpha") {
+			t.Errorf("expected Alpha on line 1, got: %q", r0)
+		}
+		if !containsSubstring(r1, "Bravo") {
+			t.Errorf("expected Bravo on line 2, got: %q", r1)
+		}
+		if !containsSubstring(r2, "Charlie") {
+			t.Errorf("expected Charlie on line 3, got: %q", r2)
+		}
+
+		r3 := buf.GetLine(4)
+		if containsSubstring(r3, "Delta") {
+			t.Errorf("expected Delta NOT visible at line 4, got: %q", r3)
+		}
+	})
+
+	t.Run("scroll offset changes visible rows", func(t *testing.T) {
+		rows := []Row{
+			{"Alpha", 20, "LA"},
+			{"Bravo", 25, "SF"},
+			{"Charlie", 30, "NYC"},
+			{"Delta", 35, "Boston"},
+			{"Echo", 40, "Denver"},
+		}
+
+		tmpl := Build(AutoTable(&rows).Scrollable(3))
+
+		op := &tmpl.ops[0]
+		op.AutoTableScroll.offset = 2
+
+		buf := NewBuffer(60, 10)
+		tmpl.Execute(buf, 60, 10)
+
+		header := buf.GetLine(0)
+		if !containsSubstring(header, "Name") {
+			t.Errorf("expected header pinned, got: %q", header)
+		}
+
+		r0 := buf.GetLine(1)
+		r1 := buf.GetLine(2)
+		r2 := buf.GetLine(3)
+		if !containsSubstring(r0, "Charlie") {
+			t.Errorf("expected Charlie after scroll, got: %q", r0)
+		}
+		if !containsSubstring(r1, "Delta") {
+			t.Errorf("expected Delta after scroll, got: %q", r1)
+		}
+		if !containsSubstring(r2, "Echo") {
+			t.Errorf("expected Echo after scroll, got: %q", r2)
+		}
+	})
+
+	t.Run("scroll clamps offset to valid range", func(t *testing.T) {
+		rows := []Row{
+			{"Alpha", 20, "LA"},
+			{"Bravo", 25, "SF"},
+			{"Charlie", 30, "NYC"},
+		}
+
+		tmpl := Build(AutoTable(&rows).Scrollable(2))
+
+		op := &tmpl.ops[0]
+		op.AutoTableScroll.offset = 100
+
+		buf := NewBuffer(60, 10)
+		tmpl.Execute(buf, 60, 10)
+
+		// should clamp to max offset (3 rows - 2 visible = offset 1)
+		r0 := buf.GetLine(1)
+		r1 := buf.GetLine(2)
+		if !containsSubstring(r0, "Bravo") {
+			t.Errorf("expected Bravo after clamp, got: %q", r0)
+		}
+		if !containsSubstring(r1, "Charlie") {
+			t.Errorf("expected Charlie after clamp, got: %q", r1)
+		}
+	})
+
+	t.Run("fewer rows than maxVisible shows all", func(t *testing.T) {
+		rows := []Row{
+			{"Alpha", 20, "LA"},
+			{"Bravo", 25, "SF"},
+		}
+
+		tmpl := Build(AutoTable(&rows).Scrollable(5))
+
+		buf := NewBuffer(60, 10)
+		tmpl.Execute(buf, 60, 10)
+
+		geom := tmpl.geom[0]
+		if geom.H != 3 {
+			t.Errorf("expected height 3 (2 rows + header), got %d", geom.H)
+		}
+
+		r0 := buf.GetLine(1)
+		r1 := buf.GetLine(2)
+		if !containsSubstring(r0, "Alpha") {
+			t.Errorf("expected Alpha, got: %q", r0)
+		}
+		if !containsSubstring(r1, "Bravo") {
+			t.Errorf("expected Bravo, got: %q", r1)
+		}
+	})
+
+	t.Run("scrollable with sort", func(t *testing.T) {
+		rows := []Row{
+			{"Charlie", 30, "NYC"},
+			{"Alpha", 20, "LA"},
+			{"Bravo", 25, "SF"},
+			{"Delta", 35, "Boston"},
+			{"Echo", 40, "Denver"},
+		}
+
+		tmpl := Build(AutoTable(&rows).Scrollable(2).Sortable())
+
+		op := &tmpl.ops[0]
+		op.AutoTableSort.col = 0
+		op.AutoTableSort.asc = true
+
+		buf := NewBuffer(60, 10)
+		tmpl.Execute(buf, 60, 10)
+
+		// sorted: Alpha, Bravo, Charlie, Delta, Echo -- visible: first 2
+		r0 := buf.GetLine(1)
+		r1 := buf.GetLine(2)
+		if !containsSubstring(r0, "Alpha") {
+			t.Errorf("expected Alpha first after sort, got: %q", r0)
+		}
+		if !containsSubstring(r1, "Bravo") {
+			t.Errorf("expected Bravo second after sort, got: %q", r1)
+		}
+
+		// scroll down by 2
+		op.AutoTableScroll.offset = 2
+		buf2 := NewBuffer(60, 10)
+		tmpl.Execute(buf2, 60, 10)
+
+		r0 = buf2.GetLine(1)
+		r1 = buf2.GetLine(2)
+		if !containsSubstring(r0, "Charlie") {
+			t.Errorf("expected Charlie after scroll+sort, got: %q", r0)
+		}
+		if !containsSubstring(r1, "Delta") {
+			t.Errorf("expected Delta after scroll+sort, got: %q", r1)
+		}
+	})
+
+	t.Run("bindings are collected", func(t *testing.T) {
+		rows := []Row{
+			{"Alpha", 20, "LA"},
+		}
+
+		tmpl := Build(AutoTable(&rows).Scrollable(3).BindNav("j", "k"))
+
+		if len(tmpl.pendingBindings) != 2 {
+			t.Fatalf("expected 2 bindings, got %d", len(tmpl.pendingBindings))
+		}
+		if tmpl.pendingBindings[0].pattern != "j" {
+			t.Errorf("expected pattern 'j', got %q", tmpl.pendingBindings[0].pattern)
+		}
+		if tmpl.pendingBindings[1].pattern != "k" {
+			t.Errorf("expected pattern 'k', got %q", tmpl.pendingBindings[1].pattern)
+		}
+	})
+
+	t.Run("vim nav bindings", func(t *testing.T) {
+		rows := []Row{
+			{"Alpha", 20, "LA"},
+		}
+
+		tmpl := Build(AutoTable(&rows).Scrollable(3).BindVimNav())
+
+		if len(tmpl.pendingBindings) != 4 {
+			t.Fatalf("expected 4 bindings (j,k,C-d,C-u), got %d", len(tmpl.pendingBindings))
+		}
+		expected := []string{"j", "k", "<C-d>", "<C-u>"}
+		for i, exp := range expected {
+			if tmpl.pendingBindings[i].pattern != exp {
+				t.Errorf("binding %d: expected %q, got %q", i, exp, tmpl.pendingBindings[i].pattern)
+			}
+		}
+	})
+
+	t.Run("scroll methods update offset correctly", func(t *testing.T) {
+		sc := &autoTableScroll{maxVisible: 3}
+
+		sc.scrollDown(1, 10)
+		if sc.offset != 1 {
+			t.Errorf("expected offset 1 after scrollDown(1), got %d", sc.offset)
+		}
+
+		sc.scrollDown(2, 10)
+		if sc.offset != 3 {
+			t.Errorf("expected offset 3, got %d", sc.offset)
+		}
+
+		sc.scrollUp(1)
+		if sc.offset != 2 {
+			t.Errorf("expected offset 2 after scrollUp(1), got %d", sc.offset)
+		}
+
+		sc.offset = 0
+		sc.pageDown(10)
+		if sc.offset != 3 {
+			t.Errorf("expected offset 3 after pageDown, got %d", sc.offset)
+		}
+
+		sc.pageUp()
+		if sc.offset != 0 {
+			t.Errorf("expected offset 0 after pageUp, got %d", sc.offset)
+		}
+
+		sc.scrollUp(100)
+		if sc.offset != 0 {
+			t.Errorf("expected offset 0 (clamped), got %d", sc.offset)
+		}
+
+		sc.scrollDown(100, 5) // 5 total, 3 visible => max offset 2
+		if sc.offset != 2 {
+			t.Errorf("expected offset 2 (clamped max), got %d", sc.offset)
+		}
+	})
+}
