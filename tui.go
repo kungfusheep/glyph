@@ -138,6 +138,7 @@ type Style struct {
 	Fill      Color // container fill (entire area)
 	Attr      Attribute
 	Transform TextTransform // text case transformation (uppercase, lowercase, etc.)
+	Align     Align         // text alignment within allocated width
 }
 
 // DefaultStyle returns a style with default colours and no attributes.
