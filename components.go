@@ -1256,6 +1256,8 @@ type AutoTableC struct {
 	border      BorderStyle
 	margin      [4]int16
 
+	columnConfigs map[string]ColumnOption // per-column config keyed by field name
+
 	sortState        *autoTableSortState // nil unless Sortable called
 	scroll           *autoTableScroll    // nil unless Scrollable called
 	declaredBindings []binding
@@ -1282,6 +1284,24 @@ func (t AutoTableC) Columns(names ...string) AutoTableC {
 // Must be called after Columns() and have the same number of entries.
 func (t AutoTableC) Headers(names ...string) AutoTableC {
 	t.headers = names
+	return t
+}
+
+// Column configures rendering for a specific column by struct field name.
+// The option can be a canned preset or a custom function:
+//
+//	AutoTable(&data).
+//	    Column("Price", Currency("$", 2)).
+//	    Column("Change", PercentChange(1)).
+//	    Column("Active", func(c *ColumnConfig) {
+//	        c.Align(AlignCenter)
+//	        c.Format(func(v any) string { ... })
+//	    })
+func (t AutoTableC) Column(name string, opt ColumnOption) AutoTableC {
+	if t.columnConfigs == nil {
+		t.columnConfigs = make(map[string]ColumnOption)
+	}
+	t.columnConfigs[name] = opt
 	return t
 }
 

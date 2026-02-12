@@ -14,6 +14,7 @@ type Stock struct {
 	Price  float64
 	Change float64
 	Volume int
+	Buy    bool
 }
 
 type Person struct {
@@ -30,12 +31,12 @@ func main() {
 	}
 
 	stocks := []Stock{
-		{"AAPL", "Apple Inc", 178.92, 2.34, 52_000_000},
-		{"GOOGL", "Alphabet", 141.23, -1.56, 28_000_000},
-		{"MSFT", "Microsoft", 378.45, 5.12, 31_000_000},
-		{"TSLA", "Tesla", 248.67, -8.90, 95_000_000},
-		{"NVDA", "NVIDIA", 721.34, 12.45, 45_000_000},
-		{"AMD", "AMD", 156.78, 3.21, 62_000_000},
+		{"AAPL", "Apple Inc", 178.92, 2.34, 52_000_000, true},
+		{"GOOGL", "Alphabet", 141.23, -1.56, 28_000_000, true},
+		{"MSFT", "Microsoft", 378.45, 5.12, 31_000_000, false},
+		{"TSLA", "Tesla", 248.67, -8.90, 95_000_000, false},
+		{"NVDA", "NVIDIA", 721.34, 12.45, 45_000_000, false},
+		{"AMD", "AMD", 156.78, 3.21, 62_000_000, false},
 	}
 
 	people := []Person{
@@ -50,8 +51,12 @@ func main() {
 		Text("AutoTable Demo").FG(Cyan).Bold(),
 		HRule().Style(Style{FG: PaletteColor(238)}),
 
-		Text("Stocks (all fields auto-detected):").FG(Yellow),
+		Text("Stocks (with column formatting):").FG(Yellow),
 		AutoTable(stocks).
+			Column("Price", Currency("$", 2)).
+			Column("Change", PercentChange(1)).
+			Column("Volume", Number(0)).
+			Column("Buy", Bool("✓", "✗")).
 			HeaderStyle(Style{FG: Cyan, Attr: AttrBold}).
 			AltRowStyle(Style{BG: PaletteColor(235)}),
 
@@ -64,6 +69,7 @@ func main() {
 		Text("Stocks (just Symbol and Price):").FG(Yellow),
 		AutoTable(stocks).
 			Columns("Symbol", "Price").
+			Column("Price", Currency("$", 2)).
 			Gap(3),
 
 		HRule().Style(Style{FG: PaletteColor(238)}),

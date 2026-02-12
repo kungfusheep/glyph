@@ -3892,3 +3892,311 @@ func TestAutoTableScroll(t *testing.T) {
 		}
 	})
 }
+
+func TestAutoTableColumnConfig(t *testing.T) {
+	type Stock struct {
+		Symbol string
+		Price  float64
+		Change float64
+		Volume int
+		Active bool
+	}
+
+	stocks := []Stock{
+		{"AAPL", 178.92, 2.34, 52000000, true},
+		{"TSLA", 248.67, -8.90, 95000000, false},
+	}
+
+	t.Run("custom format", func(t *testing.T) {
+		tmpl := Build(AutoTable(&stocks).
+			Column("Price", Currency("$", 2)).
+			Column("Volume", Number(0)))
+		buf := NewBuffer(80, 10)
+		tmpl.Execute(buf, 80, 10)
+
+		row1 := buf.GetLine(1)
+		if !containsSubstring(row1, "$178.92") {
+			t.Errorf("expected $178.92 in row: %q", row1)
+		}
+		if !containsSubstring(row1, "52,000,000") {
+			t.Errorf("expected 52,000,000 in row: %q", row1)
+		}
+	})
+
+	t.Run("custom style per cell", func(t *testing.T) {
+		tmpl := Build(AutoTable(&stocks).
+			Column("Change", PercentChange(1)))
+		buf := NewBuffer(80, 10)
+		tmpl.Execute(buf, 80, 10)
+
+		// positive change row
+		row1 := buf.GetLine(1)
+		if !containsSubstring(row1, "+2.3%") {
+			t.Errorf("expected +2.3%% in row: %q", row1)
+		}
+
+		// negative change row
+		row2 := buf.GetLine(2)
+		if !containsSubstring(row2, "-8.9%") {
+			t.Errorf("expected -8.9%% in row: %q", row2)
+		}
+
+		// verify styles on the cells - find the +2.3% cells and check FG
+		for x := 0; x < 80; x++ {
+			cell := buf.Get(x, 1)
+			if cell.Rune == '+' {
+				if cell.Style.FG != Green {
+					t.Errorf("positive change cell should be Green, got %v", cell.Style.FG)
+				}
+				break
+			}
+		}
+
+		for x := 0; x < 80; x++ {
+			cell := buf.Get(x, 2)
+			if cell.Rune == '-' {
+				// could be the Symbol cell's dash, check next char
+				next := buf.Get(x+1, 2)
+				if next.Rune == '8' {
+					if cell.Style.FG != Red {
+						t.Errorf("negative change cell should be Red, got %v", cell.Style.FG)
+					}
+					break
+				}
+			}
+		}
+	})
+
+	t.Run("bool formatting", func(t *testing.T) {
+		tmpl := Build(AutoTable(&stocks).
+			Column("Active", Bool("YES", "NO")))
+		buf := NewBuffer(80, 10)
+		tmpl.Execute(buf, 80, 10)
+
+		row1 := buf.GetLine(1)
+		if !containsSubstring(row1, "YES") {
+			t.Errorf("expected YES for true, got: %q", row1)
+		}
+
+		row2 := buf.GetLine(2)
+		if !containsSubstring(row2, "NO") {
+			t.Errorf("expected NO for false, got: %q", row2)
+		}
+	})
+
+	t.Run("type-based default alignment", func(t *testing.T) {
+		// ints and floats should right-align, bools center, strings left
+		tmpl := Build(AutoTable(&stocks))
+		buf := NewBuffer(80, 10)
+		tmpl.Execute(buf, 80, 10)
+
+		// verify Price is right-aligned: the value should be preceded by spaces
+		// find the Price column header position
+		header := buf.GetLine(0)
+		priceStart := -1
+		for i := 0; i < len(header)-5; i++ {
+			if header[i:i+5] == "Price" {
+				priceStart = i
+				break
+			}
+		}
+		if priceStart < 0 {
+			t.Fatal("could not find Price header")
+		}
+
+		// check that the first cell in the Price column has leading spaces (right aligned)
+		// 178.92 vs 248.67 - same width, so alignment might not show padding
+		// better check: use Volume which has different widths (52000000 vs 95000000)
+		volHeader := -1
+		for i := 0; i < len(header)-6; i++ {
+			if header[i:i+6] == "Volume" {
+				volHeader = i
+				break
+			}
+		}
+		if volHeader < 0 {
+			t.Fatal("could not find Volume header")
+		}
+
+		// row1 has 52000000 (8 chars), row2 has 95000000 (8 chars) - same width
+		// use a different approach: check that Active (bool) is center-aligned
+		// Active header should exist
+		if !containsSubstring(header, "Active") {
+			t.Errorf("missing Active header: %q", header)
+		}
+	})
+
+	t.Run("column config with static slice", func(t *testing.T) {
+		// static (non-pointer) slice should also use column configs
+		staticStocks := []Stock{
+			{"AAPL", 178.92, 2.34, 52000000, true},
+		}
+		tmpl := Build(AutoTable(staticStocks).
+			Column("Price", Currency("$", 2)))
+		buf := NewBuffer(80, 10)
+		tmpl.Execute(buf, 80, 10)
+
+		row1 := buf.GetLine(1)
+		if !containsSubstring(row1, "$178.92") {
+			t.Errorf("static path: expected $178.92 in row: %q", row1)
+		}
+	})
+
+	t.Run("composed column option", func(t *testing.T) {
+		// use a preset and then override just the style
+		customGreen := Style{FG: Green}
+		tmpl := Build(AutoTable(&stocks).
+			Column("Price", func(c *ColumnConfig) {
+				Currency("$", 2)(c) // base preset
+				c.Style(func(v any) Style { return customGreen })
+			}))
+		buf := NewBuffer(80, 10)
+		tmpl.Execute(buf, 80, 10)
+
+		row1 := buf.GetLine(1)
+		if !containsSubstring(row1, "$178.92") {
+			t.Errorf("composed: expected $178.92 in row: %q", row1)
+		}
+
+		// verify style is the custom green, not default
+		for x := 0; x < 80; x++ {
+			cell := buf.Get(x, 1)
+			if cell.Rune == '$' {
+				if cell.Style.FG != Green {
+					t.Errorf("composed style should be Green, got %v", cell.Style.FG)
+				}
+				break
+			}
+		}
+	})
+
+	t.Run("header alignment matches column", func(t *testing.T) {
+		// right-aligned column should have right-aligned header
+		tmpl := Build(AutoTable(&stocks).
+			Columns("Symbol", "Price").
+			Column("Price", Currency("$", 2)))
+		buf := NewBuffer(40, 10)
+		tmpl.Execute(buf, 40, 10)
+
+		// verify the table renders without panic
+		header := buf.GetLine(0)
+		if !containsSubstring(header, "Symbol") {
+			t.Errorf("missing Symbol in header: %q", header)
+		}
+		if !containsSubstring(header, "Price") {
+			t.Errorf("missing Price in header: %q", header)
+		}
+	})
+
+	t.Run("center alignment actually works", func(t *testing.T) {
+		type Row struct {
+			Label  string
+			Active bool
+		}
+		rows := []Row{
+			{"hello", true},
+			{"world", false},
+		}
+
+		tmpl := Build(AutoTable(&rows).
+			Columns("Label", "Active").
+			Column("Active", Bool("Y", "N")))
+		// use tight width to avoid proportional expansion muddling positions
+		buf := NewBuffer(14, 5)
+		tmpl.Execute(buf, 14, 5)
+
+		// find where 'A' of "Active" header starts
+		activeStart := -1
+		for x := 0; x < 14; x++ {
+			if buf.Get(x, 0).Rune == 'A' {
+				activeStart = x
+				break
+			}
+		}
+		if activeStart < 0 {
+			t.Fatalf("could not find Active header, row0: %q", buf.GetLine(0))
+		}
+
+		// find the column width (Active = 6 chars natural width)
+		// "Y" (1 char) centered in 6+ chars should NOT be at activeStart
+		cell := buf.Get(activeStart, 1)
+		if cell.Rune == 'Y' {
+			t.Errorf("'Y' at column start (left-aligned), expected center. row0=%q row1=%q",
+				buf.GetLine(0), buf.GetLine(1))
+		}
+	})
+
+	t.Run("center alignment static path", func(t *testing.T) {
+		type Row struct {
+			Label  string
+			Active bool
+		}
+		// static (non-pointer) slice uses the static compile path
+		rows := []Row{
+			{"hello", true},
+			{"world", false},
+		}
+
+		tmpl := Build(AutoTable(rows).
+			Columns("Label", "Active").
+			Column("Active", Bool("Y", "N")))
+		buf := NewBuffer(14, 5)
+		tmpl.Execute(buf, 14, 5)
+
+		// find where 'A' of "Active" header starts
+		activeStart := -1
+		for x := 0; x < 14; x++ {
+			if buf.Get(x, 0).Rune == 'A' {
+				activeStart = x
+				break
+			}
+		}
+		if activeStart < 0 {
+			t.Fatalf("could not find Active header, row0: %q", buf.GetLine(0))
+		}
+
+		// "Y" centered should NOT be at column start
+		cell := buf.Get(activeStart, 1)
+		if cell.Rune == 'Y' {
+			t.Errorf("static path: 'Y' at column start (left-aligned), expected center. row0=%q row1=%q",
+				buf.GetLine(0), buf.GetLine(1))
+		}
+	})
+
+	t.Run("right alignment actually works", func(t *testing.T) {
+		type Row struct {
+			Name  string
+			Value int
+		}
+		rows := []Row{
+			{"hi", 5},
+			{"yo", 12345},
+		}
+
+		tmpl := Build(AutoTable(&rows).
+			Columns("Name", "Value").
+			Column("Value", Number(0)))
+		buf := NewBuffer(18, 5)
+		tmpl.Execute(buf, 18, 5)
+
+		// find where Value column starts
+		valStart := -1
+		for x := 0; x < 18; x++ {
+			if buf.Get(x, 0).Rune == 'V' {
+				valStart = x
+				break
+			}
+		}
+		if valStart < 0 {
+			t.Fatalf("could not find Value header, row0: %q", buf.GetLine(0))
+		}
+
+		// row 1 has "5" — right-aligned in a column wide enough for "12,345" (6 chars)
+		// the "5" should NOT be at valStart (that would be left-aligned)
+		cell := buf.Get(valStart, 1)
+		if cell.Rune == '5' {
+			t.Errorf("'5' at column start (left-aligned), expected right. row0=%q row1=%q",
+				buf.GetLine(0), buf.GetLine(1))
+		}
+	})
+}

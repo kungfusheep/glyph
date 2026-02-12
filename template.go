@@ -258,6 +258,7 @@ type Op struct {
 	AutoTableAltStyle *Style              // alternating row style
 	AutoTableGap      int8                // gap between columns
 	AutoTableFill     Color               // row fill for alt rows
+	AutoTableColCfgs  []*ColumnConfig     // per-column config (parallel to Fields, nil = no config)
 	AutoTableSort     *autoTableSortState // nil unless sorting enabled
 	AutoTableScroll   *autoTableScroll    // nil unless scrolling enabled
 
@@ -1747,6 +1748,27 @@ func (t *Template) compileAutoTableReactive(v AutoTableC, rv reflect.Value, pare
 		copy(headers, columns)
 	}
 
+	// resolve per-column configs
+	colCfgs := make([]*ColumnConfig, len(columns))
+	for i, name := range columns {
+		cfg := &ColumnConfig{}
+		fi := fieldIndices[i]
+
+		// apply type-based default alignment
+		ft := elemType.Field(fi).Type
+		if ft.Kind() == reflect.Ptr {
+			ft = ft.Elem()
+		}
+		cfg.align = autoTableDefaultAlign(ft)
+
+		// apply user config on top (overrides type defaults)
+		if opt, ok := v.columnConfigs[name]; ok {
+			opt(cfg)
+		}
+
+		colCfgs[i] = cfg
+	}
+
 	var altFill Color
 	if v.altRowStyle != nil && v.altRowStyle.BG.Mode != ColorDefault {
 		altFill = v.altRowStyle.BG
@@ -1763,12 +1785,44 @@ func (t *Template) compileAutoTableReactive(v AutoTableC, rv reflect.Value, pare
 		AutoTableAltStyle: v.altRowStyle,
 		AutoTableGap:      v.gap,
 		AutoTableFill:     altFill,
+		AutoTableColCfgs:  colCfgs,
 		AutoTableSort:     v.sortState,
 		AutoTableScroll:   v.scroll,
 		Margin:            v.margin,
 	}
 
 	return t.addOp(op, depth)
+}
+
+// alignOffset returns the x offset needed to align text within the given width.
+func alignOffset(text string, width int, align Align) int {
+	textLen := utf8.RuneCountInString(text)
+	if textLen >= width {
+		return 0
+	}
+	pad := width - textLen
+	switch align {
+	case AlignRight:
+		return pad
+	case AlignCenter:
+		return pad / 2
+	default:
+		return 0
+	}
+}
+
+// autoTableDefaultAlign returns sensible default alignment based on type.
+func autoTableDefaultAlign(t reflect.Type) Align {
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return AlignRight
+	case reflect.Bool:
+		return AlignCenter
+	default:
+		return AlignLeft
+	}
 }
 
 // autoTableResolveColumns resolves column names to struct field indices.
@@ -1823,6 +1877,23 @@ func (t *Template) compileAutoTableStatic(v AutoTableC, rv reflect.Value, parent
 		headers = columns
 	}
 
+	// resolve column configs for static path
+	colCfgs := make([]*ColumnConfig, len(columns))
+	for i, col := range columns {
+		cfg := &ColumnConfig{}
+		if f, ok := elemType.FieldByName(col); ok {
+			ft := f.Type
+			if ft.Kind() == reflect.Ptr {
+				ft = ft.Elem()
+			}
+			cfg.align = autoTableDefaultAlign(ft)
+		}
+		if opt, ok := v.columnConfigs[col]; ok {
+			opt(cfg)
+		}
+		colCfgs[i] = cfg
+	}
+
 	widths := make([]int, len(columns))
 	for i, h := range headers {
 		widths[i] = len(h)
@@ -1836,7 +1907,12 @@ func (t *Template) compileAutoTableStatic(v AutoTableC, rv reflect.Value, parent
 		for j, col := range columns {
 			field := elem.FieldByName(col)
 			if field.IsValid() {
-				str := fmt.Sprintf("%v", field.Interface())
+				var str string
+				if cfg := colCfgs[j]; cfg != nil && cfg.format != nil {
+					str = cfg.format(field.Interface())
+				} else {
+					str = fmt.Sprintf("%v", field.Interface())
+				}
 				if len(str) > widths[j] {
 					widths[j] = len(str)
 				}
@@ -1848,7 +1924,11 @@ func (t *Template) compileAutoTableStatic(v AutoTableC, rv reflect.Value, parent
 
 	var headerCells []any
 	for i, h := range headers {
-		headerCells = append(headerCells, Text(h).Width(int16(widths[i])).Style(v.headerStyle))
+		hdrStyle := v.headerStyle
+		if cfg := colCfgs[i]; cfg != nil {
+			hdrStyle.Align = cfg.align
+		}
+		headerCells = append(headerCells, Text(h).Width(int16(widths[i])).Style(hdrStyle))
 	}
 	rows = append(rows, HBox.Gap(v.gap)(headerCells...))
 
@@ -1868,10 +1948,23 @@ func (t *Template) compileAutoTableStatic(v AutoTableC, rv reflect.Value, parent
 		for j, col := range columns {
 			field := elem.FieldByName(col)
 			var str string
+			cellStyle := rowStyle
 			if field.IsValid() {
-				str = fmt.Sprintf("%v", field.Interface())
+				val := field.Interface()
+				cfg := colCfgs[j]
+				if cfg != nil && cfg.format != nil {
+					str = cfg.format(val)
+				} else {
+					str = fmt.Sprintf("%v", val)
+				}
+				if cfg != nil && cfg.style != nil {
+					cellStyle = cfg.style(val)
+				}
 			}
-			cells = append(cells, Text(str).Width(int16(widths[j])).Style(rowStyle))
+			if cfg := colCfgs[j]; cfg != nil {
+				cellStyle.Align = cfg.align
+			}
+			cells = append(cells, Text(str).Width(int16(widths[j])).Style(cellStyle))
 		}
 
 		row := HBox.Gap(v.gap)
@@ -3368,12 +3461,20 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpText:
 		style := t.effectiveStyle(op.TextStyle)
 		text := applyTransform(op.StaticStr, style.Transform)
-		buf.WriteStringFast(int(absX), int(absY), text, style, int(maxW))
+		x := int(absX)
+		if style.Align != AlignLeft && op.Width > 0 {
+			x += alignOffset(text, int(op.Width), style.Align)
+		}
+		buf.WriteStringFast(x, int(absY), text, style, int(maxW))
 
 	case OpTextPtr:
 		style := t.effectiveStyle(op.TextStyle)
 		text := applyTransform(*op.StrPtr, style.Transform)
-		buf.WriteStringFast(int(absX), int(absY), text, style, int(maxW))
+		x := int(absX)
+		if style.Align != AlignLeft && op.Width > 0 {
+			x += alignOffset(text, int(op.Width), style.Align)
+		}
+		buf.WriteStringFast(x, int(absY), text, style, int(maxW))
 
 	case OpTextOff:
 		// Would need elemBase passed through for ForEach
@@ -4807,7 +4908,13 @@ func (t *Template) renderAutoTable(buf *Buffer, op *Op, absX, absY, maxW int16) 
 			elem = elem.Elem()
 		}
 		for j, fi := range op.AutoTableFields {
-			str := fmt.Sprintf("%v", elem.Field(fi).Interface())
+			val := elem.Field(fi).Interface()
+			var str string
+			if cfg := op.AutoTableColCfgs[j]; cfg != nil && cfg.format != nil {
+				str = cfg.format(val)
+			} else {
+				str = fmt.Sprintf("%v", val)
+			}
 			if len(str) > widths[j] {
 				widths[j] = len(str)
 			}
@@ -4846,7 +4953,11 @@ func (t *Template) renderAutoTable(buf *Buffer, op *Op, absX, absY, maxW int16) 
 				text += " ▼"
 			}
 		}
-		t.writeTableCell(buf, x, y, text, widths[i], AlignLeft, hdrStyle)
+		hdrAlign := AlignLeft
+		if cfg := op.AutoTableColCfgs[i]; cfg != nil {
+			hdrAlign = cfg.align
+		}
+		t.writeTableCell(buf, x, y, text, widths[i], hdrAlign, hdrStyle)
 
 		// register column header as a jump target for sorting
 		if jumpActive {
@@ -4917,8 +5028,27 @@ func (t *Template) renderAutoTable(buf *Buffer, op *Op, absX, absY, maxW int16) 
 
 			bx := 0
 			for j, fi := range op.AutoTableFields {
-				str := fmt.Sprintf("%v", elem.Field(fi).Interface())
-				t.writeTableCell(sc.buf, bx, i, str, widths[j], AlignLeft, rowStyle)
+				val := elem.Field(fi).Interface()
+				cfg := op.AutoTableColCfgs[j]
+
+				var str string
+				if cfg != nil && cfg.format != nil {
+					str = cfg.format(val)
+				} else {
+					str = fmt.Sprintf("%v", val)
+				}
+
+				cellStyle := rowStyle
+				if cfg != nil && cfg.style != nil {
+					cellStyle = cfg.style(val)
+				}
+
+				cellAlign := AlignLeft
+				if cfg != nil {
+					cellAlign = cfg.align
+				}
+
+				t.writeTableCell(sc.buf, bx, i, str, widths[j], cellAlign, cellStyle)
 				bx += widths[j] + gap
 			}
 		}
@@ -4952,8 +5082,27 @@ func (t *Template) renderAutoTable(buf *Buffer, op *Op, absX, absY, maxW int16) 
 
 			x = int(absX)
 			for j, fi := range op.AutoTableFields {
-				str := fmt.Sprintf("%v", elem.Field(fi).Interface())
-				t.writeTableCell(buf, x, y, str, widths[j], AlignLeft, rowStyle)
+				val := elem.Field(fi).Interface()
+				cfg := op.AutoTableColCfgs[j]
+
+				var str string
+				if cfg != nil && cfg.format != nil {
+					str = cfg.format(val)
+				} else {
+					str = fmt.Sprintf("%v", val)
+				}
+
+				cellStyle := rowStyle
+				if cfg != nil && cfg.style != nil {
+					cellStyle = cfg.style(val)
+				}
+
+				cellAlign := AlignLeft
+				if cfg != nil {
+					cellAlign = cfg.align
+				}
+
+				t.writeTableCell(buf, x, y, str, widths[j], cellAlign, cellStyle)
 				x += widths[j] + gap
 			}
 			y++
