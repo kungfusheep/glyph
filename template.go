@@ -195,7 +195,7 @@ type Op struct {
 
 	// Control flow
 	CondPtr  *bool         // for If (simple bool pointer)
-	CondNode ConditionNode // for If (builder-style conditions)
+	CondNode conditionNode // for If (builder-style conditions)
 	ThenTmpl *Template     // for If
 	ElseTmpl *Template     // for If/Else
 	IterTmpl *Template     // for ForEach
@@ -206,7 +206,7 @@ type Op struct {
 	iterGeoms []Geom // per-item geometry
 
 	// Switch
-	SwitchNode  SwitchNodeInterface
+	SwitchNode  switchNodeInterface
 	SwitchCases []*Template
 	SwitchDef   *Template
 
@@ -456,7 +456,7 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		return t.compileRenderer(v, parent, depth)
 	case Box:
 		return t.compileBox(v, parent, depth, elemBase, elemSize)
-	case ConditionNode:
+	case conditionNode:
 		return t.compileCondition(v, parent, depth, elemBase, elemSize)
 	case LayerViewNode:
 		return t.compileLayer(v, parent, depth)
@@ -569,7 +569,7 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	}
 
 	// Check for SwitchNodeInterface (generic Switch)
-	if sw, ok := node.(SwitchNodeInterface); ok {
+	if sw, ok := node.(switchNodeInterface); ok {
 		return t.compileSwitch(sw, parent, depth, elemBase, elemSize)
 	}
 
@@ -748,6 +748,7 @@ func (t *Template) compileSelectionList(v *SelectionList, parent int16, depth in
 	op := Op{
 		Kind:             OpSelectionList,
 		Parent:           parent,
+		Margin:           v.Style.margin,
 		SlicePtr:         slicePtr,
 		ElemSize:         sliceElemSize,
 		IterTmpl:         iterTmpl,
@@ -1008,6 +1009,7 @@ func (t *Template) compileTextInput(v TextInput, parent int16, depth int) int16 
 		Kind:                    OpTextInput,
 		Parent:                  parent,
 		Width:                   int16(v.Width),
+		Margin:                  v.Style.margin,
 		TextInputFieldPtr:       v.Field,
 		TextInputFocusGroupPtr:  v.FocusGroup,
 		TextInputFocusIndex:     v.FocusIndex,
@@ -1199,7 +1201,7 @@ func (t *Template) compileIf(v IfNode, parent int16, depth int, elemBase unsafe.
 	return t.addOp(op, depth)
 }
 
-func (t *Template) compileCondition(cond ConditionNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *Template) compileCondition(cond conditionNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	// Check if condition pointer is within element range (ForEach context)
 	if elemBase != nil && elemSize > 0 {
 		ptrAddr := cond.getPtrAddr()
@@ -1255,7 +1257,7 @@ func (t *Template) compileCondition(cond ConditionNode, parent int16, depth int,
 	return t.addOp(op, depth)
 }
 
-func (t *Template) compileSwitch(sw SwitchNodeInterface, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *Template) compileSwitch(sw switchNodeInterface, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	op := Op{
 		Kind:       OpSwitch,
 		Parent:     parent,
@@ -1410,7 +1412,7 @@ func (t *Template) compileTextC(v TextC, parent int16, depth int, elemBase unsaf
 		Parent:    parent,
 		TextStyle: v.style,
 		Width:     v.width,
-		Margin:    v.margin,
+		Margin:    v.style.margin,
 	}
 
 	switch val := v.content.(type) {
@@ -1445,7 +1447,7 @@ func (t *Template) compileSpacerC(v SpacerC, parent int16, depth int) int16 {
 		FlexGrow:  grow,
 		RuleChar:  v.char,
 		RuleStyle: v.style,
-		Margin:    v.margin,
+		Margin:    v.style.margin,
 	}, depth)
 }
 
@@ -1459,7 +1461,7 @@ func (t *Template) compileHRuleC(v HRuleC, parent int16, depth int) int16 {
 		Parent:    parent,
 		RuleChar:  char,
 		RuleStyle: v.style,
-		Margin:    v.margin,
+		Margin:    v.style.margin,
 	}, depth)
 }
 
@@ -1474,7 +1476,7 @@ func (t *Template) compileVRuleC(v VRuleC, parent int16, depth int) int16 {
 		RuleChar:  char,
 		RuleStyle: v.style,
 		Height:    v.height,
-		Margin:    v.margin,
+		Margin:    v.style.margin,
 	}, depth)
 }
 
@@ -1490,7 +1492,7 @@ func (t *Template) compileProgressC(v ProgressC, parent int16, depth int, elemBa
 		TextStyle: v.style, // reuse TextStyle for progress bar color
 	}
 
-	op.Margin = v.margin
+	op.Margin = v.style.margin
 
 	switch val := v.value.(type) {
 	case int:
@@ -1520,7 +1522,7 @@ func (t *Template) compileSpinnerC(v SpinnerC, parent int16, depth int) int16 {
 		SpinnerFramePtr: v.frame,
 		SpinnerFrames:   frames,
 		SpinnerStyle:    v.style,
-		Margin:          v.margin,
+		Margin:          v.style.margin,
 	}, depth)
 }
 
@@ -1568,7 +1570,7 @@ func (t *Template) compileLeaderC(v LeaderC, parent int16, depth int) int16 {
 		op.LeaderValue = fmt.Sprintf("%v", val)
 	}
 
-	op.Margin = v.margin
+	op.Margin = v.style.margin
 	return t.addOp(op, depth)
 }
 
@@ -1596,7 +1598,7 @@ func (t *Template) compileSparklineC(v SparklineC, parent int16, depth int) int1
 		}
 	}
 
-	op.Margin = v.margin
+	op.Margin = v.style.margin
 	return t.addOp(op, depth)
 }
 
@@ -1672,7 +1674,7 @@ func (t *Template) compileTabsC(v TabsC, parent int16, depth int) int16 {
 		TabsLabels:        v.labels,
 		TabsSelectedPtr:   v.selected,
 		TabsStyleType:     v.tabStyle,
-		TabsGap:           v.gap,
+		TabsGap:           int(v.gap),
 		TabsActiveStyle:   v.activeStyle,
 		TabsInactiveStyle: v.inactiveStyle,
 		Margin:            v.margin,
@@ -1998,7 +2000,9 @@ func (t *Template) compileCheckboxC(v *CheckboxC, parent int16, depth int, elemB
 	// Use If for the checkbox mark
 	mark := If(v.checked).Then(Text(v.checkedMark)).Else(Text(v.unchecked))
 
-	return t.compileHBoxC(HBox.Gap(1)(mark, labelNode), parent, depth, elemBase, 0)
+	box := HBox.Gap(1)(mark, labelNode)
+	box.margin = v.style.margin
+	return t.compileHBoxC(box, parent, depth, elemBase, 0)
 }
 
 func (t *Template) compileRadioC(v *RadioC, parent int16, depth int) int16 {
@@ -2017,9 +2021,13 @@ func (t *Template) compileRadioC(v *RadioC, parent int16, depth int) int16 {
 	}
 
 	if v.horizontal {
-		return t.compileHBoxC(HBox.Gap(v.gap)(items...), parent, depth, nil, 0)
+		hbox := HBox.Gap(v.gap)(items...)
+		hbox.margin = v.style.margin
+		return t.compileHBoxC(hbox, parent, depth, nil, 0)
 	}
-	return t.compileVBoxC(VBox.Gap(v.gap)(items...), parent, depth, nil, 0)
+	vbox := VBox.Gap(v.gap)(items...)
+	vbox.margin = v.style.margin
+	return t.compileVBoxC(vbox, parent, depth, nil, 0)
 }
 
 func (t *Template) compileInputC(v *InputC, parent int16, depth int) int16 {
@@ -3401,9 +3409,10 @@ func (t *Template) effectiveStyle(s Style) Style {
 	if t.inheritedStyle == nil && t.inheritedFill.Mode == ColorDefault {
 		return s
 	}
-	// fully empty style inherits everything
+	// fully empty style inherits everything (except margin — margin never cascades)
 	if s.Equal(Style{}) && t.inheritedStyle != nil {
 		result := *t.inheritedStyle
+		result.margin = [4]int16{}
 		// use cascaded Fill as BG for text rendering
 		if result.BG.Mode == ColorDefault && t.inheritedFill.Mode != ColorDefault {
 			result.BG = t.inheritedFill

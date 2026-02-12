@@ -234,8 +234,8 @@ func (e *OrdConditionEval[T]) evaluateWithBase(base unsafe.Pointer) bool {
 	}
 }
 
-// ConditionNode interface for the compiler to detect condition nodes
-type ConditionNode interface {
+// conditionNode interface for the compiler to detect condition nodes
+type conditionNode interface {
 	evaluate() bool
 	evaluateWithBase(base unsafe.Pointer) bool // for ForEach
 	setOffset(offset uintptr)                  // set offset for ForEach
@@ -245,9 +245,9 @@ type ConditionNode interface {
 	getElse() any
 }
 
-// Ensure our types implement ConditionNode
-var _ ConditionNode = (*ConditionEval[int])(nil)
-var _ ConditionNode = (*OrdConditionEval[int])(nil)
+// ensure our types implement conditionNode
+var _ conditionNode = (*ConditionEval[int])(nil)
+var _ conditionNode = (*OrdConditionEval[int])(nil)
 
 // SwitchBuilder for type-safe multi-way branching.
 type SwitchBuilder[T comparable] struct {
@@ -304,12 +304,12 @@ type SwitchNode[T comparable] struct {
 	def   any
 }
 
-// SwitchNodeInterface for the compiler to detect switch nodes
-type SwitchNodeInterface interface {
-	evaluateSwitch() any      // runtime: returns matching node
-	getCaseNodes() []any      // compile-time: all case nodes
-	getDefaultNode() any      // compile-time: default node
-	getMatchIndex() int       // runtime: returns matching case index, or -1 for default
+// switchNodeInterface for the compiler to detect switch nodes
+type switchNodeInterface interface {
+	evaluateSwitch() any // runtime: returns matching node
+	getCaseNodes() []any // compile-time: all case nodes
+	getDefaultNode() any // compile-time: default node
+	getMatchIndex() int  // runtime: returns matching case index, or -1 for default
 }
 
 func (s *SwitchNode[T]) evaluateSwitch() any {
@@ -344,4 +344,4 @@ func (s *SwitchNode[T]) getMatchIndex() int {
 	return -1 // default
 }
 
-var _ SwitchNodeInterface = (*SwitchNode[int])(nil)
+var _ switchNodeInterface = (*SwitchNode[int])(nil)

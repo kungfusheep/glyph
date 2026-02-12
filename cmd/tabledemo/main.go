@@ -47,11 +47,13 @@ func main() {
 		{"Eve", 32, "Sydney", "Australia"},
 	}
 
-	app.SetView(VBox.Gap(2)(
+	title := Style{FG: Yellow, Attr: AttrBold}.MarginTRBL(2, 0, 0, 0)
+
+	app.SetView(VBox.Gap(0)(
 		Text("AutoTable Demo").FG(Cyan).Bold(),
 		HRule().Style(Style{FG: PaletteColor(238)}),
 
-		Text("Stocks (with column formatting):").FG(Yellow),
+		Text("Stocks (with column formatting):").Style(title),
 		AutoTable(stocks).
 			Column("Price", Currency("$", 2)).
 			Column("Change", PercentChange(1)).
@@ -60,13 +62,13 @@ func main() {
 			HeaderStyle(Style{FG: Cyan, Attr: AttrBold}).
 			AltRowStyle(Style{BG: PaletteColor(235)}),
 
-		Text("People (selected columns with custom headers):").FG(Yellow),
+		Text("People (selected columns with custom headers):").Style(title),
 		AutoTable(people).
 			Columns("Name", "Age", "City").
 			Headers("Person", "Years", "Location").
 			HeaderStyle(Style{FG: Green, Attr: AttrBold}),
 
-		Text("Stocks (just Symbol and Price):").FG(Yellow),
+		Text("Stocks (just Symbol and Price):").FG(Yellow).Style(title),
 		AutoTable(stocks).
 			Columns("Symbol", "Price").
 			Column("Price", Currency("$", 2)).

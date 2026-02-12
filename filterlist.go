@@ -19,6 +19,7 @@ type FilterListC[T any] struct {
 	maxVisible  int
 	border      BorderStyle
 	title       string
+	margin      [4]int16
 }
 
 // FilterList creates a filterable list.
@@ -59,10 +60,14 @@ func (fl *FilterListC[T]) toTemplate() any {
 		fl.list,
 	}
 
+	box := VBox
 	if fl.border.Horizontal != 0 {
-		return VBox.Border(fl.border).Title(fl.title)(children...)
+		box = box.Border(fl.border).Title(fl.title)
 	}
-	return VBox(children...)
+	if fl.margin != [4]int16{} {
+		box = box.MarginTRBL(fl.margin[0], fl.margin[1], fl.margin[2], fl.margin[3])
+	}
+	return box(children...)
 }
 
 // bindings returns declared bindings from the list (nav, handles, etc).
@@ -107,6 +112,21 @@ func (fl *FilterListC[T]) Border(b BorderStyle) *FilterListC[T] {
 // Title sets the border title.
 func (fl *FilterListC[T]) Title(t string) *FilterListC[T] {
 	fl.title = t
+	return fl
+}
+
+func (fl *FilterListC[T]) Margin(all int16) *FilterListC[T] {
+	fl.margin = [4]int16{all, all, all, all}
+	return fl
+}
+
+func (fl *FilterListC[T]) MarginVH(v, h int16) *FilterListC[T] {
+	fl.margin = [4]int16{v, h, v, h}
+	return fl
+}
+
+func (fl *FilterListC[T]) MarginTRBL(t, r, b, l int16) *FilterListC[T] {
+	fl.margin = [4]int16{t, r, b, l}
 	return fl
 }
 

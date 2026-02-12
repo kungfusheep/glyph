@@ -28,7 +28,8 @@ type FilterLogC struct {
 	filterMu      sync.Mutex
 
 	// layout
-	grow float32
+	grow   float32
+	margin [4]int16
 
 	// focus management
 	focused bool
@@ -82,10 +83,14 @@ func (fl *FilterLogC) toTemplate() any {
 		fl.log,
 	}
 
+	box := VBox
 	if fl.grow > 0 {
-		return VBox.Grow(fl.grow)(children...)
+		box = box.Grow(fl.grow)
 	}
-	return VBox(children...)
+	if fl.margin != [4]int16{} {
+		box = box.MarginTRBL(fl.margin[0], fl.margin[1], fl.margin[2], fl.margin[3])
+	}
+	return box(children...)
 }
 
 // bindings returns declared bindings from the log component.
@@ -114,6 +119,21 @@ func (fl *FilterLogC) MaxLines(n int) *FilterLogC {
 func (fl *FilterLogC) Grow(g float32) *FilterLogC {
 	fl.grow = g
 	fl.log.grow = g
+	return fl
+}
+
+func (fl *FilterLogC) Margin(all int16) *FilterLogC {
+	fl.margin = [4]int16{all, all, all, all}
+	return fl
+}
+
+func (fl *FilterLogC) MarginVH(v, h int16) *FilterLogC {
+	fl.margin = [4]int16{v, h, v, h}
+	return fl
+}
+
+func (fl *FilterLogC) MarginTRBL(t, r, b, l int16) *FilterLogC {
+	fl.margin = [4]int16{t, r, b, l}
 	return fl
 }
 
@@ -157,12 +177,12 @@ func (fl *FilterLogC) ManagedBy(fm *FocusManager) *FilterLogC {
 	return fl
 }
 
-// focusBinding implements Focusable (returns the input's binding).
+// focusBinding implements focusable (returns the input's binding).
 func (fl *FilterLogC) focusBinding() *textInputBinding {
 	return fl.input.declaredTIB
 }
 
-// setFocused implements Focusable.
+// setFocused implements focusable.
 func (fl *FilterLogC) setFocused(focused bool) {
 	fl.focused = focused
 	fl.input.focused = focused

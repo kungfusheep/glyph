@@ -809,7 +809,7 @@ func TestV2ConditionInsideForEach(t *testing.T) {
 }
 
 // TestV2ConditionNodeBuilder tests the builder-style If() conditionals
-// using forme.If(&x).Eq(true).Then(...) syntax
+// using If(&x).Eq(true).Then(...) syntax
 func TestV2ConditionNodeBuilder(t *testing.T) {
 	showGraph := true
 	showProcs := false

@@ -408,8 +408,7 @@ func Widget(
 type TextC struct {
 	content any // string or *string
 	style   Style
-	width   int16    // explicit width (0 = content-sized)
-	margin  [4]int16 // top, right, bottom, left
+	width   int16 // explicit width (0 = content-sized)
 }
 
 func Text(content any) TextC {
@@ -466,9 +465,9 @@ func (t TextC) Width(w int16) TextC {
 	return t
 }
 
-func (t TextC) Margin(all int16) TextC            { t.margin = [4]int16{all, all, all, all}; return t }
-func (t TextC) MarginVH(v, h int16) TextC         { t.margin = [4]int16{v, h, v, h}; return t }
-func (t TextC) MarginTRBL(a, b, c, d int16) TextC { t.margin = [4]int16{a, b, c, d}; return t }
+func (t TextC) Margin(all int16) TextC            { t.style.margin = [4]int16{all, all, all, all}; return t }
+func (t TextC) MarginVH(v, h int16) TextC         { t.style.margin = [4]int16{v, h, v, h}; return t }
+func (t TextC) MarginTRBL(a, b, c, d int16) TextC { t.style.margin = [4]int16{a, b, c, d}; return t }
 
 // ============================================================================
 // Spacer - Empty space
@@ -480,7 +479,6 @@ type SpacerC struct {
 	char     rune
 	style    Style
 	flexGrow float32
-	margin   [4]int16
 }
 
 func Space() SpacerC {
@@ -520,18 +518,20 @@ func (s SpacerC) Grow(g float32) SpacerC {
 	return s
 }
 
-func (s SpacerC) Margin(all int16) SpacerC            { s.margin = [4]int16{all, all, all, all}; return s }
-func (s SpacerC) MarginVH(v, h int16) SpacerC         { s.margin = [4]int16{v, h, v, h}; return s }
-func (s SpacerC) MarginTRBL(a, b, c, d int16) SpacerC { s.margin = [4]int16{a, b, c, d}; return s }
+func (s SpacerC) Margin(all int16) SpacerC    { s.style.margin = [4]int16{all, all, all, all}; return s }
+func (s SpacerC) MarginVH(v, h int16) SpacerC { s.style.margin = [4]int16{v, h, v, h}; return s }
+func (s SpacerC) MarginTRBL(a, b, c, d int16) SpacerC {
+	s.style.margin = [4]int16{a, b, c, d}
+	return s
+}
 
 // ============================================================================
 // HRule - Horizontal line
 // ============================================================================
 
 type HRuleC struct {
-	char   rune
-	style  Style
-	margin [4]int16
+	char  rune
+	style Style
 }
 
 func HRule() HRuleC {
@@ -548,9 +548,13 @@ func (h HRuleC) Style(s Style) HRuleC {
 	return h
 }
 
-func (h HRuleC) Margin(all int16) HRuleC            { h.margin = [4]int16{all, all, all, all}; return h }
-func (h HRuleC) MarginVH(v, hz int16) HRuleC        { h.margin = [4]int16{v, hz, v, hz}; return h }
-func (h HRuleC) MarginTRBL(a, b, c, d int16) HRuleC { h.margin = [4]int16{a, b, c, d}; return h }
+func (h HRuleC) FG(c Color) HRuleC { h.style.FG = c; return h }
+func (h HRuleC) BG(c Color) HRuleC { h.style.BG = c; return h }
+func (h HRuleC) Bold() HRuleC      { h.style.Attr |= AttrBold; return h }
+
+func (h HRuleC) Margin(all int16) HRuleC            { h.style.margin = [4]int16{all, all, all, all}; return h }
+func (h HRuleC) MarginVH(v, hz int16) HRuleC        { h.style.margin = [4]int16{v, hz, v, hz}; return h }
+func (h HRuleC) MarginTRBL(a, b, c, d int16) HRuleC { h.style.margin = [4]int16{a, b, c, d}; return h }
 
 // ============================================================================
 // VRule - Vertical line
@@ -560,7 +564,6 @@ type VRuleC struct {
 	char   rune
 	style  Style
 	height int16
-	margin [4]int16
 }
 
 func VRule() VRuleC {
@@ -577,24 +580,27 @@ func (v VRuleC) Style(s Style) VRuleC {
 	return v
 }
 
+func (v VRuleC) FG(c Color) VRuleC { v.style.FG = c; return v }
+func (v VRuleC) BG(c Color) VRuleC { v.style.BG = c; return v }
+func (v VRuleC) Bold() VRuleC      { v.style.Attr |= AttrBold; return v }
+
 func (v VRuleC) Height(h int16) VRuleC {
 	v.height = h
 	return v
 }
 
-func (v VRuleC) Margin(all int16) VRuleC            { v.margin = [4]int16{all, all, all, all}; return v }
-func (v VRuleC) MarginVH(vt, hz int16) VRuleC       { v.margin = [4]int16{vt, hz, vt, hz}; return v }
-func (v VRuleC) MarginTRBL(a, b, c, d int16) VRuleC { v.margin = [4]int16{a, b, c, d}; return v }
+func (v VRuleC) Margin(all int16) VRuleC            { v.style.margin = [4]int16{all, all, all, all}; return v }
+func (v VRuleC) MarginVH(vt, hz int16) VRuleC       { v.style.margin = [4]int16{vt, hz, vt, hz}; return v }
+func (v VRuleC) MarginTRBL(a, b, c, d int16) VRuleC { v.style.margin = [4]int16{a, b, c, d}; return v }
 
 // ============================================================================
 // Progress - Progress bar
 // ============================================================================
 
 type ProgressC struct {
-	value  any // int (0-100) or *int
-	width  int16
-	style  Style
-	margin [4]int16
+	value any // int (0-100) or *int
+	width int16
+	style Style
 }
 
 func Progress(value any) ProgressC {
@@ -611,9 +617,19 @@ func (p ProgressC) Style(s Style) ProgressC {
 	return p
 }
 
-func (p ProgressC) Margin(all int16) ProgressC            { p.margin = [4]int16{all, all, all, all}; return p }
-func (p ProgressC) MarginVH(v, h int16) ProgressC         { p.margin = [4]int16{v, h, v, h}; return p }
-func (p ProgressC) MarginTRBL(a, b, c, d int16) ProgressC { p.margin = [4]int16{a, b, c, d}; return p }
+func (p ProgressC) FG(c Color) ProgressC { p.style.FG = c; return p }
+func (p ProgressC) BG(c Color) ProgressC { p.style.BG = c; return p }
+func (p ProgressC) Bold() ProgressC      { p.style.Attr |= AttrBold; return p }
+
+func (p ProgressC) Margin(all int16) ProgressC {
+	p.style.margin = [4]int16{all, all, all, all}
+	return p
+}
+func (p ProgressC) MarginVH(v, h int16) ProgressC { p.style.margin = [4]int16{v, h, v, h}; return p }
+func (p ProgressC) MarginTRBL(a, b, c, d int16) ProgressC {
+	p.style.margin = [4]int16{a, b, c, d}
+	return p
+}
 
 // ============================================================================
 // Spinner - Animated spinner
@@ -623,7 +639,6 @@ type SpinnerC struct {
 	frame  *int
 	frames []string
 	style  Style
-	margin [4]int16
 }
 
 func Spinner(frame *int) SpinnerC {
@@ -640,21 +655,27 @@ func (s SpinnerC) Style(st Style) SpinnerC {
 	return s
 }
 
-func (s SpinnerC) Margin(all int16) SpinnerC            { s.margin = [4]int16{all, all, all, all}; return s }
-func (s SpinnerC) MarginVH(v, h int16) SpinnerC         { s.margin = [4]int16{v, h, v, h}; return s }
-func (s SpinnerC) MarginTRBL(a, b, c, d int16) SpinnerC { s.margin = [4]int16{a, b, c, d}; return s }
+func (s SpinnerC) FG(c Color) SpinnerC { s.style.FG = c; return s }
+func (s SpinnerC) BG(c Color) SpinnerC { s.style.BG = c; return s }
+func (s SpinnerC) Bold() SpinnerC      { s.style.Attr |= AttrBold; return s }
+
+func (s SpinnerC) Margin(all int16) SpinnerC    { s.style.margin = [4]int16{all, all, all, all}; return s }
+func (s SpinnerC) MarginVH(v, h int16) SpinnerC { s.style.margin = [4]int16{v, h, v, h}; return s }
+func (s SpinnerC) MarginTRBL(a, b, c, d int16) SpinnerC {
+	s.style.margin = [4]int16{a, b, c, d}
+	return s
+}
 
 // ============================================================================
 // Leader - Label.....Value display
 // ============================================================================
 
 type LeaderC struct {
-	label  any // string or *string
-	value  any // string or *string
-	width  int16
-	fill   rune
-	style  Style
-	margin [4]int16
+	label any // string or *string
+	value any // string or *string
+	width int16
+	fill  rune
+	style Style
 }
 
 func Leader(label, value any) LeaderC {
@@ -676,9 +697,16 @@ func (l LeaderC) Style(s Style) LeaderC {
 	return l
 }
 
-func (l LeaderC) Margin(all int16) LeaderC            { l.margin = [4]int16{all, all, all, all}; return l }
-func (l LeaderC) MarginVH(v, h int16) LeaderC         { l.margin = [4]int16{v, h, v, h}; return l }
-func (l LeaderC) MarginTRBL(a, b, c, d int16) LeaderC { l.margin = [4]int16{a, b, c, d}; return l }
+func (l LeaderC) FG(c Color) LeaderC { l.style.FG = c; return l }
+func (l LeaderC) BG(c Color) LeaderC { l.style.BG = c; return l }
+func (l LeaderC) Bold() LeaderC      { l.style.Attr |= AttrBold; return l }
+
+func (l LeaderC) Margin(all int16) LeaderC    { l.style.margin = [4]int16{all, all, all, all}; return l }
+func (l LeaderC) MarginVH(v, h int16) LeaderC { l.style.margin = [4]int16{v, h, v, h}; return l }
+func (l LeaderC) MarginTRBL(a, b, c, d int16) LeaderC {
+	l.style.margin = [4]int16{a, b, c, d}
+	return l
+}
 
 // ============================================================================
 // Sparkline - Mini chart
@@ -690,7 +718,6 @@ type SparklineC struct {
 	min    float64
 	max    float64
 	style  Style
-	margin [4]int16
 }
 
 func Sparkline(values any) SparklineC {
@@ -713,10 +740,17 @@ func (s SparklineC) Style(st Style) SparklineC {
 	return s
 }
 
-func (s SparklineC) Margin(all int16) SparklineC    { s.margin = [4]int16{all, all, all, all}; return s }
-func (s SparklineC) MarginVH(v, h int16) SparklineC { s.margin = [4]int16{v, h, v, h}; return s }
+func (s SparklineC) FG(c Color) SparklineC { s.style.FG = c; return s }
+func (s SparklineC) BG(c Color) SparklineC { s.style.BG = c; return s }
+func (s SparklineC) Bold() SparklineC      { s.style.Attr |= AttrBold; return s }
+
+func (s SparklineC) Margin(all int16) SparklineC {
+	s.style.margin = [4]int16{all, all, all, all}
+	return s
+}
+func (s SparklineC) MarginVH(v, h int16) SparklineC { s.style.margin = [4]int16{v, h, v, h}; return s }
 func (s SparklineC) MarginTRBL(a, b, c, d int16) SparklineC {
-	s.margin = [4]int16{a, b, c, d}
+	s.style.margin = [4]int16{a, b, c, d}
 	return s
 }
 
@@ -996,6 +1030,21 @@ func (l *ListC[T]) SelectedStyle(s Style) *ListC[T] {
 	return l
 }
 
+func (l *ListC[T]) Margin(all int16) *ListC[T] {
+	l.style.margin = [4]int16{all, all, all, all}
+	return l
+}
+
+func (l *ListC[T]) MarginVH(v, h int16) *ListC[T] {
+	l.style.margin = [4]int16{v, h, v, h}
+	return l
+}
+
+func (l *ListC[T]) MarginTRBL(t, r, b, li int16) *ListC[T] {
+	l.style.margin = [4]int16{t, r, b, li}
+	return l
+}
+
 // toSelectionList returns the internal SelectionList (creates on first call).
 // Same instance is returned for both template compilation and method calls.
 func (l *ListC[T]) toSelectionList() *SelectionList {
@@ -1092,7 +1141,7 @@ type TabsC struct {
 	labels        []string
 	selected      *int
 	tabStyle      TabsStyle
-	gap           int
+	gap           int8
 	activeStyle   Style
 	inactiveStyle Style
 	margin        [4]int16
@@ -1102,12 +1151,12 @@ func Tabs(labels []string, selected *int) TabsC {
 	return TabsC{labels: labels, selected: selected, gap: 2}
 }
 
-func (t TabsC) Style(s TabsStyle) TabsC {
+func (t TabsC) Kind(s TabsStyle) TabsC {
 	t.tabStyle = s
 	return t
 }
 
-func (t TabsC) Gap(g int) TabsC {
+func (t TabsC) Gap(g int8) TabsC {
 	t.gap = g
 	return t
 }
@@ -1571,6 +1620,21 @@ func (c *CheckboxC) Style(s Style) *CheckboxC {
 	return c
 }
 
+func (c *CheckboxC) Margin(all int16) *CheckboxC {
+	c.style.margin = [4]int16{all, all, all, all}
+	return c
+}
+
+func (c *CheckboxC) MarginVH(v, h int16) *CheckboxC {
+	c.style.margin = [4]int16{v, h, v, h}
+	return c
+}
+
+func (c *CheckboxC) MarginTRBL(t, r, b, l int16) *CheckboxC {
+	c.style.margin = [4]int16{t, r, b, l}
+	return c
+}
+
 func (c *CheckboxC) BindToggle(key string) *CheckboxC {
 	c.declaredBindings = append(c.declaredBindings,
 		binding{pattern: key, handler: c.Toggle},
@@ -1633,6 +1697,21 @@ func (r *RadioC) Marks(selected, unselected string) *RadioC {
 
 func (r *RadioC) Style(s Style) *RadioC {
 	r.style = s
+	return r
+}
+
+func (r *RadioC) Margin(all int16) *RadioC {
+	r.style.margin = [4]int16{all, all, all, all}
+	return r
+}
+
+func (r *RadioC) MarginVH(v, h int16) *RadioC {
+	r.style.margin = [4]int16{v, h, v, h}
+	return r
+}
+
+func (r *RadioC) MarginTRBL(t, ri, b, l int16) *RadioC {
+	r.style.margin = [4]int16{t, ri, b, l}
 	return r
 }
 
@@ -1762,6 +1841,21 @@ func (c *CheckListC[T]) SelectedStyle(s Style) *CheckListC[T] {
 	return c
 }
 
+func (c *CheckListC[T]) Margin(all int16) *CheckListC[T] {
+	c.style.margin = [4]int16{all, all, all, all}
+	return c
+}
+
+func (c *CheckListC[T]) MarginVH(v, h int16) *CheckListC[T] {
+	c.style.margin = [4]int16{v, h, v, h}
+	return c
+}
+
+func (c *CheckListC[T]) MarginTRBL(t, r, b, l int16) *CheckListC[T] {
+	c.style.margin = [4]int16{t, r, b, l}
+	return c
+}
+
 func (c *CheckListC[T]) Gap(g int8) *CheckListC[T] {
 	c.gap = g
 	return c
@@ -1801,7 +1895,7 @@ func (c *CheckListC[T]) BindToggle(key string) *CheckListC[T] {
 	c.declaredBindings = append(c.declaredBindings,
 		binding{pattern: key, handler: func() {
 			if c.checked != nil {
-				if item := c.SelectedItem(); item != nil {
+				if item := c.Selected(); item != nil {
 					ptr := c.checked(item)
 					*ptr = !*ptr
 				}
@@ -1823,7 +1917,7 @@ func (c *CheckListC[T]) BindDelete(key string) *CheckListC[T] {
 func (c *CheckListC[T]) Handle(key string, fn func(*T)) *CheckListC[T] {
 	c.declaredBindings = append(c.declaredBindings,
 		binding{pattern: key, handler: func() {
-			if item := c.SelectedItem(); item != nil {
+			if item := c.Selected(); item != nil {
 				fn(item)
 			}
 		}},
@@ -1836,7 +1930,7 @@ func (c *CheckListC[T]) bindings() []binding { return c.declaredBindings }
 func (c *CheckListC[T]) Ref(f func(*CheckListC[T])) *CheckListC[T] { f(c); return c }
 
 // SelectedItem returns a pointer to the currently selected item.
-func (c *CheckListC[T]) SelectedItem() *T {
+func (c *CheckListC[T]) Selected() *T {
 	if c.items == nil || len(*c.items) == 0 {
 		return nil
 	}
@@ -1968,8 +2062,8 @@ func (i *InputC) Placeholder(p string) *InputC {
 }
 
 // Width sets the input width.
-func (i *InputC) Width(w int) *InputC {
-	i.width = w
+func (i *InputC) Width(w int16) *InputC {
+	i.width = int(w)
 	return i
 }
 
@@ -1981,6 +2075,21 @@ func (i *InputC) Mask(m rune) *InputC {
 
 func (i *InputC) Style(s Style) *InputC {
 	i.style = s
+	return i
+}
+
+func (i *InputC) Margin(all int16) *InputC {
+	i.style.margin = [4]int16{all, all, all, all}
+	return i
+}
+
+func (i *InputC) MarginVH(v, h int16) *InputC {
+	i.style.margin = [4]int16{v, h, v, h}
+	return i
+}
+
+func (i *InputC) MarginTRBL(t, r, b, l int16) *InputC {
+	i.style.margin = [4]int16{t, r, b, l}
 	return i
 }
 
@@ -2007,12 +2116,12 @@ func (i *InputC) ManagedBy(fm *FocusManager) *InputC {
 	return i
 }
 
-// focusBinding implements Focusable.
+// focusBinding implements focusable.
 func (i *InputC) focusBinding() *textInputBinding {
 	return i.declaredTIB
 }
 
-// setFocused implements Focusable.
+// setFocused implements focusable.
 func (i *InputC) setFocused(focused bool) {
 	i.focused = focused
 }

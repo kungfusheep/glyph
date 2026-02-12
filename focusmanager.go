@@ -2,8 +2,8 @@ package forme
 
 import "github.com/kungfusheep/riffkey"
 
-// Focusable is implemented by components that can receive keyboard focus.
-type Focusable interface {
+// focusable is implemented by components that can receive keyboard focus.
+type focusable interface {
 	// focusBinding returns the text input binding for this component
 	focusBinding() *textInputBinding
 	// setFocused updates the component's visual focus state
@@ -31,7 +31,7 @@ type FocusManager struct {
 }
 
 type focusItem struct {
-	focusable Focusable
+	focusable focusable
 	tib       *textInputBinding
 }
 
@@ -45,7 +45,7 @@ func NewFocusManager() *FocusManager {
 
 // Register adds a focusable component to the manager.
 // The first registered component receives initial focus.
-func (fm *FocusManager) Register(f Focusable) *FocusManager {
+func (fm *FocusManager) Register(f focusable) *FocusManager {
 	tib := f.focusBinding()
 	fm.items = append(fm.items, &focusItem{
 		focusable: f,
