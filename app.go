@@ -259,10 +259,12 @@ func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
 		}
 		// route unmatched keys to focused component
 		router.HandleUnmatched(tmpl.pendingFocusManager.HandleKey)
+		router.NoCounts()
 	} else if tmpl.pendingTIB != nil {
 		th := riffkey.NewTextHandler(tmpl.pendingTIB.value, tmpl.pendingTIB.cursor)
 		th.OnChange = tmpl.pendingTIB.onChange
 		router.HandleUnmatched(th.HandleKey)
+		router.NoCounts()
 	}
 	// wire Log invalidation
 	for _, lv := range tmpl.pendingLogs {
@@ -441,7 +443,7 @@ func (a *App) HandleNamed(name, pattern string, handler func(riffkey.Match)) *Ap
 }
 
 // BindField routes unmatched keys to a text input field.
-func (a *App) BindField(f *Field) *App {
+func (a *App) BindField(f *InputState) *App {
 	a.router.TextInput(&f.Value, &f.Cursor)
 	return a
 }

@@ -311,7 +311,7 @@ type Op struct {
 	JumpStyle    Style  // label style override (zero = use app default)
 
 	// TextInput
-	TextInputFieldPtr       *Field      // Field-based API (bundles Value+Cursor)
+	TextInputFieldPtr       *InputState // Field-based API (bundles Value+Cursor)
 	TextInputFocusGroupPtr  *FocusGroup // shared focus tracker
 	TextInputFocusIndex     int         // this field's index in focus group
 	TextInputValuePtr       *string     // bound text value (legacy)

@@ -782,15 +782,15 @@ func BG(text string, color Color) Span {
 	return Span{Text: text, Style: Style{BG: color}}
 }
 
-// Field bundles the state for a text input field.
+// InputState bundles the state for a text input field.
 // Use with TextInput.Field for cleaner multi-field forms.
-type Field struct {
+type InputState struct {
 	Value  string
 	Cursor int
 }
 
 // Clear resets the field value and cursor.
-func (f *Field) Clear() {
+func (f *InputState) Clear() {
 	f.Value = ""
 	f.Cursor = 0
 }
@@ -804,9 +804,9 @@ type FocusGroup struct {
 // TextInput is a single-line text input field.
 // Wire up input handling via riffkey.NewTextHandler or riffkey.NewFieldHandler.
 //
-// Example with Field + FocusGroup (recommended for forms):
+// Example with InputState + FocusGroup (recommended for forms):
 //
-//	name := tui.Field{}
+//	name := tui.InputState{}
 //	focus := tui.FocusGroup{}
 //	tui.TextInput{Field: &name, FocusGroup: &focus, FocusIndex: 0}
 //
@@ -815,7 +815,7 @@ type FocusGroup struct {
 //	tui.TextInput{Value: &query, Cursor: &cursor, Placeholder: "Search..."}
 type TextInput struct {
 	// Field-based API (recommended for forms)
-	Field      *Field      // Bundles Value + Cursor in one struct
+	Field      *InputState // Bundles Value + Cursor in one struct
 	FocusGroup *FocusGroup // Shared focus tracker - cursor shows when FocusGroup.Current == FocusIndex
 	FocusIndex int         // This field's index in the focus group
 
