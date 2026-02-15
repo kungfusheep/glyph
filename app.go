@@ -575,34 +575,41 @@ func (a *App) render() {
 	if a.inline && a.viewHeight > 0 {
 		renderHeight = a.viewHeight
 	} else if a.inline {
-		renderHeight = 1 // Default to 1 line for inline
+		// auto-size: give layout full terminal height, then trim to content
+		renderHeight = int16(size.Height)
 	}
 
 	// Priority: pushed views > current view > base template
+	var activeTmpl *Template
 	if len(a.viewStack) > 0 {
 		topView := a.viewStack[len(a.viewStack)-1]
 		if a.viewTemplates != nil {
 			if tmpl, ok := a.viewTemplates[topView]; ok {
-				tmpl.Execute(buf, int16(size.Width), renderHeight)
-				goto rendered
+				activeTmpl = tmpl
 			}
 		}
 	}
-
-	// No pushed view - use base template
-	if a.currentView != "" && a.viewTemplates != nil {
-		if tmpl, ok := a.viewTemplates[a.currentView]; ok {
-			tmpl.Execute(buf, int16(size.Width), renderHeight)
+	if activeTmpl == nil {
+		if a.currentView != "" && a.viewTemplates != nil {
+			if tmpl, ok := a.viewTemplates[a.currentView]; ok {
+				activeTmpl = tmpl
+			} else {
+				return // View not found
+			}
+		} else if a.template != nil {
+			activeTmpl = a.template
 		} else {
-			return // View not found
+			return // No view set
 		}
-	} else if a.template != nil {
-		a.template.Execute(buf, int16(size.Width), renderHeight)
-	} else {
-		return // No view set
 	}
+	activeTmpl.Execute(buf, int16(size.Width), renderHeight)
 
-rendered:
+	// for inline auto-size, use content height instead of full terminal height
+	if a.inline && a.viewHeight == 0 {
+		if h := buf.ContentHeight(); h > 0 {
+			renderHeight = int16(h)
+		}
+	}
 
 	// apply layer cursor if one was set during template render
 	if a.activeLayer != nil {

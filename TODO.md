@@ -15,27 +15,10 @@ we need a nice solution to the pointer/value binding issue
 - [ ] Serialisable views: serialise template tree for dev tooling — live inspector, visual debugger, hot style tweaking, record/replay for test snapshots. Connect to a running app over a socket, inspect the Op tree, tweak and push back.
 
 
+forms
+
 
 ## random ideas
-
-
-Emergent over prescribed aesthetics.
-Expose state and inner workings.
-Dense, not sparse.
-Explicit is better than implicit.
-Engineered for human vision and perception.
-Regiment functionalism.
-Performance is design.
-Verbosity over opacity.
-Ignore design trends. Timeless and unfashionable.
-Flat, not hierarchical.
-Diametrically opposite of minimalism, as complex as it needs to be.
-Driven by objective reasoning and common sense.
-Don't infantilize users.
-
-Design philosophy: 
-- Design for the user, not the designer.
-
 
 
 

@@ -48,6 +48,11 @@ func (b *Buffer) Height() int {
 	return b.height
 }
 
+// ContentHeight returns the number of rows that have been written to.
+func (b *Buffer) ContentHeight() int {
+	return b.dirtyMaxY + 1
+}
+
 // Size returns the buffer dimensions.
 func (b *Buffer) Size() (width, height int) {
 	return b.width, b.height
@@ -583,22 +588,22 @@ func (b *Buffer) VLine(x, y, length int, r rune, style Style) {
 
 // Box drawing characters for borders.
 const (
-	BoxHorizontal        = '─'
-	BoxVertical          = '│'
-	BoxTopLeft           = '┌'
-	BoxTopRight          = '┐'
-	BoxBottomLeft        = '└'
-	BoxBottomRight       = '┘'
-	BoxRoundedTopLeft    = '╭'
-	BoxRoundedTopRight   = '╮'
-	BoxRoundedBottomLeft = '╰'
+	BoxHorizontal         = '─'
+	BoxVertical           = '│'
+	BoxTopLeft            = '┌'
+	BoxTopRight           = '┐'
+	BoxBottomLeft         = '└'
+	BoxBottomRight        = '┘'
+	BoxRoundedTopLeft     = '╭'
+	BoxRoundedTopRight    = '╮'
+	BoxRoundedBottomLeft  = '╰'
 	BoxRoundedBottomRight = '╯'
-	BoxDoubleHorizontal  = '═'
-	BoxDoubleVertical    = '║'
-	BoxDoubleTopLeft     = '╔'
-	BoxDoubleTopRight    = '╗'
-	BoxDoubleBottomLeft  = '╚'
-	BoxDoubleBottomRight = '╝'
+	BoxDoubleHorizontal   = '═'
+	BoxDoubleVertical     = '║'
+	BoxDoubleTopLeft      = '╔'
+	BoxDoubleTopRight     = '╗'
+	BoxDoubleBottomLeft   = '╚'
+	BoxDoubleBottomRight  = '╝'
 )
 
 // Box junction characters for merged borders
