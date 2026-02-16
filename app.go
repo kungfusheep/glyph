@@ -97,7 +97,7 @@ func NewApp() (*App, error) {
 
 	router := riffkey.NewRouter()
 	input := riffkey.NewInput(router)
-	reader := riffkey.NewReader(os.Stdin)
+	reader := riffkey.NewReader(os.Stdin).SetUTF8(true)
 
 	app := &App{
 		screen:     screen,
