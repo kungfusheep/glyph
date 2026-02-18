@@ -222,8 +222,11 @@ func (s Style) Capitalize() Style {
 	return s
 }
 
+// Margin sets uniform margin on all sides.
 func (s Style) Margin(all int16) Style            { s.margin = [4]int16{all, all, all, all}; return s }
+// MarginVH sets vertical and horizontal margin.
 func (s Style) MarginVH(v, h int16) Style         { s.margin = [4]int16{v, h, v, h}; return s }
+// MarginTRBL sets individual margins for top, right, bottom, left.
 func (s Style) MarginTRBL(t, r, b, l int16) Style { s.margin = [4]int16{t, r, b, l}; return s }
 
 // Equal returns true if two styles are equal.

@@ -99,6 +99,7 @@ func ParseFzfQuery(raw string) FzfQuery {
 	return q
 }
 
+// Empty reports whether the query has no terms.
 func (q *FzfQuery) Empty() bool {
 	return len(q.groups) == 0
 }

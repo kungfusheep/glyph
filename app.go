@@ -124,6 +124,7 @@ func NewInlineApp() (*App, error) {
 	return app, nil
 }
 
+// Ref provides access to the component for external references.
 func (a *App) Ref(f func(*App)) *App { f(a); return a }
 
 // ClearOnExit sets whether the inline app should clear its content on exit.
@@ -315,6 +316,7 @@ func (a *App) View(name string, view any) *ViewBuilder {
 	}
 }
 
+// Ref provides access to the component for external references.
 func (vb *ViewBuilder) Ref(f func(*ViewBuilder)) *ViewBuilder { f(vb); return vb }
 
 // NoCounts disables vim-style count prefixes (e.g., 5j) for this view.

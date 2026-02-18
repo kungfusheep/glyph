@@ -115,16 +115,19 @@ func (fl *FilterListC[T]) Title(t string) *FilterListC[T] {
 	return fl
 }
 
+// Margin sets uniform margin on all sides.
 func (fl *FilterListC[T]) Margin(all int16) *FilterListC[T] {
 	fl.margin = [4]int16{all, all, all, all}
 	return fl
 }
 
+// MarginVH sets vertical and horizontal margin.
 func (fl *FilterListC[T]) MarginVH(v, h int16) *FilterListC[T] {
 	fl.margin = [4]int16{v, h, v, h}
 	return fl
 }
 
+// MarginTRBL sets individual margins for top, right, bottom, left.
 func (fl *FilterListC[T]) MarginTRBL(t, r, b, l int16) *FilterListC[T] {
 	fl.margin = [4]int16{t, r, b, l}
 	return fl

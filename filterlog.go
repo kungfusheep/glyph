@@ -122,16 +122,19 @@ func (fl *FilterLogC) Grow(g float32) *FilterLogC {
 	return fl
 }
 
+// Margin sets uniform margin on all sides.
 func (fl *FilterLogC) Margin(all int16) *FilterLogC {
 	fl.margin = [4]int16{all, all, all, all}
 	return fl
 }
 
+// MarginVH sets vertical and horizontal margin.
 func (fl *FilterLogC) MarginVH(v, h int16) *FilterLogC {
 	fl.margin = [4]int16{v, h, v, h}
 	return fl
 }
 
+// MarginTRBL sets individual margins for top, right, bottom, left.
 func (fl *FilterLogC) MarginTRBL(t, r, b, l int16) *FilterLogC {
 	fl.margin = [4]int16{t, r, b, l}
 	return fl

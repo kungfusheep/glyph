@@ -27,10 +27,10 @@ type FlexNode struct {
 	W, H int16
 
 	// Layout configuration
-	layout Layout    // nil = no layout (leaf node)
-	gap    int8      // gap between children
-	hPad   int8      // horizontal padding
-	vPad   int8      // vertical padding
+	layout Layout // nil = no layout (leaf node)
+	gap    int8   // gap between children
+	hPad   int8   // horizontal padding
+	vPad   int8   // vertical padding
 	border BorderStyle
 
 	// Content (for leaf nodes)
@@ -69,6 +69,7 @@ type VerticalLayout struct {
 	TopPad int8
 }
 
+// DistributeWidths allocates widths to children based on flex grow factors.
 func (l VerticalLayout) DistributeWidths(node *FlexNode) {
 	availableW := node.W - int16(l.HPad)*2
 	availableH := node.H
@@ -101,6 +102,7 @@ func (l VerticalLayout) DistributeWidths(node *FlexNode) {
 	}
 }
 
+// LayoutChildren positions children vertically within the available space.
 func (l VerticalLayout) LayoutChildren(node *FlexNode) {
 	// Child positions are RELATIVE to the content area (inside border/padding)
 	// Border offset is applied during draw, not here
@@ -171,11 +173,12 @@ func (l VerticalLayout) LayoutChildren(node *FlexNode) {
 
 // HorizontalLayout arranges children horizontally.
 type HorizontalLayout struct {
-	Gap    int8
-	VPad   int8 // vertical padding
+	Gap     int8
+	VPad    int8 // vertical padding
 	LeftPad int8
 }
 
+// DistributeWidths allocates widths to children based on flex grow factors.
 func (l HorizontalLayout) DistributeWidths(node *FlexNode) {
 	availableW := node.W - int16(l.LeftPad)*2
 	availableH := node.H
@@ -224,6 +227,7 @@ func (l HorizontalLayout) DistributeWidths(node *FlexNode) {
 	}
 }
 
+// LayoutChildren positions children horizontally within the available space.
 func (l HorizontalLayout) LayoutChildren(node *FlexNode) {
 	// Child positions are RELATIVE to the content area (inside border/padding)
 	// Border offset is applied during draw, not here
@@ -592,59 +596,71 @@ func FLEDs(states ...bool) *FlexNode {
 
 // Chainable modifiers
 
+// Ref provides access to the node for external references.
 func (n *FlexNode) Ref(f func(*FlexNode)) *FlexNode { f(n); return n }
 
+// Gap sets the spacing between children.
 func (n *FlexNode) Gap(g int8) *FlexNode {
 	n.gap = g
 	return n
 }
 
+// Pad sets horizontal and vertical padding.
 func (n *FlexNode) Pad(h, v int8) *FlexNode {
 	n.hPad = h
 	n.vPad = v
 	return n
 }
 
+// Border sets the border style.
 func (n *FlexNode) Border(b BorderStyle) *FlexNode {
 	n.border = b
 	return n
 }
 
+// Width sets a fixed width.
 func (n *FlexNode) Width(w int16) *FlexNode {
 	n.explicitW = w
 	return n
 }
 
+// Height sets a fixed height.
 func (n *FlexNode) Height(h int16) *FlexNode {
 	n.explicitH = h
 	return n
 }
 
+// Width sets a fixed width.
 func (n *FlexNode) MinWidth(w int16) *FlexNode {
 	n.minW = w
 	return n
 }
 
+// Height sets a fixed height.
 func (n *FlexNode) MinHeight(h int16) *FlexNode {
 	n.minH = h
 	return n
 }
 
+// Percent sets width as a percentage of the parent.
 func (n *FlexNode) Percent(p float32) *FlexNode {
 	n.percentWidth = p
 	return n
 }
 
+// Grow sets the flex grow factor.
 func (n *FlexNode) Grow(factor float32) *FlexNode {
 	n.flexGrow = factor
 	return n
 }
 
+// Style sets the component style.
 func (n *FlexNode) Style(s Style) *FlexNode {
 	n.style = s
 	return n
 }
 
+// Bold enables bold text.
 func (n *FlexNode) Bold() *FlexNode {
 	n.style.Attr = n.style.Attr.With(AttrBold)
 	return n
