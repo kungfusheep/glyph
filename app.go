@@ -97,7 +97,7 @@ func NewApp() (*App, error) {
 
 	router := riffkey.NewRouter()
 	input := riffkey.NewInput(router)
-	reader := riffkey.NewReader(os.Stdin)
+	reader := riffkey.NewReader(os.Stdin).SetUTF8(true)
 
 	app := &App{
 		screen:     screen,
@@ -260,10 +260,12 @@ func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
 		}
 		// route unmatched keys to focused component
 		router.HandleUnmatched(tmpl.pendingFocusManager.HandleKey)
+		router.NoCounts()
 	} else if tmpl.pendingTIB != nil {
 		th := riffkey.NewTextHandler(tmpl.pendingTIB.value, tmpl.pendingTIB.cursor)
 		th.OnChange = tmpl.pendingTIB.onChange
 		router.HandleUnmatched(th.HandleKey)
+		router.NoCounts()
 	}
 	// wire Log invalidation
 	for _, lv := range tmpl.pendingLogs {
@@ -443,7 +445,7 @@ func (a *App) HandleNamed(name, pattern string, handler func(riffkey.Match)) *Ap
 }
 
 // BindField routes unmatched keys to a text input field.
-func (a *App) BindField(f *Field) *App {
+func (a *App) BindField(f *InputState) *App {
 	a.router.TextInput(&f.Value, &f.Cursor)
 	return a
 }
@@ -575,34 +577,41 @@ func (a *App) render() {
 	if a.inline && a.viewHeight > 0 {
 		renderHeight = a.viewHeight
 	} else if a.inline {
-		renderHeight = 1 // Default to 1 line for inline
+		// auto-size: give layout full terminal height, then trim to content
+		renderHeight = int16(size.Height)
 	}
 
 	// Priority: pushed views > current view > base template
+	var activeTmpl *Template
 	if len(a.viewStack) > 0 {
 		topView := a.viewStack[len(a.viewStack)-1]
 		if a.viewTemplates != nil {
 			if tmpl, ok := a.viewTemplates[topView]; ok {
-				tmpl.Execute(buf, int16(size.Width), renderHeight)
-				goto rendered
+				activeTmpl = tmpl
 			}
 		}
 	}
-
-	// No pushed view - use base template
-	if a.currentView != "" && a.viewTemplates != nil {
-		if tmpl, ok := a.viewTemplates[a.currentView]; ok {
-			tmpl.Execute(buf, int16(size.Width), renderHeight)
+	if activeTmpl == nil {
+		if a.currentView != "" && a.viewTemplates != nil {
+			if tmpl, ok := a.viewTemplates[a.currentView]; ok {
+				activeTmpl = tmpl
+			} else {
+				return // View not found
+			}
+		} else if a.template != nil {
+			activeTmpl = a.template
 		} else {
-			return // View not found
+			return // No view set
 		}
-	} else if a.template != nil {
-		a.template.Execute(buf, int16(size.Width), renderHeight)
-	} else {
-		return // No view set
 	}
+	activeTmpl.Execute(buf, int16(size.Width), renderHeight)
 
-rendered:
+	// for inline auto-size, use content height instead of full terminal height
+	if a.inline && a.viewHeight == 0 {
+		if h := buf.ContentHeight(); h > 0 {
+			renderHeight = int16(h)
+		}
+	}
 
 	// apply layer cursor if one was set during template render
 	if a.activeLayer != nil {

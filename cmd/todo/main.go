@@ -10,7 +10,7 @@ type Todo struct {
 func main() {
 
 	todos := []Todo{{"Learn forme", true}, {"Build something", false}}
-	var input Field
+	var input InputState
 
 	app, _ := NewApp()
 	app.SetView(

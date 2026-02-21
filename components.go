@@ -2281,7 +2281,7 @@ func (c *CheckListC[T]) toSelectionList() *SelectionList {
 
 // InputC is a text input with internal state management.
 type InputC struct {
-	field       Field
+	field       InputState
 	placeholder string
 	width       int
 	mask        rune
@@ -2398,8 +2398,8 @@ func (i *InputC) Clear() {
 	i.field.Clear()
 }
 
-// Field returns a pointer to the internal field (for TextInput compatibility).
-func (i *InputC) Field() *Field {
+// State returns a pointer to the internal input state (for TextInput compatibility).
+func (i *InputC) State() *InputState {
 	return &i.field
 }
 

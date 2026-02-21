@@ -48,6 +48,11 @@ func (b *Buffer) Height() int {
 	return b.height
 }
 
+// ContentHeight returns the number of rows that have been written to.
+func (b *Buffer) ContentHeight() int {
+	return b.dirtyMaxY + 1
+}
+
 // Size returns the buffer dimensions.
 func (b *Buffer) Size() (width, height int) {
 	return b.width, b.height
@@ -485,7 +490,30 @@ func (b *Buffer) ClearLineWithStyle(y int, style Style) {
 }
 
 // FillRect fills a rectangular region with the given cell.
+// Uses direct slice writes (no border merge) for non-border cells,
+// falls back to Set() only when the cell is a border character.
 func (b *Buffer) FillRect(x, y, width, height int, c Cell) {
+	// fast path: non-border fills bypass Set() entirely
+	if c.Rune < boxDrawingMin || c.Rune > boxDrawingMax {
+		for dy := 0; dy < height; dy++ {
+			row := y + dy
+			if row < 0 || row >= b.height {
+				continue
+			}
+			if row > b.dirtyMaxY {
+				b.dirtyMaxY = row
+			}
+			b.dirtyRows[row] = true
+			base := row * b.width
+			for dx := 0; dx < width; dx++ {
+				col := x + dx
+				if col >= 0 && col < b.width {
+					b.cells[base+col] = c
+				}
+			}
+		}
+		return
+	}
 	for dy := 0; dy < height; dy++ {
 		for dx := 0; dx < width; dx++ {
 			b.Set(x+dx, y+dy, c)
@@ -560,22 +588,22 @@ func (b *Buffer) VLine(x, y, length int, r rune, style Style) {
 
 // Box drawing characters for borders.
 const (
-	BoxHorizontal        = '─'
-	BoxVertical          = '│'
-	BoxTopLeft           = '┌'
-	BoxTopRight          = '┐'
-	BoxBottomLeft        = '└'
-	BoxBottomRight       = '┘'
-	BoxRoundedTopLeft    = '╭'
-	BoxRoundedTopRight   = '╮'
-	BoxRoundedBottomLeft = '╰'
+	BoxHorizontal         = '─'
+	BoxVertical           = '│'
+	BoxTopLeft            = '┌'
+	BoxTopRight           = '┐'
+	BoxBottomLeft         = '└'
+	BoxBottomRight        = '┘'
+	BoxRoundedTopLeft     = '╭'
+	BoxRoundedTopRight    = '╮'
+	BoxRoundedBottomLeft  = '╰'
 	BoxRoundedBottomRight = '╯'
-	BoxDoubleHorizontal  = '═'
-	BoxDoubleVertical    = '║'
-	BoxDoubleTopLeft     = '╔'
-	BoxDoubleTopRight    = '╗'
-	BoxDoubleBottomLeft  = '╚'
-	BoxDoubleBottomRight = '╝'
+	BoxDoubleHorizontal   = '═'
+	BoxDoubleVertical     = '║'
+	BoxDoubleTopLeft      = '╔'
+	BoxDoubleTopRight     = '╗'
+	BoxDoubleBottomLeft   = '╚'
+	BoxDoubleBottomRight  = '╝'
 )
 
 // Box junction characters for merged borders
