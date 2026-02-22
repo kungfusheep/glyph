@@ -1,6 +1,7 @@
-package forme
+package forme_test
 
 import (
+	. "github.com/kungfusheep/forme"
 	"os"
 	"strings"
 	"time"
@@ -715,7 +716,7 @@ func ExampleDefine() {
 	})
 }
 
-// Focus cycling.
+// Focu cycling.
 // FocusManager coordinates focus between multiple inputs. Tab/Shift-Tab cycles through ManagedBy components.
 func ExampleFocusManager() {
 	fm := NewFocusManager()

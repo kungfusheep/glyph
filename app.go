@@ -250,17 +250,66 @@ func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
 		}
 	}
 	// focus manager takes precedence over single pendingTIB
-	if tmpl.pendingFocusManager != nil {
-		// wire focus manager bindings (Tab/Shift-Tab)
-		for _, b := range tmpl.pendingFocusManager.bindings() {
+	if fm := tmpl.pendingFocusManager; fm != nil {
+		// wire focus manager bindings (Tab/Shift-Tab) on the base router
+		for _, b := range fm.bindings() {
 			if h, ok := b.handler.(func(riffkey.Match)); ok {
 				pattern := b.pattern
 				router.Handle(pattern, func(m riffkey.Match) { h(m); a.RequestRender() })
 			}
 		}
-		// route unmatched keys to focused component
-		router.HandleUnmatched(tmpl.pendingFocusManager.HandleKey)
-		router.NoCounts()
+
+		// build a sub-router per focusable item.
+		// each gets pushed on focus and popped on blur.
+		fm.push = func(r *riffkey.Router) { a.Push(r) }
+		fm.pop = func() { a.Pop() }
+		fm.routers = make([]*riffkey.Router, len(fm.items))
+
+		for i, item := range fm.items {
+			sub := riffkey.NewRouter()
+
+			// common: Tab/Shift-Tab to cycle, Escape to blur
+			sub.Handle(fm.nextKey, func(_ riffkey.Match) { fm.Next(); a.RequestRender() })
+			if fm.prevKey != "" {
+				sub.Handle(fm.prevKey, func(_ riffkey.Match) { fm.Prev(); a.RequestRender() })
+			}
+			sub.Handle("<Escape>", func(_ riffkey.Match) { fm.BlurCurrent(); a.RequestRender() })
+
+			// sub-bindings (e.g., Enter for form submit)
+			for _, sb := range fm.subBindings {
+				switch h := sb.handler.(type) {
+				case func():
+					pattern := sb.pattern
+					sub.Handle(pattern, func(_ riffkey.Match) { h(); a.RequestRender() })
+				case func(riffkey.Match):
+					pattern := sb.pattern
+					sub.Handle(pattern, func(m riffkey.Match) { h(m); a.RequestRender() })
+				}
+			}
+
+			// per-item bindings (e.g., j/k for Radio, Space for Checkbox)
+			for _, cb := range item.bindings {
+				switch h := cb.handler.(type) {
+				case func():
+					pattern := cb.pattern
+					sub.Handle(pattern, func(_ riffkey.Match) { h(); a.RequestRender() })
+				case func(riffkey.Match):
+					pattern := cb.pattern
+					sub.Handle(pattern, func(m riffkey.Match) { h(m); a.RequestRender() })
+				}
+			}
+
+			if item.tib != nil {
+				// text input: route unmatched keys to TextHandler
+				th := fm.handlers[i]
+				sub.HandleUnmatched(th.HandleKey)
+				sub.NoCounts()
+			}
+
+			fm.routers[i] = sub
+		}
+
+		fm.initialPush()
 	} else if tmpl.pendingTIB != nil {
 		th := riffkey.NewTextHandler(tmpl.pendingTIB.value, tmpl.pendingTIB.cursor)
 		th.OnChange = tmpl.pendingTIB.onChange

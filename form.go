@@ -1,9 +1,17 @@
 package forme
 
+// validatable is implemented by controls that support validation.
+type validatable interface {
+	Err() string
+	runValidation()
+}
+
 // FormField pairs a label with an input control.
 type FormField struct {
 	label   string
 	control any
+	err     string // validation error for this field
+	focused bool
 }
 
 // Field creates a form field pairing a label with any control component.
@@ -29,6 +37,7 @@ type FormC struct {
 	labelStyle Style
 	grow       float32
 	margin     [4]int16
+	onSubmit   func()
 }
 
 // Form creates a form from labeled fields.
@@ -47,17 +56,55 @@ func Form(fields ...FormField) *FormC {
 		}
 	}
 
-	// auto-wire focusable controls
-	for _, ff := range fields {
+	// auto-wire focusable controls and blur validation
+	var focusableFields []*FormField // maps FM index → FormField
+	for idx := range fields {
+		ff := &f.fields[idx]
 		if fc, ok := ff.control.(focusable); ok {
-			// use ManagedBy if it's an InputC (sets up the text input binding)
-			if inp, ok := ff.control.(*InputC); ok {
-				inp.ManagedBy(f.fm)
-			} else {
+			fieldRef := ff
+			focusableFields = append(focusableFields, fieldRef)
+			switch ctrl := ff.control.(type) {
+			case *InputC:
+				ctrl.ManagedBy(f.fm)
+				ctrl.onBlur = func() {
+					fieldRef.err = ctrl.Err()
+				}
+			case *CheckboxC:
+				f.fm.Register(fc)
+				ctrl.onBlur = func() {
+					fieldRef.err = ctrl.Err()
+				}
+				f.fm.ItemBindings(
+					binding{pattern: "<Space>", handler: func() { ctrl.Toggle() }},
+				)
+			case *RadioC:
+				f.fm.Register(fc)
+				f.fm.ItemBindings(
+					binding{pattern: "j", handler: func() { ctrl.Next() }},
+					binding{pattern: "k", handler: func() { ctrl.Prev() }},
+				)
+			default:
 				f.fm.Register(fc)
 			}
 		}
 	}
+
+	// first focusable field starts focused
+	if len(focusableFields) > 0 {
+		focusableFields[0].focused = true
+	}
+
+	// track focus changes to update visual indicator
+	f.fm.OnChange(func(idx int) {
+		for i, ff := range focusableFields {
+			ff.focused = (i == idx)
+		}
+	})
+	f.fm.OnBlur(func() {
+		for _, ff := range focusableFields {
+			ff.focused = false
+		}
+	})
 
 	return f
 }
@@ -104,6 +151,13 @@ func (f *FormC) OnFocusChange(fn func(index int)) *FormC {
 	return f
 }
 
+// OnSubmit sets a callback that fires when Enter is pressed.
+// Useful for wiring form submission without a separate app-level binding.
+func (f *FormC) OnSubmit(fn func()) *FormC {
+	f.onSubmit = fn
+	return f
+}
+
 // Grow sets the flex grow factor.
 func (f *FormC) Grow(g float32) *FormC {
 	f.grow = g
@@ -133,15 +187,45 @@ func (f *FormC) FocusManager() *FocusManager {
 	return f.fm
 }
 
-// toTemplate builds the VBox of HBox rows.
+// ValidateAll runs validation on all fields that have VOnSubmit set.
+// Returns true if all fields are valid.
+func (f *FormC) ValidateAll() bool {
+	valid := true
+	for i := range f.fields {
+		ff := &f.fields[i]
+		if v, ok := ff.control.(validatable); ok {
+			v.runValidation()
+			ff.err = v.Err()
+			if ff.err != "" {
+				valid = false
+			}
+		}
+	}
+	return valid
+}
+
+// toTemplate builds the VBox of HBox rows with optional error display.
 func (f *FormC) toTemplate() any {
-	rows := make([]any, len(f.fields))
-	for i, ff := range f.fields {
+	rows := make([]any, 0, len(f.fields)*2)
+	for i := range f.fields {
+		ff := &f.fields[i]
 		ls := f.labelStyle
 		ls.Align = AlignRight
 		ls = ls.MarginTRBL(0, 1, 0, 0)
+
 		label := Text(ff.label + ":").Width(f.labelWidth).Style(ls)
-		rows[i] = HBox(label, ff.control)
+		indicator := If(&ff.focused).
+			Then(Text("▸").Width(1)).
+			Else(Text("").Width(1))
+		rows = append(rows, HBox(indicator, label, ff.control))
+
+		// add error display if the control supports validation
+		if _, ok := ff.control.(validatable); ok {
+			spacer := Text("").Width(f.labelWidth+2).MarginTRBL(0, 1, 0, 0)
+			rows = append(rows, If(&ff.err).Then(
+				HBox(spacer, Text(&ff.err).FG(Red)),
+			))
+		}
 	}
 
 	box := VBox.Gap(f.gap)
@@ -154,7 +238,13 @@ func (f *FormC) toTemplate() any {
 	return box(rows...)
 }
 
-// bindings relays the FocusManager's focus-cycling bindings.
+// bindings returns Form-specific bindings only.
+// Tab/Shift-Tab are handled by the FocusManager in wireBindings.
 func (f *FormC) bindings() []binding {
-	return f.fm.bindings()
+	if f.onSubmit != nil {
+		enterBinding := binding{pattern: "<Enter>", handler: f.onSubmit}
+		f.fm.subBindings = append(f.fm.subBindings, enterBinding)
+		return []binding{enterBinding}
+	}
+	return nil
 }

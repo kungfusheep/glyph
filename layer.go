@@ -32,6 +32,10 @@ type Layer struct {
 	// Width changes always trigger a re-render (text wrapping changes).
 	// Height changes trigger a re-render if content height depends on viewport.
 	Render func()
+
+	// AlwaysRender causes Render to fire every frame, not just on width changes.
+	// Used by components that track external pointer mutations (e.g. TextViewC).
+	AlwaysRender bool
 }
 
 // NewLayer creates a new empty layer.
@@ -92,8 +96,7 @@ func (l *Layer) NeedsRender() bool {
 	if l.Render == nil {
 		return false
 	}
-	// first render, or width changed (text wrapping)
-	return l.lastRenderWidth == 0 || l.lastRenderWidth != l.viewWidth
+	return l.AlwaysRender || l.lastRenderWidth == 0 || l.lastRenderWidth != l.viewWidth
 }
 
 // prepare ensures the layer is ready to blit. Called by the framework before

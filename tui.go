@@ -223,9 +223,11 @@ func (s Style) Capitalize() Style {
 }
 
 // Margin sets uniform margin on all sides.
-func (s Style) Margin(all int16) Style            { s.margin = [4]int16{all, all, all, all}; return s }
+func (s Style) Margin(all int16) Style { s.margin = [4]int16{all, all, all, all}; return s }
+
 // MarginVH sets vertical and horizontal margin.
-func (s Style) MarginVH(v, h int16) Style         { s.margin = [4]int16{v, h, v, h}; return s }
+func (s Style) MarginVH(v, h int16) Style { s.margin = [4]int16{v, h, v, h}; return s }
+
 // MarginTRBL sets individual margins for top, right, bottom, left.
 func (s Style) MarginTRBL(t, r, b, l int16) Style { s.margin = [4]int16{t, r, b, l}; return s }
 
@@ -633,6 +635,7 @@ type SelectionList struct {
 	SelectedStyle Style  // style for selected row (e.g., background color)
 	len           int    // cached length for bounds checking
 	offset        int    // scroll offset for windowing
+	onMove        func() // called after selection index changes
 }
 
 // ensureVisible adjusts scroll offset so selected item is visible.
@@ -654,22 +657,31 @@ func (s *SelectionList) ensureVisible() {
 // Up moves selection up by one. Safe to use directly with app.Handle.
 func (s *SelectionList) Up(m any) {
 	if s.Selected != nil && *s.Selected > 0 {
+		old := *s.Selected
 		*s.Selected--
 		s.ensureVisible()
+		if *s.Selected != old && s.onMove != nil {
+			s.onMove()
+		}
 	}
 }
 
 // Down moves selection down by one. Safe to use directly with app.Handle.
 func (s *SelectionList) Down(m any) {
 	if s.Selected != nil && s.len > 0 && *s.Selected < s.len-1 {
+		old := *s.Selected
 		*s.Selected++
 		s.ensureVisible()
+		if *s.Selected != old && s.onMove != nil {
+			s.onMove()
+		}
 	}
 }
 
 // PageUp moves selection up by page size (MaxVisible or 10).
 func (s *SelectionList) PageUp(m any) {
 	if s.Selected != nil {
+		old := *s.Selected
 		pageSize := 10
 		if s.MaxVisible > 0 {
 			pageSize = s.MaxVisible
@@ -679,12 +691,16 @@ func (s *SelectionList) PageUp(m any) {
 			*s.Selected = 0
 		}
 		s.ensureVisible()
+		if *s.Selected != old && s.onMove != nil {
+			s.onMove()
+		}
 	}
 }
 
 // PageDown moves selection down by page size (MaxVisible or 10).
 func (s *SelectionList) PageDown(m any) {
 	if s.Selected != nil && s.len > 0 {
+		old := *s.Selected
 		pageSize := 10
 		if s.MaxVisible > 0 {
 			pageSize = s.MaxVisible
@@ -694,22 +710,33 @@ func (s *SelectionList) PageDown(m any) {
 			*s.Selected = s.len - 1
 		}
 		s.ensureVisible()
+		if *s.Selected != old && s.onMove != nil {
+			s.onMove()
+		}
 	}
 }
 
 // First moves selection to the first item.
 func (s *SelectionList) First(m any) {
 	if s.Selected != nil {
+		old := *s.Selected
 		*s.Selected = 0
 		s.ensureVisible()
+		if *s.Selected != old && s.onMove != nil {
+			s.onMove()
+		}
 	}
 }
 
 // Last moves selection to the last item.
 func (s *SelectionList) Last(m any) {
 	if s.Selected != nil && s.len > 0 {
+		old := *s.Selected
 		*s.Selected = s.len - 1
 		s.ensureVisible()
+		if *s.Selected != old && s.onMove != nil {
+			s.onMove()
+		}
 	}
 }
 

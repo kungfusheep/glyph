@@ -1079,6 +1079,7 @@ type ListC[T any] struct {
 	selected         *int
 	internalSel      int // used when no external selection provided
 	render           func(*T) any
+	onSelect         func(*T)
 	marker           string
 	markerStyle      Style
 	maxVisible       int
@@ -1166,6 +1167,12 @@ func (l *ListC[T]) Render(fn func(*T) any) *ListC[T] {
 	return l
 }
 
+// OnSelect registers a callback that fires when the selection changes.
+func (l *ListC[T]) OnSelect(fn func(*T)) *ListC[T] {
+	l.onSelect = fn
+	return l
+}
+
 // Marker sets the selection marker (default "> ").
 func (l *ListC[T]) Marker(m string) *ListC[T] {
 	l.marker = m
@@ -1218,16 +1225,29 @@ func (l *ListC[T]) MarginTRBL(t, r, b, li int16) *ListC[T] {
 // Same instance is returned for both template compilation and method calls.
 func (l *ListC[T]) toSelectionList() *SelectionList {
 	if l.cached == nil {
-		l.cached = &SelectionList{
+		sl := &SelectionList{
 			Items:         l.items,
 			Selected:      l.selected,
-			Render:        l.render,
 			Marker:        l.marker,
 			MarkerStyle:   l.markerStyle,
 			MaxVisible:    l.maxVisible,
 			Style:         l.style,
 			SelectedStyle: l.selectedStyle,
 		}
+		if l.render != nil {
+			sl.Render = l.render
+		} else {
+			sl.Render = func(item *T) any { return Text(item) }
+		}
+		if l.onSelect != nil {
+			fn := l.onSelect
+			sl.onMove = func() {
+				if item := l.Selected(); item != nil {
+					fn(item)
+				}
+			}
+		}
+		l.cached = sl
 	}
 	return l.cached
 }
@@ -1790,6 +1810,15 @@ type CheckboxC struct {
 	unchecked        string
 	style            Style
 	declaredBindings []binding
+
+	// focus
+	focused bool
+	onBlur  func()
+
+	// validation
+	validator  BoolValidator
+	validateOn ValidateOn
+	err        string
 }
 
 // Checkbox creates a checkbox bound to a bool pointer.
@@ -1856,9 +1885,60 @@ func (c *CheckboxC) BindToggle(key string) *CheckboxC {
 
 func (c *CheckboxC) bindings() []binding { return c.declaredBindings }
 
+// focusBinding implements focusable. Checkbox has no text input.
+func (c *CheckboxC) focusBinding() *textInputBinding { return nil }
+
+// setFocused implements focusable.
+func (c *CheckboxC) setFocused(focused bool) {
+	wasFocused := c.focused
+	c.focused = focused
+	if wasFocused && !focused {
+		if c.validateOn&VOnBlur != 0 {
+			c.runValidation()
+		}
+		if c.onBlur != nil {
+			c.onBlur()
+		}
+	}
+}
+
+// Focused returns whether this checkbox currently has focus.
+func (c *CheckboxC) Focused() bool { return c.focused }
+
+// Validate sets a validation function and when it runs.
+// If when is omitted, defaults to VOnBlur|VOnSubmit.
+func (c *CheckboxC) Validate(fn BoolValidator, when ...ValidateOn) *CheckboxC {
+	c.validator = fn
+	if len(when) > 0 {
+		c.validateOn = when[0]
+	} else {
+		c.validateOn = VOnBlur | VOnSubmit
+	}
+	return c
+}
+
+// Err returns the current validation error message, or empty string if valid.
+func (c *CheckboxC) Err() string {
+	return c.err
+}
+
+// runValidation runs the validator and stores the result.
+func (c *CheckboxC) runValidation() {
+	if c.validator != nil {
+		if err := c.validator(*c.checked); err != nil {
+			c.err = err.Error()
+		} else {
+			c.err = ""
+		}
+	}
+}
+
 // Toggle flips the checked state.
 func (c *CheckboxC) Toggle() {
 	*c.checked = !*c.checked
+	if c.validateOn&VOnChange != 0 {
+		c.runValidation()
+	}
 }
 
 // Checked returns the current state.
@@ -1877,6 +1957,10 @@ type RadioC struct {
 	gap              int8
 	horizontal       bool
 	declaredBindings []binding
+
+	// focus
+	focused bool
+	onBlur  func()
 }
 
 // Radio creates a radio group with static options.
@@ -1955,6 +2039,23 @@ func (r *RadioC) BindNav(next, prev string) *RadioC {
 }
 
 func (r *RadioC) bindings() []binding { return r.declaredBindings }
+
+// focusBinding implements focusable. Radio has no text input.
+func (r *RadioC) focusBinding() *textInputBinding { return nil }
+
+// setFocused implements focusable.
+func (r *RadioC) setFocused(focused bool) {
+	wasFocused := r.focused
+	r.focused = focused
+	if wasFocused && !focused {
+		if r.onBlur != nil {
+			r.onBlur()
+		}
+	}
+}
+
+// Focused returns whether this radio group currently has focus.
+func (r *RadioC) Focused() bool { return r.focused }
 
 // Next moves selection to next option.
 func (r *RadioC) Next() {
@@ -2288,14 +2389,59 @@ type InputC struct {
 	style       Style
 	declaredTIB *textInputBinding
 
+	// value binding
+	boundValue *string
+
+	// validation
+	validator  StringValidator
+	validateOn ValidateOn
+	err        string
+
 	// focus management
 	focused bool
 	manager *FocusManager
+
+	// blur callback (wired by Form for VOnBlur validation)
+	onBlur func()
 }
 
 // Input creates a text input with internal state.
-func Input() *InputC {
-	return &InputC{}
+// Optionally pass a *string to bind the input value to a variable.
+func Input(bind ...*string) *InputC {
+	i := &InputC{}
+	if len(bind) > 0 && bind[0] != nil {
+		i.boundValue = bind[0]
+		i.field.Value = *bind[0]
+	}
+	return i
+}
+
+// Validate sets a validation function and when it runs.
+// If when is omitted, defaults to VOnBlur|VOnSubmit.
+func (i *InputC) Validate(fn StringValidator, when ...ValidateOn) *InputC {
+	i.validator = fn
+	if len(when) > 0 {
+		i.validateOn = when[0]
+	} else {
+		i.validateOn = VOnBlur | VOnSubmit
+	}
+	return i
+}
+
+// Err returns the current validation error message, or empty string if valid.
+func (i *InputC) Err() string {
+	return i.err
+}
+
+// runValidation runs the validator and stores the result.
+func (i *InputC) runValidation() {
+	if i.validator != nil {
+		if err := i.validator(i.field.Value); err != nil {
+			i.err = err.Error()
+		} else {
+			i.err = ""
+		}
+	}
 }
 
 // Ref provides access to the component for external references.
@@ -2346,8 +2492,9 @@ func (i *InputC) MarginTRBL(t, r, b, l int16) *InputC {
 // Bind routes unmatched key input to this text field.
 func (i *InputC) Bind() *InputC {
 	i.declaredTIB = &textInputBinding{
-		value:  &i.field.Value,
-		cursor: &i.field.Cursor,
+		value:    &i.field.Value,
+		cursor:   &i.field.Cursor,
+		onChange: i.handleChange,
 	}
 	return i
 }
@@ -2360,8 +2507,9 @@ func (i *InputC) ManagedBy(fm *FocusManager) *InputC {
 	i.manager = fm
 	i.focused = false
 	i.declaredTIB = &textInputBinding{
-		value:  &i.field.Value,
-		cursor: &i.field.Cursor,
+		value:    &i.field.Value,
+		cursor:   &i.field.Cursor,
+		onChange: i.handleChange,
 	}
 	fm.Register(i)
 	return i
@@ -2374,7 +2522,29 @@ func (i *InputC) focusBinding() *textInputBinding {
 
 // setFocused implements focusable.
 func (i *InputC) setFocused(focused bool) {
+	wasFocused := i.focused
 	i.focused = focused
+	// blur: was focused, now not
+	if wasFocused && !focused {
+		if i.validateOn&VOnBlur != 0 {
+			i.runValidation()
+		}
+		if i.onBlur != nil {
+			i.onBlur()
+		}
+	}
+}
+
+// handleChange is called after every keystroke.
+func (i *InputC) handleChange(val string) {
+	// sync to bound value
+	if i.boundValue != nil {
+		*i.boundValue = val
+	}
+	// validate on change
+	if i.validateOn&VOnChange != 0 {
+		i.runValidation()
+	}
 }
 
 // Focused returns whether this input currently has focus.
