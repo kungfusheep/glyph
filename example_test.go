@@ -750,3 +750,49 @@ func ExampleTreeView() {
 func ExampleTextTransform() {
 	Text("hello world").Style(Style{Transform: TransformUppercase})
 }
+
+// Registration form.
+// Form arranges labeled fields with aligned labels and automatic focus management. Mix inputs, checkboxes and validators.
+func ExampleFormFn() {
+	var name, email, pass string
+	var terms bool
+
+	Form.LabelBold().Gap(1)(
+		Field("Name", Input(&name).Placeholder("Jane Doe")),
+		Field("Email", Input(&email).Placeholder("jane@example.com")),
+		Field("Password", Input(&pass).Placeholder("min 8 chars").Mask('*')),
+		Field("Terms", Checkbox(&terms, "I agree")),
+	)
+}
+
+// Submit handler.
+// Forward-declare the form variable so OnSubmit can reference the same instance.
+func ExampleFormFn_onSubmit() {
+	var name, email, pass string
+	var terms bool
+	var form *FormC
+
+	form = Form.LabelBold().OnSubmit(func() {
+		_ = form.ValidateAll()
+	})(
+		Field("Name", Input(&name).Validate(VRequired)),
+		Field("Email", Input(&email).Validate(VEmail)),
+		Field("Password", Input(&pass).Mask('*').Validate(VMinLen(8))),
+		Field("Terms", Checkbox(&terms, "I agree").Validate(VTrue)),
+	)
+	_ = form
+}
+
+// Mixed control types.
+// Inputs, checkboxes and radio groups all work as form fields with automatic focus cycling.
+func ExampleFormFn_mixedControls() {
+	var name string
+	var notify bool
+	var role int
+
+	Form.LabelBold().Gap(1)(
+		Field("Name", Input(&name).Placeholder("you")),
+		Field("Notify", Checkbox(&notify, "Send me updates")),
+		Field("Role", Radio(&role, "Viewer", "Editor", "Admin")),
+	)
+}
