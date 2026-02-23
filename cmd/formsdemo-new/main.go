@@ -13,21 +13,22 @@ func main() {
 	agree := false
 	status := "Tab: next | j/k: radio | Space: checkbox | Enter: submit"
 
-	form := Form(
-		Field("Name", Input(&name).Validate(VRequired, VOnBlur)),
-		Field("Email", Input(&email).Validate(VEmail, VOnBlur)),
-		Field("Role", Radio(&role, "Admin", "User", "Guest")),
-		Field("Terms", Checkbox(&agree, "I accept").Validate(VTrue, VOnSubmit)),
-	).LabelBold()
-
-	form.OnSubmit(func() {
+	var form *FormC
+	register := func() {
 		if form.ValidateAll() {
 			roles := []string{"Admin", "User", "Guest"}
 			status = fmt.Sprintf("Registered: %s <%s> as %s", name, email, roles[role])
 		} else {
 			status = "Please fix the errors above"
 		}
-	})
+	}
+
+	form = Form.LabelBold().OnSubmit(register)(
+		Field("Name", Input(&name).Validate(VRequired, VOnBlur)),
+		Field("Email", Input(&email).Validate(VEmail, VOnBlur)),
+		Field("Role", Radio(&role, "Admin", "User", "Guest")),
+		Field("Terms", Checkbox(&agree, "I accept").Validate(VTrue, VOnSubmit)),
+	)
 
 	app, err := NewApp()
 	if err != nil {

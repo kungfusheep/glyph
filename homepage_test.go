@@ -117,11 +117,7 @@ func TestHomepage_processMonitor(t *testing.T) {
 			Text("CPU"), Progress(&cpuPct).Width(30),
 			Text("Mem"), Progress(&memPct).Width(30),
 		),
-		AutoTable(&procs).
-			Columns("PID", "Command", "CPU", "Mem").
-			Column("CPU", Percent(1)).
-			Column("Mem", Percent(1)).
-			Sortable().Scrollable(20).BindVimNav(),
+		AutoTable(&procs).Sortable().Scrollable(20).BindVimNav(),
 	)
 }
 
@@ -186,10 +182,12 @@ func TestHomepage_formsWithValidation(t *testing.T) {
 	role := 0
 	agree := false
 
-	_ = Form(
+	register := func() {}
+
+	_ = Form.LabelBold().OnSubmit(register)(
 		Field("Name", Input(&name).Validate(VRequired, VOnBlur)),
 		Field("Email", Input(&email).Validate(VEmail, VOnBlur)),
 		Field("Role", Radio(&role, "Admin", "User", "Guest")),
 		Field("Terms", Checkbox(&agree, "I accept").Validate(VTrue, VOnSubmit)),
-	).LabelBold()
+	)
 }

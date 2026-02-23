@@ -4,7 +4,7 @@
 
 Declarative terminal UI for Go.
 
-![hero](./hero.gif)
+![hero](./assets/hero.gif)
 
 ```go
 VBox.Border(BorderDouble).Title("SYS").FitContent()(

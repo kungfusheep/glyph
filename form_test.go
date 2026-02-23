@@ -109,10 +109,10 @@ func TestFormCompilesWithValidation(t *testing.T) {
 	role := 0
 	agree := false
 
-	_ = Form(
+	_ = Form.LabelBold()(
 		Field("Name", Input(&name).Placeholder("name").Validate(VRequired, VOnBlur)),
 		Field("Email", Input(&email).Placeholder("email").Validate(VEmail, VOnBlur)),
 		Field("Role", Radio(&role, "Admin", "User", "Guest")),
 		Field("Terms", Checkbox(&agree, "I accept").Validate(VTrue, VOnSubmit)),
-	).LabelBold()
+	)
 }

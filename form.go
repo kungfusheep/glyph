@@ -24,11 +24,11 @@ func Field(label string, control any) FormField {
 //
 // usage:
 //
-//	Form(
+//	Form.LabelBold().OnSubmit(register)(
 //	    Field("Name", Input().Placeholder("Enter your name")),
 //	    Field("Email", Input().Placeholder("you@example.com")),
 //	    Field("Password", Input().Placeholder("password").Mask('*')),
-//	).Gap(1).LabelFG(BrightWhite)
+//	)
 type FormC struct {
 	fields     []FormField
 	fm         *FocusManager
@@ -40,9 +40,13 @@ type FormC struct {
 	onSubmit   func()
 }
 
+// FormFn is a configurable constructor for forms.
+// Configure with methods, then call with fields — same pattern as VBox/HBox.
+type FormFn func(fields ...FormField) *FormC
+
 // Form creates a form from labeled fields.
 // Automatically creates a FocusManager and wires any focusable controls.
-func Form(fields ...FormField) *FormC {
+var Form FormFn = func(fields ...FormField) *FormC {
 	f := &FormC{
 		fields: fields,
 		fm:     NewFocusManager(),
@@ -110,76 +114,111 @@ func Form(fields ...FormField) *FormC {
 }
 
 // Gap sets the vertical gap between fields.
-func (f *FormC) Gap(g int8) *FormC {
-	f.gap = g
-	return f
+func (f FormFn) Gap(g int8) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.gap = g
+		return form
+	}
 }
 
 // LabelStyle sets the full style for all labels.
-func (f *FormC) LabelStyle(s Style) *FormC {
-	f.labelStyle = s
-	return f
+func (f FormFn) LabelStyle(s Style) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.labelStyle = s
+		return form
+	}
 }
 
 // LabelFG sets the foreground color for all labels.
-func (f *FormC) LabelFG(c Color) *FormC {
-	f.labelStyle.FG = c
-	return f
+func (f FormFn) LabelFG(c Color) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.labelStyle.FG = c
+		return form
+	}
 }
 
 // LabelBold sets labels to bold.
-func (f *FormC) LabelBold() *FormC {
-	f.labelStyle = f.labelStyle.Bold()
-	return f
+func (f FormFn) LabelBold() FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.labelStyle = form.labelStyle.Bold()
+		return form
+	}
 }
 
 // NextKey sets the key for advancing focus (default: Tab).
-func (f *FormC) NextKey(key string) *FormC {
-	f.fm.NextKey(key)
-	return f
+func (f FormFn) NextKey(key string) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.fm.NextKey(key)
+		return form
+	}
 }
 
 // PrevKey sets the key for reversing focus (default: Shift-Tab).
-func (f *FormC) PrevKey(key string) *FormC {
-	f.fm.PrevKey(key)
-	return f
+func (f FormFn) PrevKey(key string) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.fm.PrevKey(key)
+		return form
+	}
 }
 
 // OnFocusChange sets a callback that fires when focus changes.
-func (f *FormC) OnFocusChange(fn func(index int)) *FormC {
-	f.fm.OnChange(fn)
-	return f
+func (f FormFn) OnFocusChange(fn func(index int)) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.fm.OnChange(fn)
+		return form
+	}
 }
 
 // OnSubmit sets a callback that fires when Enter is pressed.
-// Useful for wiring form submission without a separate app-level binding.
-func (f *FormC) OnSubmit(fn func()) *FormC {
-	f.onSubmit = fn
-	return f
+func (f FormFn) OnSubmit(fn func()) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.onSubmit = fn
+		return form
+	}
 }
 
 // Grow sets the flex grow factor.
-func (f *FormC) Grow(g float32) *FormC {
-	f.grow = g
-	return f
+func (f FormFn) Grow(g float32) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.grow = g
+		return form
+	}
 }
 
 // Margin sets equal margin on all sides.
-func (f *FormC) Margin(m int16) *FormC {
-	f.margin = [4]int16{m, m, m, m}
-	return f
+func (f FormFn) Margin(m int16) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.margin = [4]int16{m, m, m, m}
+		return form
+	}
 }
 
 // MarginVH sets vertical and horizontal margin.
-func (f *FormC) MarginVH(v, h int16) *FormC {
-	f.margin = [4]int16{v, h, v, h}
-	return f
+func (f FormFn) MarginVH(v, h int16) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.margin = [4]int16{v, h, v, h}
+		return form
+	}
 }
 
 // MarginTRBL sets top, right, bottom, left margin individually.
-func (f *FormC) MarginTRBL(t, r, b, l int16) *FormC {
-	f.margin = [4]int16{t, r, b, l}
-	return f
+func (f FormFn) MarginTRBL(t, r, b, l int16) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.margin = [4]int16{t, r, b, l}
+		return form
+	}
 }
 
 // FocusManager returns the internal focus manager for external wiring.

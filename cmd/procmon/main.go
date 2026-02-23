@@ -80,11 +80,7 @@ func main() {
 				Text("CPU"), Progress(&cpuPct).Width(30),
 				Text("Mem"), Progress(&memPct).Width(30),
 			),
-			AutoTable(&procs).
-				Columns("PID", "Command", "CPU", "Mem").
-				Column("CPU", Percent(1)).
-				Column("Mem", Percent(1)).
-				Sortable().Scrollable(20).BindVimNav(),
+			AutoTable(&procs).Sortable().Scrollable(20).BindVimNav(),
 		),
 	)
 

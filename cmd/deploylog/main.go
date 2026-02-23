@@ -19,9 +19,10 @@ func main() {
 
 	pr, pw := io.Pipe()
 
-	app, _ := NewApp()
+	app, _ := NewInlineApp()
+	app.ClearOnExit(true)
 	app.SetView(
-		VBox.Border(BorderRounded).Title("deploy")(
+		VBox.FitContent()(
 			HBox.Gap(2)(
 				Spinner(&frame).FG(Cyan),
 				Text(&status).Bold(),
