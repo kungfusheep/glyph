@@ -836,6 +836,30 @@ func (l LeaderC) MarginTRBL(a, b, c, d int16) LeaderC {
 }
 
 // ============================================================================
+// Counter - "current/total" display (alloc-free)
+// ============================================================================
+
+// counterC renders two int pointers as "current/total" with an optional
+// prefix. Formatting happens at render time using a stack-allocated scratch
+// buffer — zero heap allocations per frame.
+type counterC struct {
+	current   *int
+	total     *int
+	prefix    string
+	style     Style
+	streaming *bool // when non-nil and true, show spinner
+	framePtr  *int  // spinner frame, set internally by FilterListC
+}
+
+func newCounter(current, total *int) counterC {
+	return counterC{current: current, total: total}
+}
+
+func (c counterC) Prefix(p string) counterC   { c.prefix = p; return c }
+func (c counterC) Dim() counterC              { c.style.Attr |= AttrDim; return c }
+func (c counterC) Streaming(s *bool) counterC { c.streaming = s; return c }
+
+// ============================================================================
 // Sparkline - Mini chart
 // ============================================================================
 

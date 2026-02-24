@@ -20,10 +20,12 @@ type FilterListC[T any] struct {
 	border      BorderStyle
 	title       string
 	margin      [4]int16
+
+	counterMatch int // filtered count, read by counter at render time
+	counterTotal int // total count, read by counter at render time
 }
 
-// FilterList creates a filterable list.
-// extract returns the searchable text for each item.
+// FilterList creates a filterable list backed by the caller's source slice.
 func FilterList[T any](source *[]T, extract func(*T) string) *FilterListC[T] {
 	f := NewFilter(source, extract)
 	fl := &FilterListC[T]{
@@ -42,6 +44,7 @@ func FilterList[T any](source *[]T, extract func(*T) string) *FilterListC[T] {
 	// default nav keys that don't conflict with text input
 	fl.list.BindNav("<C-n>", "<C-p>").
 		BindPageNav("<C-d>", "<C-u>")
+	fl.updateCounter()
 	return fl
 }
 
@@ -57,6 +60,8 @@ func (fl *FilterListC[T]) toTemplate() any {
 			Text("> ").Bold(),
 			fl.input,
 		),
+		newCounter(&fl.counterMatch, &fl.counterTotal).
+			Prefix("  ").Dim(),
 		fl.list,
 	}
 
@@ -83,6 +88,24 @@ func (fl *FilterListC[T]) textBinding() *textInputBinding {
 func (fl *FilterListC[T]) sync() {
 	fl.filter.Update(fl.input.Value())
 	fl.list.ClampSelection()
+	fl.updateCounter()
+}
+
+func (fl *FilterListC[T]) appended() {
+	fl.filter.appended()
+	fl.list.ClampSelection()
+	fl.updateCounter()
+}
+
+func (fl *FilterListC[T]) refresh() {
+	fl.filter.refresh()
+	fl.list.ClampSelection()
+	fl.updateCounter()
+}
+
+func (fl *FilterListC[T]) updateCounter() {
+	fl.counterMatch = fl.filter.Len()
+	fl.counterTotal = len(*fl.filter.source)
 }
 
 // Placeholder sets the input placeholder text.
@@ -185,6 +208,7 @@ func (fl *FilterListC[T]) Clear() {
 	fl.input.Clear()
 	fl.filter.Reset()
 	fl.list.ClampSelection()
+	fl.updateCounter()
 }
 
 // Active reports whether a filter query is currently applied.
