@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	. "github.com/kungfusheep/forme"
+	. "github.com/kungfusheep/glyph"
 )
 
 func main() {

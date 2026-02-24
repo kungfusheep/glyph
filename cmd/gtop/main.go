@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	. "github.com/kungfusheep/forme"
+	. "github.com/kungfusheep/glyph"
 )
 
 type Proc struct {
@@ -122,7 +122,7 @@ func main() {
 	app.SetView(
 		VBox(
 			HBox.Gap(2)(
-				Text("forme-top").Bold().FG(Cyan),
+				Text("glyph-top").Bold().FG(Cyan),
 				Space(),
 				Text(&status).FG(BrightBlack),
 			),

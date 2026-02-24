@@ -1,4 +1,4 @@
-package forme
+package glyph
 
 import "github.com/kungfusheep/riffkey"
 

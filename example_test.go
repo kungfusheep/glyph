@@ -1,7 +1,7 @@
-package forme_test
+package glyph_test
 
 import (
-	. "github.com/kungfusheep/forme"
+	. "github.com/kungfusheep/glyph"
 	"os"
 	"strings"
 	"time"

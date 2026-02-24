@@ -1,5 +1,5 @@
-// Package forme provides a high-performance terminal UI framework.
-package forme
+// Package glyph provides a high-performance terminal UI framework.
+package glyph
 
 import "unsafe"
 
@@ -878,9 +878,9 @@ type TextInput struct {
 
 // OverlayNode displays content floating above the main view.
 // Use for modals, dialogs, and floating windows.
-// Control visibility with forme.If:
+// Control visibility with glyph.If:
 //
-//	forme.If(&showModal).Eq(true).Then(forme.Overlay{Child: ...})
+//	glyph.If(&showModal).Eq(true).Then(glyph.Overlay{Child: ...})
 type OverlayNode struct {
 	Centered   bool  // true = center on screen (default behavior if X/Y not set)
 	X, Y       int   // explicit position (used if Centered is false)

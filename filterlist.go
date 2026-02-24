@@ -1,4 +1,4 @@
-package forme
+package glyph
 
 // FilterListC is a drop-in filterable list. it composes an input, a
 // filter and a list into a single template node.

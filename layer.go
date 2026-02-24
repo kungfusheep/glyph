@@ -1,4 +1,4 @@
-package forme
+package glyph
 
 // Layer is a pre-rendered buffer with scroll management.
 // Content is rendered once (expensive), then blitted to screen each frame (cheap).

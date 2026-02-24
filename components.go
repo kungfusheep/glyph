@@ -1,4 +1,4 @@
-package forme
+package glyph
 
 import (
 	"reflect"
@@ -2034,7 +2034,7 @@ func (c *CheckListC[T]) toSelectionList() *SelectionList {
 			if t.Kind() == reflect.Struct {
 				for i := 0; i < t.NumField(); i++ {
 					field := t.Field(i)
-					tag := field.Tag.Get("forme")
+					tag := field.Tag.Get("glyph")
 
 					if tag == "checked" && field.Type.Kind() == reflect.Bool && checkedFn == nil {
 						idx := i
