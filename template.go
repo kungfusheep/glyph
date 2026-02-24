@@ -229,9 +229,10 @@ type Op struct {
 	LayerHeight int16  // viewport height (0 = fill available)
 
 	// RichText
-	StaticSpans []Span  // for static spans
-	SpansPtr    *[]Span // for pointer to spans
-	SpansOff    uintptr // for ForEach offset
+	StaticSpans []Span    // for static spans
+	SpansPtr    *[]Span   // for pointer to spans
+	SpansOff    uintptr   // for ForEach offset
+	SpanStrOffs []uintptr // per-span *string offsets for Textf (^0 = static)
 
 	// SelectionList
 	SelectionListPtr *SelectionList // pointer to the list for len/offset updates
@@ -698,7 +699,59 @@ func (t *Template) compileRichText(v RichTextNode, parent int16, depth int, elem
 		op.StaticSpans = nil
 	}
 
+	// compute per-span *string offsets for Textf
+	if v.spanPtrs != nil && elemBase != nil {
+		noOffset := ^uintptr(0)
+		offs := make([]uintptr, len(v.spanPtrs))
+		for i, ptr := range v.spanPtrs {
+			if ptr != nil && isWithinRange(unsafe.Pointer(ptr), elemBase, elemSize) {
+				offs[i] = uintptr(unsafe.Pointer(ptr)) - uintptr(elemBase)
+			} else {
+				offs[i] = noOffset
+			}
+		}
+		op.SpanStrOffs = offs
+	} else if v.spanPtrs != nil {
+		// outside ForEach — store pointers directly as offsets won't work,
+		// but we still need to re-read *string values at render time.
+		// Use a sentinel-free approach: store the raw pointer values.
+		noOffset := ^uintptr(0)
+		offs := make([]uintptr, len(v.spanPtrs))
+		for i, ptr := range v.spanPtrs {
+			if ptr != nil {
+				offs[i] = uintptr(unsafe.Pointer(ptr))
+			} else {
+				offs[i] = noOffset
+			}
+		}
+		op.SpanStrOffs = offs
+	}
+
 	return t.addOp(op, depth)
+}
+
+// resolveSpanStrs returns a copy of spans with dynamic *string values re-read.
+// elemBase is the ForEach element pointer (nil when outside ForEach).
+// When elemBase is nil, offs[i] stores the raw uintptr of the *string.
+// When elemBase is non-nil, offs[i] stores the offset from elemBase.
+// ^uintptr(0) sentinel means that span's text is static.
+func resolveSpanStrs(spans []Span, offs []uintptr, elemBase unsafe.Pointer) []Span {
+	noOffset := ^uintptr(0)
+	resolved := make([]Span, len(spans))
+	copy(resolved, spans)
+	for i, off := range offs {
+		if off == noOffset {
+			continue
+		}
+		var ptr *string
+		if elemBase != nil {
+			ptr = (*string)(unsafe.Pointer(uintptr(elemBase) + off))
+		} else {
+			ptr = (*string)(unsafe.Pointer(off))
+		}
+		resolved[i].Text = *ptr
+	}
+	return resolved
 }
 
 func (t *Template) compileSelectionList(v *SelectionList, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
@@ -724,7 +777,7 @@ func (t *Template) compileSelectionList(v *SelectionList, parent int16, depth in
 
 	// Create iteration template if Render function provided
 	var iterTmpl *Template
-	if v.Render != nil {
+	if v.Render != nil && !reflect.ValueOf(v.Render).IsNil() {
 		renderRV := reflect.ValueOf(v.Render)
 		takesPtr := renderRV.Type().In(0).Kind() == reflect.Ptr
 
@@ -1786,6 +1839,18 @@ func (t *Template) compileAutoTableReactive(v AutoTableC, rv reflect.Value, pare
 	var altFill Color
 	if v.altRowStyle != nil && v.altRowStyle.BG.Mode != ColorDefault {
 		altFill = v.altRowStyle.BG
+	}
+
+	// resolve SortBy field name to column index (once)
+	if ss := v.sortState; ss != nil && ss.initialCol != "" && !ss.initialDone {
+		for i, name := range columns {
+			if name == ss.initialCol {
+				ss.col = i
+				ss.asc = ss.initialAsc
+				break
+			}
+		}
+		ss.initialDone = true
 	}
 
 	op := Op{
@@ -3512,14 +3577,22 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		buf.WriteProgressBar(int(absX), int(absY), int(op.Width), ratio, style)
 
 	case OpRichText:
-		buf.WriteSpans(int(absX), int(absY), op.StaticSpans, int(maxW))
+		spans := op.StaticSpans
+		if op.SpanStrOffs != nil {
+			spans = resolveSpanStrs(spans, op.SpanStrOffs, nil)
+		}
+		buf.WriteSpans(int(absX), int(absY), spans, int(maxW))
 
 	case OpRichTextPtr:
-		buf.WriteSpans(int(absX), int(absY), *op.SpansPtr, int(maxW))
+		spans := *op.SpansPtr
+		if op.SpanStrOffs != nil {
+			spans = resolveSpanStrs(spans, op.SpanStrOffs, nil)
+		}
+		buf.WriteSpans(int(absX), int(absY), spans, int(maxW))
 
 	case OpRichTextOff:
-		// Would need elemBase passed through for ForEach
-		// For now, skip
+		// top-level render has no elemBase; skip
+		// (OpRichTextOff is only produced inside ForEach)
 
 	case OpLeader:
 		width := int(op.Width)
@@ -3903,15 +3976,26 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		buf.WriteProgressBar(int(absX), int(absY), int(op.Width), ratio, style)
 
 	case OpRichText:
-		buf.WriteSpans(int(absX), int(absY), op.StaticSpans, int(maxW))
+		spans := op.StaticSpans
+		if op.SpanStrOffs != nil {
+			spans = resolveSpanStrs(spans, op.SpanStrOffs, elemBase)
+		}
+		buf.WriteSpans(int(absX), int(absY), spans, int(maxW))
 
 	case OpRichTextPtr:
-		buf.WriteSpans(int(absX), int(absY), *op.SpansPtr, int(maxW))
+		spans := *op.SpansPtr
+		if op.SpanStrOffs != nil {
+			spans = resolveSpanStrs(spans, op.SpanStrOffs, elemBase)
+		}
+		buf.WriteSpans(int(absX), int(absY), spans, int(maxW))
 
 	case OpRichTextOff:
-		// Offset from element base
 		spansPtr := (*[]Span)(unsafe.Pointer(uintptr(elemBase) + op.SpansOff))
-		buf.WriteSpans(int(absX), int(absY), *spansPtr, int(maxW))
+		spans := *spansPtr
+		if op.SpanStrOffs != nil {
+			spans = resolveSpanStrs(spans, op.SpanStrOffs, elemBase)
+		}
+		buf.WriteSpans(int(absX), int(absY), spans, int(maxW))
 
 	case OpLeader:
 		width := int(op.Width)
@@ -4361,12 +4445,24 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 					txt := applyTransform(*strPtr, effStyle.Transform)
 					buf.WriteStringFast(int(contentX), y, txt, textStyle, int(contentW))
 				case OpRichText:
-					buf.WriteSpans(int(contentX), y, iterOp.StaticSpans, int(contentW))
+					spans := iterOp.StaticSpans
+					if iterOp.SpanStrOffs != nil {
+						spans = resolveSpanStrs(spans, iterOp.SpanStrOffs, elemPtr)
+					}
+					buf.WriteSpans(int(contentX), y, spans, int(contentW))
 				case OpRichTextPtr:
-					buf.WriteSpans(int(contentX), y, *iterOp.SpansPtr, int(contentW))
+					spans := *iterOp.SpansPtr
+					if iterOp.SpanStrOffs != nil {
+						spans = resolveSpanStrs(spans, iterOp.SpanStrOffs, elemPtr)
+					}
+					buf.WriteSpans(int(contentX), y, spans, int(contentW))
 				case OpRichTextOff:
 					spansPtr := (*[]Span)(unsafe.Pointer(uintptr(elemPtr) + iterOp.SpansOff))
-					buf.WriteSpans(int(contentX), y, *spansPtr, int(contentW))
+					spans := *spansPtr
+					if iterOp.SpanStrOffs != nil {
+						spans = resolveSpanStrs(spans, iterOp.SpanStrOffs, elemPtr)
+					}
+					buf.WriteSpans(int(contentX), y, spans, int(contentW))
 				}
 			}
 		}
