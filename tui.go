@@ -1,4 +1,4 @@
-// Package glyph provides a high-performance terminal UI framework.
+// Package glyph provides a terminal UI framework for Go.
 package glyph
 
 import "unsafe"
@@ -460,7 +460,7 @@ type JumpNode struct {
 // ProgressNode displays a progress bar.
 type ProgressNode struct {
 	Flex
-	Value    any   // int or *int (0-100)
+	Value    any   // *int (0-100)
 	BarWidth int16 // width of the bar in characters (distinct from Flex.Width layout width)
 }
 

@@ -418,7 +418,7 @@ func (a *App) Go(name string) {
 }
 
 // Back returns to the previous view.
-// Currently an alias for Pop() - may add history later.
+// Currently an alias for Pop().
 func (a *App) Back() {
 	a.input.Pop()
 	a.RequestRender()
