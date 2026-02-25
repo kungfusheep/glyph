@@ -468,8 +468,11 @@ func (s *Screen) FlushFull() {
 
 // FlushInline renders the buffer for inline mode (no alternate screen).
 // Renders at current cursor position using relative movement.
+// prevLines is the number of lines rendered in the previous frame; any
+// lines beyond the current content up to prevLines are cleared so that
+// stale content does not remain on screen when the view shrinks.
 // Returns the number of lines rendered for cleanup tracking.
-func (s *Screen) FlushInline(height int) int {
+func (s *Screen) FlushInline(height, prevLines int) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -490,9 +493,22 @@ func (s *Screen) FlushInline(height int) int {
 		}
 		linesRendered++
 
-		if y < height-1 {
+		if y < height-1 || linesRendered < prevLines {
 			s.buf.WriteString("\n") // Move down to next line
 		}
+	}
+
+	// Clear any leftover lines from the previous frame
+	for y := linesRendered; y < prevLines; y++ {
+		s.buf.WriteString("\r\x1b[K")
+		if y < prevLines-1 {
+			s.buf.WriteString("\n")
+		}
+	}
+
+	totalLines := linesRendered
+	if prevLines > totalLines {
+		totalLines = prevLines
 	}
 
 	// Reset style
@@ -500,8 +516,8 @@ func (s *Screen) FlushInline(height int) int {
 	s.lastStyle = DefaultStyle()
 
 	// Move cursor back to start of our content (first line)
-	if linesRendered > 1 {
-		s.buf.WriteString(fmt.Sprintf("\x1b[%dA", linesRendered-1))
+	if totalLines > 1 {
+		s.buf.WriteString(fmt.Sprintf("\x1b[%dA", totalLines-1))
 	}
 	s.buf.WriteString("\r")
 
