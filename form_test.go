@@ -1,9 +1,9 @@
-package forme_test
+package glyph_test
 
 import (
 	"testing"
 
-	. "github.com/kungfusheep/forme"
+	. "github.com/kungfusheep/glyph"
 )
 
 func TestInputBindsToString(t *testing.T) {

@@ -1,4 +1,4 @@
-# forme hero - animated GIF from the full-screen TUI demo
+# glyph hero - animated GIF from the full-screen TUI demo
 Output hero.gif
 
 Set Shell "bash"

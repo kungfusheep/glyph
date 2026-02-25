@@ -4,19 +4,19 @@ Common pitfalls and their solutions, collected from real usage.
 
 ## SelectionList Render: Use Pointers to Struct Fields
 
-When using `SelectionList` with a custom `Render` function, the returned `forme.Text`
+When using `SelectionList` with a custom `Render` function, the returned `glyph.Text`
 should use a **pointer to a struct field**, not a computed string value.
 
 ### Won't work - text appears blank:
 
 ```go
-ed.browserList = &forme.SelectionList{
+ed.browserList = &glyph.SelectionList{
     Items:    &ed.entries,
     Selected: &ed.selected,
     Render: func(entry *Entry) any {
         // BAD: computed string, not a pointer
         label := fmt.Sprintf("%s - %s", entry.Icon, entry.Name)
-        return forme.Text{Content: label}
+        return glyph.Text{Content: label}
     },
 }
 ```
@@ -34,12 +34,12 @@ for i := range entries {
     entries[i].DisplayLabel = fmt.Sprintf("+ %s", entries[i].Name)
 }
 
-ed.browserList = &forme.SelectionList{
+ed.browserList = &glyph.SelectionList{
     Items:    &ed.entries,
     Selected: &ed.selected,
     Render: func(entry *Entry) any {
         // GOOD: pointer to persistent struct field
-        return forme.Text{Content: &entry.DisplayLabel}
+        return glyph.Text{Content: &entry.DisplayLabel}
     },
 }
 ```

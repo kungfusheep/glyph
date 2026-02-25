@@ -1,6 +1,6 @@
 <!-- ![logo](./logo.svg) -->
 
-# forme
+# glyph
 
 Declarative terminal UI for Go.
 
@@ -26,7 +26,7 @@ VBox.Border(BorderDouble).Title("SYS").FitContent()(
 ## Install
 
 ```bash
-go get github.com/kungfusheep/forme
+go get github.com/kungfusheep/glyph
 ```
 
 ## Quick Start
@@ -34,7 +34,7 @@ go get github.com/kungfusheep/forme
 ```go
 package main
 
-import . "github.com/kungfusheep/forme"
+import . "github.com/kungfusheep/glyph"
 
 func main() {
     app, _ := NewApp()
@@ -212,15 +212,15 @@ A simple todo app:
 ```go
 package main
 
-import . "github.com/kungfusheep/forme"
+import . "github.com/kungfusheep/glyph"
 
 type Todo struct {
-	Text string `forme:"render"`
-	Done bool   `forme:"checked"`
+	Text string `glyph:"render"`
+	Done bool   `glyph:"checked"`
 }
 
 func main() {
-	todos := []Todo{{"Learn forme", true}, {"Build something", false}}
+	todos := []Todo{{"Learn glyph", true}, {"Build something", false}}
 	var input Field
 
 	app, _ := NewApp()
@@ -254,7 +254,7 @@ package main
 
 import (
 	"fmt"
-	. "github.com/kungfusheep/forme"
+	. "github.com/kungfusheep/glyph"
 )
 
 func main() {
@@ -287,7 +287,7 @@ func main() {
 |------|-------------|
 | `go run ./cmd/hero` | The hero screenshot above |
 | `go run ./cmd/todo` | Todo app with checklist |
-| `go run ./cmd/forme-fzf` | Fuzzy finder with FilterList |
+| `go run ./cmd/glyph-fzf` | Fuzzy finder with FilterList |
 | `go run ./cmd/happypath` | Basic layout patterns |
 | `go run ./cmd/tabledemo` | AutoTable showcase |
 | `go run ./cmd/widgetdemo` | Custom widget examples |

@@ -1,4 +1,4 @@
-package forme_test
+package glyph_test
 
 // compiler-verified examples matching the homepage code blocks.
 // if these break, the homepage is lying.
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	. "github.com/kungfusheep/forme"
+	. "github.com/kungfusheep/glyph"
 )
 
 type homepageCommit struct {
@@ -35,7 +35,7 @@ func TestHomepage_firstApp(t *testing.T) {
 
 	app.SetView(
 		VBox(
-			Text("Hello, forme"),
+			Text("Hello, glyph"),
 			Text("Press q to quit"),
 		),
 	)

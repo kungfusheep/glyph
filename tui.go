@@ -1,5 +1,5 @@
-// Package forme provides a high-performance terminal UI framework.
-package forme
+// Package glyph provides a high-performance terminal UI framework.
+package glyph
 
 import "unsafe"
 
@@ -750,7 +750,8 @@ type Span struct {
 // Spans can be []Span (static) or *[]Span (dynamic binding).
 type RichTextNode struct {
 	Flex
-	Spans any // []Span or *[]Span
+	Spans    any       // []Span or *[]Span
+	spanPtrs []*string // per-span *string pointers for Textf (nil = static text)
 }
 
 // Rich creates a RichText from a mix of strings and Spans.
@@ -773,43 +774,55 @@ func Rich(parts ...any) RichTextNode {
 }
 
 // Styled creates a span with the given style.
-func Styled(text string, style Style) Span {
-	return Span{Text: text, Style: style}
+// Accepts string or *string. Returns Span for string, TextC for *string.
+func Styled(text any, style Style) any {
+	if ptr, ok := text.(*string); ok {
+		return Text(ptr).Style(style)
+	}
+	s, _ := text.(string)
+	return Span{Text: s, Style: style}
 }
 
-// Bold creates a bold text span.
-func Bold(text string) Span {
-	return Span{Text: text, Style: Style{Attr: AttrBold}}
+// Bold creates a bold styled part.
+// Accepts string or *string. Returns Span for string, TextC for *string.
+func Bold(text any) any {
+	return Styled(text, Style{Attr: AttrBold})
 }
 
-// Dim creates a dim text span.
-func Dim(text string) Span {
-	return Span{Text: text, Style: Style{Attr: AttrDim}}
+// Dim creates a dim styled part.
+// Accepts string or *string. Returns Span for string, TextC for *string.
+func Dim(text any) any {
+	return Styled(text, Style{Attr: AttrDim})
 }
 
-// Italic creates an italic text span.
-func Italic(text string) Span {
-	return Span{Text: text, Style: Style{Attr: AttrItalic}}
+// Italic creates an italic styled part.
+// Accepts string or *string. Returns Span for string, TextC for *string.
+func Italic(text any) any {
+	return Styled(text, Style{Attr: AttrItalic})
 }
 
-// Underline creates an underlined text span.
-func Underline(text string) Span {
-	return Span{Text: text, Style: Style{Attr: AttrUnderline}}
+// Underline creates an underlined styled part.
+// Accepts string or *string. Returns Span for string, TextC for *string.
+func Underline(text any) any {
+	return Styled(text, Style{Attr: AttrUnderline})
 }
 
-// Inverse creates an inverse text span.
-func Inverse(text string) Span {
-	return Span{Text: text, Style: Style{Attr: AttrInverse}}
+// Inverse creates an inverse styled part.
+// Accepts string or *string. Returns Span for string, TextC for *string.
+func Inverse(text any) any {
+	return Styled(text, Style{Attr: AttrInverse})
 }
 
-// FG creates a span with foreground color.
-func FG(text string, color Color) Span {
-	return Span{Text: text, Style: Style{FG: color}}
+// FG creates a foreground-colored styled part.
+// Accepts string or *string as text. Returns Span for string, TextC for *string.
+func FG(text any, color Color) any {
+	return Styled(text, Style{FG: color})
 }
 
-// BG creates a span with background color.
-func BG(text string, color Color) Span {
-	return Span{Text: text, Style: Style{BG: color}}
+// BG creates a background-colored styled part.
+// Accepts string or *string as text. Returns Span for string, TextC for *string.
+func BG(text any, color Color) any {
+	return Styled(text, Style{BG: color})
 }
 
 // InputState bundles the state for a text input field.
@@ -865,9 +878,9 @@ type TextInput struct {
 
 // OverlayNode displays content floating above the main view.
 // Use for modals, dialogs, and floating windows.
-// Control visibility with forme.If:
+// Control visibility with glyph.If:
 //
-//	forme.If(&showModal).Eq(true).Then(forme.Overlay{Child: ...})
+//	glyph.If(&showModal).Eq(true).Then(glyph.Overlay{Child: ...})
 type OverlayNode struct {
 	Centered   bool  // true = center on screen (default behavior if X/Y not set)
 	X, Y       int   // explicit position (used if Centered is false)

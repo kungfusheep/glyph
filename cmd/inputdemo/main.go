@@ -5,7 +5,7 @@ import (
 	"log"
 	"strings"
 
-	. "github.com/kungfusheep/forme"
+	. "github.com/kungfusheep/glyph"
 	"github.com/kungfusheep/riffkey"
 )
 

@@ -1,4 +1,4 @@
-module github.com/kungfusheep/forme
+module github.com/kungfusheep/glyph
 
 go 1.25.1
 

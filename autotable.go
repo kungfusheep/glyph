@@ -1,4 +1,4 @@
-package forme
+package glyph
 
 import (
 	"fmt"
@@ -273,8 +273,11 @@ func formatBytes(b float64) string {
 // autoTableSortState tracks the current sort column and direction.
 // allocated once by Sortable, shared via pointer through value copies.
 type autoTableSortState struct {
-	col int  // -1 = unsorted, 0..n-1 = column index
-	asc bool // true = ascending
+	col         int    // -1 = unsorted, 0..n-1 = column index
+	asc         bool   // true = ascending
+	initialCol  string // field name for default sort (resolved at compile time)
+	initialAsc  bool
+	initialDone bool // true once initialCol has been resolved
 }
 
 // autoTableScroll manages viewport scrolling for AutoTable.
@@ -429,6 +432,15 @@ func (t AutoTableC) Sortable() AutoTableC {
 	if t.sortState == nil {
 		t.sortState = &autoTableSortState{col: -1}
 	}
+	return t
+}
+
+// SortBy sets the default sort column and direction. implies Sortable().
+// field is the struct field name (e.g. "CPU"). asc true = ascending.
+func (t AutoTableC) SortBy(field string, asc bool) AutoTableC {
+	t = t.Sortable()
+	t.sortState.initialCol = field
+	t.sortState.initialAsc = asc
 	return t
 }
 

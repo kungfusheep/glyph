@@ -1,4 +1,4 @@
-package forme
+package glyph
 
 import (
 	"reflect"
@@ -515,6 +515,56 @@ func (t TextC) MarginVH(v, h int16) TextC { t.style.margin = [4]int16{v, h, v, h
 
 // MarginTRBL sets individual margins for top, right, bottom, left.
 func (t TextC) MarginTRBL(a, b, c, d int16) TextC { t.style.margin = [4]int16{a, b, c, d}; return t }
+
+// Textf composes inline formatted text from mixed parts.
+// Accepts string, *string, Span, TextC (from Bold/Italic with *string), and styled helpers.
+// Works with ForEach via per-span pointer offset rewriting.
+//
+// usage:
+//
+//	Textf("Hello ", Bold("world"), "!")
+//	Textf("Name: ", Bold(&it.Name), " Status: ", &it.Status)  // ForEach compatible
+func Textf(parts ...any) RichTextNode {
+	spans := make([]Span, 0, len(parts))
+	ptrs := make([]*string, 0, len(parts))
+	hasPtrs := false
+
+	for _, p := range parts {
+		switch v := p.(type) {
+		case string:
+			spans = append(spans, Span{Text: v})
+			ptrs = append(ptrs, nil)
+		case *string:
+			spans = append(spans, Span{Text: *v})
+			ptrs = append(ptrs, v)
+			hasPtrs = true
+		case Span:
+			spans = append(spans, v)
+			ptrs = append(ptrs, nil)
+		case TextC:
+			// extract the content and style from a TextC (e.g. from Bold(&ptr))
+			var sp Span
+			sp.Style = v.style
+			switch c := v.content.(type) {
+			case string:
+				sp.Text = c
+				spans = append(spans, sp)
+				ptrs = append(ptrs, nil)
+			case *string:
+				sp.Text = *c
+				spans = append(spans, sp)
+				ptrs = append(ptrs, c)
+				hasPtrs = true
+			}
+		}
+	}
+
+	node := RichTextNode{Spans: spans}
+	if hasPtrs {
+		node.spanPtrs = ptrs
+	}
+	return node
+}
 
 // ============================================================================
 // Spacer - Empty space
@@ -2008,7 +2058,7 @@ func (c *CheckListC[T]) toSelectionList() *SelectionList {
 			if t.Kind() == reflect.Struct {
 				for i := 0; i < t.NumField(); i++ {
 					field := t.Field(i)
-					tag := field.Tag.Get("forme")
+					tag := field.Tag.Get("glyph")
 
 					if tag == "checked" && field.Type.Kind() == reflect.Bool && checkedFn == nil {
 						idx := i

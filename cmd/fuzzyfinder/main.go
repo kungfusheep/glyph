@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	. "github.com/kungfusheep/forme"
+	. "github.com/kungfusheep/glyph"
 )
 
 type Pkg struct {
@@ -13,7 +13,7 @@ type Pkg struct {
 
 func main() {
 	packages := []Pkg{
-		{"forme", "declarative TUI framework"},
+		{"glyph", "declarative TUI framework"},
 		{"chi", "lightweight HTTP router"},
 		{"cobra", "CLI application framework"},
 		{"viper", "configuration management"},
