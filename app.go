@@ -418,7 +418,7 @@ func (a *App) Go(name string) {
 }
 
 // Back returns to the previous view.
-// Currently an alias for Pop() - may add history later.
+// Currently an alias for Pop().
 func (a *App) Back() {
 	a.input.Pop()
 	a.RequestRender()
@@ -689,7 +689,7 @@ func (a *App) render() {
 
 	if a.inline {
 		// Inline mode: render at cursor position
-		a.linesUsed = a.screen.FlushInline(int(renderHeight))
+		a.linesUsed = a.screen.FlushInline(int(renderHeight), a.linesUsed)
 		a.pool.Swap() // Queue async clear
 	} else {
 		// Fullscreen mode

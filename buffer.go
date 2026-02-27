@@ -122,7 +122,7 @@ var partialBlocks = [9]rune{' ', '▏', '▎', '▍', '▌', '▋', '▊', '▉'
 // WriteProgressBar writes a progress bar directly to the buffer.
 // Uses partial block characters for smooth sub-character precision.
 // Background color fills the empty space for seamless appearance.
-// Batch write - much faster than per-cell Set calls.
+// Writes all cells in a single pass.
 func (b *Buffer) WriteProgressBar(x, y, width int, ratio float32, style Style) {
 	if y < 0 || y >= b.height {
 		return
@@ -175,7 +175,7 @@ func (b *Buffer) WriteProgressBar(x, y, width int, ratio float32, style Style) {
 }
 
 // WriteStringFast writes a string without border merging.
-// Direct slice access for maximum speed.
+// Writes directly to the cell slice without border merging.
 func (b *Buffer) WriteStringFast(x, y int, s string, style Style, maxWidth int) {
 	if y < 0 || y >= b.height {
 		return
@@ -378,7 +378,7 @@ func (b *Buffer) Fill(c Cell) {
 }
 
 // Clear clears the buffer to empty cells with default style.
-// Uses copy() from a cached empty buffer for speed (memmove vs scalar loop).
+// Uses copy() from a cached empty buffer.
 func (b *Buffer) Clear() {
 	size := len(b.cells)
 
@@ -435,7 +435,7 @@ func (b *Buffer) ResetDirtyMax() {
 }
 
 // ClearDirty clears only the rows that were written to since last clear.
-// Much faster than Clear() when content doesn't fill the buffer.
+// Useful when content doesn't fill the buffer.
 func (b *Buffer) ClearDirty() {
 	if b.dirtyMaxY < 0 {
 		return
@@ -1038,7 +1038,7 @@ func (b *Buffer) StringTrimmed() string {
 // srcX, srcY: top-left corner in source buffer (for scrolling)
 // dstX, dstY: top-left corner in destination buffer
 // width, height: size of region to copy
-// Uses optimized row-by-row copy() for speed.
+// Copies row-by-row using copy().
 func (b *Buffer) Blit(src *Buffer, srcX, srcY, dstX, dstY, width, height int) {
 	// Clip to source bounds
 	if srcX < 0 {
@@ -1081,7 +1081,7 @@ func (b *Buffer) Blit(src *Buffer, srcX, srcY, dstX, dstY, width, height int) {
 		return
 	}
 
-	// Row-by-row copy using copy() for speed
+	// row-by-row copy
 	for y := 0; y < height; y++ {
 		srcStart := (srcY+y)*src.width + srcX
 		dstStart := (dstY+y)*b.width + dstX
@@ -1097,7 +1097,7 @@ func (b *Buffer) Blit(src *Buffer, srcX, srcY, dstX, dstY, width, height int) {
 
 // CopyFrom copies all cells from src to b using a single bulk copy.
 // Requires both buffers to have identical dimensions.
-// This is much faster than cell-by-cell copy for full-buffer transfers.
+// Uses a single bulk copy of the cell slice.
 func (b *Buffer) CopyFrom(src *Buffer) {
 	if b.width == src.width && b.height == src.height {
 		copy(b.cells, src.cells)

@@ -108,7 +108,7 @@ func (f VBoxFn) Border(b BorderStyle) VBoxFn {
 	}
 }
 
-// FG sets the foreground color.
+// BorderFG sets the border foreground color.
 func (f VBoxFn) BorderFG(c Color) VBoxFn {
 	return func(children ...any) VBoxC {
 		v := f(children...)
@@ -117,7 +117,7 @@ func (f VBoxFn) BorderFG(c Color) VBoxFn {
 	}
 }
 
-// BG sets the background color.
+// BorderBG sets the border background color.
 func (f VBoxFn) BorderBG(c Color) VBoxFn {
 	return func(children ...any) VBoxC {
 		v := f(children...)
@@ -281,7 +281,7 @@ func (f HBoxFn) Border(b BorderStyle) HBoxFn {
 	}
 }
 
-// FG sets the foreground color.
+// BorderFG sets the border foreground color.
 func (f HBoxFn) BorderFG(c Color) HBoxFn {
 	return func(children ...any) HBoxC {
 		h := f(children...)
@@ -290,7 +290,7 @@ func (f HBoxFn) BorderFG(c Color) HBoxFn {
 	}
 }
 
-// BG sets the background color.
+// BorderBG sets the border background color.
 func (f HBoxFn) BorderBG(c Color) HBoxFn {
 	return func(children ...any) HBoxC {
 		h := f(children...)
@@ -735,12 +735,12 @@ func (v VRuleC) MarginTRBL(a, b, c, d int16) VRuleC { v.style.margin = [4]int16{
 // ============================================================================
 
 type ProgressC struct {
-	value any // int (0-100) or *int
+	value any // *int (0-100)
 	width int16
 	style Style
 }
 
-// Progress creates a progress bar bound to a value (0-100).
+// Progress creates a progress bar bound to an int pointer (0-100).
 func Progress(value any) ProgressC {
 	return ProgressC{value: value}
 }
@@ -1111,7 +1111,7 @@ func (f OverlayFn) BG(c Color) OverlayFn {
 	}
 }
 
-// FG sets the foreground color.
+// BackdropFG sets the backdrop foreground color.
 func (f OverlayFn) BackdropFG(c Color) OverlayFn {
 	return func(children ...any) OverlayC {
 		o := f(children...)
@@ -1430,13 +1430,13 @@ func (t TabsC) Gap(g int8) TabsC {
 	return t
 }
 
-// Style sets the component style.
+// ActiveStyle sets the style for the active tab.
 func (t TabsC) ActiveStyle(s Style) TabsC {
 	t.activeStyle = s
 	return t
 }
 
-// Style sets the component style.
+// InactiveStyle sets the style for inactive tabs.
 func (t TabsC) InactiveStyle(s Style) TabsC {
 	t.inactiveStyle = s
 	return t
@@ -1492,25 +1492,25 @@ func (s ScrollbarC) Horizontal() ScrollbarC {
 	return s
 }
 
-// Char sets the display character.
+// TrackChar sets the track display character.
 func (s ScrollbarC) TrackChar(c rune) ScrollbarC {
 	s.trackChar = c
 	return s
 }
 
-// Char sets the display character.
+// ThumbChar sets the thumb display character.
 func (s ScrollbarC) ThumbChar(c rune) ScrollbarC {
 	s.thumbChar = c
 	return s
 }
 
-// Style sets the component style.
+// TrackStyle sets the style for the track.
 func (s ScrollbarC) TrackStyle(st Style) ScrollbarC {
 	s.trackStyle = st
 	return s
 }
 
-// Style sets the component style.
+// ThumbStyle sets the style for the thumb.
 func (s ScrollbarC) ThumbStyle(st Style) ScrollbarC {
 	s.thumbStyle = st
 	return s
@@ -1754,7 +1754,7 @@ func (r *RadioC) Gap(g int8) *RadioC {
 	return r
 }
 
-// Horizontal renders the scrollbar horizontally instead of vertically.
+// Horizontal renders the radio group horizontally instead of vertically.
 func (r *RadioC) Horizontal() *RadioC {
 	r.horizontal = true
 	return r
@@ -1879,7 +1879,7 @@ func (c *CheckListC[T]) Marker(m string) *CheckListC[T] {
 	return c
 }
 
-// Style sets the component style.
+// MarkerStyle sets the style for the selection marker.
 func (c *CheckListC[T]) MarkerStyle(s Style) *CheckListC[T] {
 	c.markerStyle = s
 	return c
@@ -1891,7 +1891,7 @@ func (c *CheckListC[T]) Style(s Style) *CheckListC[T] {
 	return c
 }
 
-// Style sets the component style.
+// SelectedStyle sets the style for the selected row.
 func (c *CheckListC[T]) SelectedStyle(s Style) *CheckListC[T] {
 	c.selectedStyle = s
 	return c

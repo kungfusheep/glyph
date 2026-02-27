@@ -181,7 +181,7 @@ func hasUppercase(s string) bool {
 }
 
 // Score scores a single candidate against the parsed query.
-// returns (score, matched). higher score = better match.
+// Returns (score, matched). Higher score = better match.
 func (q *FzfQuery) Score(candidate string) (int, bool) {
 	if len(q.groups) == 0 {
 		return 0, true
@@ -244,8 +244,8 @@ func (t *fzfTerm) score(candidate string) (int, bool) {
 // ============================================================================
 
 // Filter provides fzf-style filtering mechanics for a slice of items.
-// it handles query parsing, scoring, filtering and index mapping back to the
-// original source slice. no UI opinions — bring your own rendering.
+// It handles query parsing, scoring, filtering and index mapping back to the
+// original source slice. No UI opinions — bring your own rendering.
 //
 // usage:
 //
@@ -282,7 +282,7 @@ func NewFilter[T any](source *[]T, extract func(*T) string) *Filter[T] {
 }
 
 // Update re-filters the source slice with a new query string.
-// no-op if the query hasn't changed.
+// No-op if the query hasn't changed.
 func (f *Filter[T]) Update(query string) {
 	if query == f.lastQuery {
 		return
@@ -351,7 +351,7 @@ func (f *Filter[T]) Reset() {
 }
 
 // Original maps a filtered index back to a pointer into the source slice.
-// returns nil if the index is out of bounds.
+// Returns nil if the index is out of bounds.
 func (f *Filter[T]) Original(filteredIndex int) *T {
 	if filteredIndex < 0 || filteredIndex >= len(f.indices) {
 		return nil
@@ -365,7 +365,7 @@ func (f *Filter[T]) Original(filteredIndex int) *T {
 }
 
 // OriginalIndex maps a filtered index back to the index in the source slice.
-// returns -1 if the index is out of bounds.
+// Returns -1 if the index is out of bounds.
 func (f *Filter[T]) OriginalIndex(filteredIndex int) int {
 	if filteredIndex < 0 || filteredIndex >= len(f.indices) {
 		return -1

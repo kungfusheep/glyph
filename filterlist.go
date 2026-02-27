@@ -288,14 +288,14 @@ func (fl *FilterListC[T]) BindNav(down, up string) *FilterListC[T] {
 }
 
 // Selected returns a pointer to the original source item corresponding
-// to the current list selection. returns nil if nothing is selected.
+// to the current list selection. Returns nil if nothing is selected.
 func (fl *FilterListC[T]) Selected() *T {
 	idx := fl.list.Index()
 	return fl.filter.Original(idx)
 }
 
 // SelectedIndex returns the index into the original source slice.
-// returns -1 if nothing is selected.
+// Returns -1 if nothing is selected.
 func (fl *FilterListC[T]) SelectedIndex() int {
 	return fl.filter.OriginalIndex(fl.list.Index())
 }

@@ -49,7 +49,7 @@ func ExampleHBoxFn() {
 // Combine WidthPct and Grow for a fixed sidebar with a flexible main area.
 func ExampleHBoxFn_widths() {
 	HBox(
-		VBox.WidthPct(30)(Text("sidebar")),
+		VBox.WidthPct(0.3)(Text("sidebar")),
 		VBox.Grow(1)(Text("main content")),
 	)
 }
@@ -213,13 +213,13 @@ func ExampleCurrency() {
 // Progress bar.
 // Bound to a float64 pointer (0.0–1.0). Width sets the bar length in cells.
 func ExampleProgress() {
-	var pct float64
+	var pct int
 
 	Progress(&pct).Width(30).FG(Green)
 }
 
 // Animated spinner.
-// The frame pointer is advanced by the framework on each render tick.
+// The frame pointer must be incremented by the caller (e.g. via a ticker goroutine).
 func ExampleSpinner() {
 	var frame int
 
@@ -437,7 +437,7 @@ func ExampleApp_multiView() {
 		Text("press b for back"),
 	)).Handle("b", func() { app.Go("home") })
 
-	app.Run()
+	app.RunFrom("home")
 }
 
 // Goroutine updates.
@@ -496,9 +496,9 @@ func ExampleStyle() {
 // Style margin.
 // Margin is part of Style. Values are top, right, bottom, left (CSS order).
 func ExampleStyle_margin() {
-	padded := DefaultStyle().MarginTRBL(1, 2, 1, 2)
+	s := DefaultStyle().MarginTRBL(1, 2, 1, 2)
 
-	Text("padded text").Style(padded)
+	Text("margined text").Style(s)
 }
 
 // Hex colour.
@@ -716,7 +716,7 @@ func ExampleDefine() {
 	})
 }
 
-// Focu cycling.
+// Focus cycling.
 // FocusManager coordinates focus between multiple inputs. Tab/Shift-Tab cycles through ManagedBy components.
 func ExampleFocusManager() {
 	fm := NewFocusManager()
