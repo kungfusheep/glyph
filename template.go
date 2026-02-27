@@ -250,6 +250,13 @@ type Op struct {
 	LeaderFill     rune     // fill character (default '.')
 	LeaderStyle    Style    // styling
 
+	// Counter
+	CounterCurrentPtr   *int   // pointer to current count
+	CounterTotalPtr     *int   // pointer to total count
+	CounterPrefix       string // prefix string (e.g. "  ")
+	CounterStreamingPtr *bool  // when non-nil and true, show spinner
+	CounterFramePtr     *int   // spinner frame counter
+
 	// Table
 	TableColumns     []TableColumn // column definitions
 	TableRowsPtr     *[][]string   // pointer to row data
@@ -376,6 +383,8 @@ const (
 	OpLeaderPtr      // Leader with pointer value
 	OpLeaderIntPtr   // Leader with int pointer value
 	OpLeaderFloatPtr // Leader with float64 pointer value
+
+	OpCounter // Counter with current/total int pointers
 
 	OpTable     // Table with columns and rows
 	OpAutoTable // AutoTable with pointer to slice of structs (reactive)
@@ -523,6 +532,8 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		return t.compileSpinnerC(v, parent, depth)
 	case LeaderC:
 		return t.compileLeaderC(v, parent, depth)
+	case counterC:
+		return t.compileCounterC(v, parent, depth)
 	case SparklineC:
 		return t.compileSparklineC(v, parent, depth)
 	case JumpC:
@@ -1639,6 +1650,20 @@ func (t *Template) compileLeaderC(v LeaderC, parent int16, depth int) int16 {
 	return t.addOp(op, depth)
 }
 
+func (t *Template) compileCounterC(v counterC, parent int16, depth int) int16 {
+	return t.addOp(Op{
+		Kind:                OpCounter,
+		Parent:              parent,
+		TextStyle:           v.style,
+		CounterCurrentPtr:   v.current,
+		CounterTotalPtr:     v.total,
+		CounterPrefix:       v.prefix,
+		CounterStreamingPtr: v.streaming,
+		CounterFramePtr:     v.framePtr,
+		Margin:              v.style.margin,
+	}, depth)
+}
+
 func (t *Template) compileSparklineC(v SparklineC, parent int16, depth int) int16 {
 	op := Op{
 		Parent:     parent,
@@ -2261,6 +2286,16 @@ func (t *Template) setOpWidth(op *Op, geom *Geom, availW int16, elemBase unsafe.
 	case OpProgress, OpProgressPtr, OpProgressOff:
 		geom.W = op.Width
 
+	case OpCounter:
+		// compute width from prefix + formatted ints
+		// spinner replaces a prefix space so display width is constant
+		var scratch [48]byte
+		b := append(scratch[:0], op.CounterPrefix...)
+		b = strconv.AppendInt(b, int64(*op.CounterCurrentPtr), 10)
+		b = append(b, '/')
+		b = strconv.AppendInt(b, int64(*op.CounterTotalPtr), 10)
+		geom.W = int16(len(b))
+
 	case OpLeader, OpLeaderPtr, OpLeaderIntPtr, OpLeaderFloatPtr:
 		geom.W = op.Width
 		if geom.W == 0 {
@@ -2639,6 +2674,9 @@ func (t *Template) layout(_ int16) {
 				geom.H = 1
 
 			case OpLeader, OpLeaderPtr, OpLeaderIntPtr, OpLeaderFloatPtr:
+				geom.H = 1
+
+			case OpCounter:
 				geom.H = 1
 
 			case OpAutoTable:
@@ -3638,6 +3676,23 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		value := applyTransform(unsafe.String(&b[0], len(b)), style.Transform)
 		buf.WriteLeader(int(absX), int(absY), label, value, width, op.LeaderFill, style)
 
+	case OpCounter:
+		style := t.effectiveStyle(op.TextStyle)
+		var scratch [48]byte
+		var b []byte
+		prefix := op.CounterPrefix
+		if op.CounterStreamingPtr != nil && *op.CounterStreamingPtr && len(prefix) > 0 {
+			b = append(scratch[:0], SpinnerCircle[*op.CounterFramePtr%len(SpinnerCircle)]...)
+			b = append(b, prefix[1:]...)
+		} else {
+			b = append(scratch[:0], prefix...)
+		}
+		b = strconv.AppendInt(b, int64(*op.CounterCurrentPtr), 10)
+		b = append(b, '/')
+		b = strconv.AppendInt(b, int64(*op.CounterTotalPtr), 10)
+		text := unsafe.String(&b[0], len(b))
+		buf.WriteStringFast(int(absX), int(absY), text, style, int(maxW))
+
 	case OpAutoTable:
 		t.renderAutoTable(buf, op, absX, absY, maxW)
 
@@ -4040,6 +4095,23 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		b := strconv.AppendFloat(scratch[:0], *op.LeaderFloatPtr, 'f', 1, 64)
 		value := applyTransform(unsafe.String(&b[0], len(b)), style.Transform)
 		buf.WriteLeader(int(absX), int(absY), label, value, width, op.LeaderFill, style)
+
+	case OpCounter:
+		style := sub.effectiveStyle(op.TextStyle)
+		var scratch [48]byte
+		var b []byte
+		prefix := op.CounterPrefix
+		if op.CounterStreamingPtr != nil && *op.CounterStreamingPtr && len(prefix) > 0 {
+			b = append(scratch[:0], SpinnerCircle[*op.CounterFramePtr%len(SpinnerCircle)]...)
+			b = append(b, prefix[1:]...)
+		} else {
+			b = append(scratch[:0], prefix...)
+		}
+		b = strconv.AppendInt(b, int64(*op.CounterCurrentPtr), 10)
+		b = append(b, '/')
+		b = strconv.AppendInt(b, int64(*op.CounterTotalPtr), 10)
+		text := unsafe.String(&b[0], len(b))
+		buf.WriteStringFast(int(absX), int(absY), text, style, int(maxW))
 
 	case OpTable:
 		sub.renderTable(buf, op, absX, absY, maxW)
