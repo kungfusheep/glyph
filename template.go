@@ -114,6 +114,10 @@ type Template struct {
 	// vertical clip: maximum Y coordinate for rendering (exclusive, 0 = no clip)
 	clipMaxY int16
 
+	// exit is used by conditional branch selectors to retain a branch until its
+	// Animate.Out tweens have completed.
+	exit exitScope
+
 	// compile-time: tracks the outermost property pointer and collects
 	// nested tween items maps so the outermost condition can record
 	// per-item displayed values for transition detection
@@ -166,6 +170,182 @@ func (t *Template) evalRoot() *Template {
 		return t.root
 	}
 	return t
+}
+
+type exitScope struct {
+	tweenCount   int
+	activeLeases int
+	rendering    bool
+	parent       *Template
+}
+
+func (t *Template) registerExitTween(tw tweenNode) {
+	if tw != nil && tw.getTweenOut() != nil {
+		t.exit.tweenCount++
+		if t.exit.parent != nil {
+			t.exit.parent.registerExitTween(tw)
+		}
+	}
+}
+
+func (t *Template) hasExitTweens() bool {
+	return t != nil && t.exit.tweenCount > 0
+}
+
+func (t *Template) hasActiveExitLeases() bool {
+	return t != nil && t.exit.activeLeases > 0
+}
+
+func (t *Template) setExitLease(slot *bool, active bool) {
+	if *slot == active {
+		return
+	}
+	*slot = active
+	if active {
+		t.exit.activeLeases++
+		if t.exit.parent != nil {
+			t.exit.parent.setExitLease(new(bool), true)
+		}
+		return
+	}
+	if t.exit.activeLeases > 0 {
+		t.exit.activeLeases--
+	}
+	if t.exit.parent != nil && t.exit.parent.exit.activeLeases > 0 {
+		t.exit.parent.exit.activeLeases--
+	}
+}
+
+func (t *Template) setExitRendering(active bool) {
+	if t == nil {
+		return
+	}
+	t.exit.rendering = active
+	for i := range t.ops {
+		switch ext := t.ops[i].Ext.(type) {
+		case *opOverlay:
+			if ext.childTmpl != nil {
+				ext.childTmpl.setExitRendering(active)
+			}
+		case *opIf:
+			ext.thenTmpl.setExitRendering(active)
+			ext.elseTmpl.setExitRendering(active)
+		case *opSwitch:
+			for _, tmpl := range ext.cases {
+				tmpl.setExitRendering(active)
+			}
+			ext.def.setExitRendering(active)
+		case *opMatch:
+			for _, tmpl := range ext.cases {
+				tmpl.setExitRendering(active)
+			}
+			ext.def.setExitRendering(active)
+		}
+	}
+}
+
+type branchSelector struct {
+	selected     int
+	initialized  bool
+	exiting      bool
+	exitRendered bool
+}
+
+func (b *branchSelector) selectBranch(requested int, branches []*Template) (int, bool) {
+	if !b.initialized {
+		b.initialized = true
+		b.selected = -1
+	}
+	if b.selected == requested {
+		b.exiting = false
+		b.exitRendered = false
+		if current := branchAt(branches, requested); current != nil {
+			current.setExitRendering(false)
+		}
+		return requested, false
+	}
+
+	current := branchAt(branches, b.selected)
+	if current == nil || !current.hasExitTweens() {
+		if current != nil {
+			current.setExitRendering(false)
+		}
+		b.selected = requested
+		b.exiting = false
+		b.exitRendered = false
+		return requested, false
+	}
+
+	if b.exiting && b.exitRendered && !current.hasActiveExitLeases() {
+		current.setExitRendering(false)
+		b.selected = requested
+		b.exiting = false
+		b.exitRendered = false
+		return requested, false
+	}
+
+	b.exiting = true
+	if !b.exitRendered {
+		current.evalRoot().animating = true
+	}
+	return b.selected, true
+}
+
+func (b *branchSelector) markExitRendered() {
+	if b.exiting {
+		b.exitRendered = true
+	}
+}
+
+func branchAt(branches []*Template, idx int) *Template {
+	if idx < 0 || idx >= len(branches) {
+		return nil
+	}
+	return branches[idx]
+}
+
+func ifBranches(ifExt *opIf, elemBase unsafe.Pointer) ([]*Template, int) {
+	branches := []*Template{ifExt.thenTmpl, ifExt.elseTmpl}
+	if ifExt.eval(elemBase) {
+		if ifExt.thenTmpl == nil {
+			return branches, -1
+		}
+		return branches, 0
+	}
+	if ifExt.elseTmpl == nil {
+		return branches, -1
+	}
+	return branches, 1
+}
+
+func switchBranches(swExt *opSwitch, elemBase unsafe.Pointer) ([]*Template, int) {
+	branches := make([]*Template, 0, len(swExt.cases)+1)
+	branches = append(branches, swExt.cases...)
+	defIdx := -1
+	if swExt.def != nil {
+		defIdx = len(branches)
+		branches = append(branches, swExt.def)
+	}
+	matchIdx := swExt.node.getMatchIndexWithBase(elemBase)
+	if matchIdx >= 0 && matchIdx < len(swExt.cases) && swExt.cases[matchIdx] != nil {
+		return branches, matchIdx
+	}
+	return branches, defIdx
+}
+
+func matchBranches(mExt *opMatch, elemBase unsafe.Pointer) ([]*Template, int) {
+	branches := make([]*Template, 0, len(mExt.cases)+1)
+	branches = append(branches, mExt.cases...)
+	defIdx := -1
+	if mExt.def != nil {
+		defIdx = len(branches)
+		branches = append(branches, mExt.def)
+	}
+	matchIdx := mExt.node.getMatchIndexWithBase(elemBase)
+	if matchIdx >= 0 && matchIdx < len(mExt.cases) && mExt.cases[matchIdx] != nil {
+		return branches, matchIdx
+	}
+	return branches, defIdx
 }
 
 // pendingOverlay stores info needed to render an overlay after main content
@@ -882,11 +1062,30 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool) *float64 {
 	durPtr := tw.(*tween).durationPtr
 	onComplete := tw.getTweenOnComplete()
 	ease := tw.getTweenEasing()
+	outTw := tw.getTweenOut()
+	var outWatchPtr *float64
+	var outDurVal time.Duration
+	var outDurPtr *time.Duration
+	var outEase func(float64) float64
+	var outOnComplete func()
+	if outTw != nil {
+		t.registerExitTween(tw)
+		outWatchPtr = t.resolveTweenTargetFloat64(outTw.getTarget())
+		outDurVal = outTw.getTweenDuration()
+		if out, ok := outTw.(*tween); ok {
+			outDurPtr = out.durationPtr
+		}
+		outEase = outTw.getTweenEasing()
+		outOnComplete = outTw.getTweenOnComplete()
+	}
 
 	lastTarget := *watchPtr
 	startVal := *watchPtr
 	var startTime time.Time
 	needsFirstFrame := false
+	exitActive := false
+	exitComplete := false
+	exitLeaseActive := false
 
 	var fromVal float64
 	if from := tw.getTweenFrom(); from != nil {
@@ -906,6 +1105,60 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool) *float64 {
 		}
 		target := *watchPtr
 		now := root.frameTime
+		if outTw != nil && t.exit.rendering {
+			outDur := outDurVal
+			if outDurPtr != nil {
+				outDur = *outDurPtr
+			}
+			outTarget := *outWatchPtr
+			if exitComplete {
+				*storage = outTarget
+				t.setExitLease(&exitLeaseActive, false)
+				return
+			}
+			if !exitActive {
+				exitActive = true
+				startVal = *storage
+				if from := outTw.getTweenFrom(); from != nil {
+					startVal = anyToFloat64(from)
+					*storage = startVal
+				}
+				lastTarget = outTarget
+				startTime = now
+			} else if outTarget != lastTarget {
+				startVal = *storage
+				lastTarget = outTarget
+				startTime = now
+			}
+			t.setExitLease(&exitLeaseActive, true)
+			if startTime.IsZero() {
+				return
+			}
+			elapsed := now.Sub(startTime)
+			if elapsed >= outDur {
+				*storage = outTarget
+				startTime = time.Time{}
+				exitActive = false
+				exitComplete = true
+				t.setExitLease(&exitLeaseActive, false)
+				if outOnComplete != nil {
+					outOnComplete()
+				}
+				return
+			}
+			progress := float64(elapsed) / float64(outDur)
+			if outEase != nil {
+				progress = outEase(progress)
+			}
+			*storage = startVal + progress*(outTarget-startVal)
+			root.animating = true
+			return
+		}
+		if outTw != nil {
+			exitActive = false
+			exitComplete = false
+			t.setExitLease(&exitLeaseActive, false)
+		}
 
 		// activation gating: From tweens in screen effects wait for resolve()
 		if armed != nil {
@@ -1084,7 +1337,7 @@ func (t *Template) resolveTweenTargetInt8(target any) *int8 {
 }
 
 type perItemColorState struct {
-	lastTarget Color
+	lastTarget    Color
 	startVal      Color
 	current       Color
 	startTime     time.Time
@@ -1336,7 +1589,6 @@ func (t *Template) compileTweenStyle(tw tweenNode, elemBase unsafe.Pointer, elem
 	return storage
 }
 
-
 func (t *Template) resolveTweenTargetColor(target any, elemBase unsafe.Pointer, elemSize uintptr) *Color {
 	switch v := target.(type) {
 	case *Color:
@@ -1417,6 +1669,7 @@ type opIf struct {
 	condNode conditionNode
 	thenTmpl *Template
 	elseTmpl *Template
+	branch   branchSelector
 }
 
 func (c *opIf) eval(elemBase unsafe.Pointer) bool {
@@ -1438,15 +1691,17 @@ type opForEach struct {
 }
 
 type opSwitch struct {
-	node     switchNodeInterface
-	cases    []*Template
-	def      *Template
+	node   switchNodeInterface
+	cases  []*Template
+	def    *Template
+	branch branchSelector
 }
 
 type opMatch struct {
-	node  matchNodeInterface
-	cases []*Template
-	def   *Template
+	node   matchNodeInterface
+	cases  []*Template
+	def    *Template
+	branch branchSelector
 }
 
 type opCustomRenderer struct {
@@ -1467,9 +1722,9 @@ type opText struct {
 	fn         func() string
 	fnCached   string // cached result from fn(), set during width measurement
 	style      Style
-	stylePtr   *Style         // dynamic style override (nil = use static)
-	styleCond  conditionNode  // conditional style for ForEach (nil = not conditional)
-	charWrap   bool           // true = character-wrap, false = word-wrap (TextBlock only)
+	stylePtr   *Style        // dynamic style override (nil = use static)
+	styleCond  conditionNode // conditional style for ForEach (nil = not conditional)
+	charWrap   bool          // true = character-wrap, false = word-wrap (TextBlock only)
 }
 
 func (tx *opText) resolve(elemBase unsafe.Pointer) string {
@@ -1525,13 +1780,13 @@ const (
 )
 
 type opProgress struct {
-	mode      uint8
-	static    int
-	ptr       *int
-	int16Ptr  *int16
-	off       uintptr
-	style     Style
-	stylePtr  *Style
+	mode     uint8
+	static   int
+	ptr      *int
+	int16Ptr *int16
+	off      uintptr
+	style    Style
+	stylePtr *Style
 }
 
 func (p *opProgress) resolve(elemBase unsafe.Pointer) int {
@@ -1706,17 +1961,17 @@ type opTable struct {
 }
 
 type opAutoTable struct {
-	slicePtr  any
-	fields    []int
-	headers   []string
-	hdrStyle  Style
-	rowStyle  Style
-	altStyle  *Style
-	gap       int8
-	fill      Color
-	colCfgs   []*ColumnConfig
-	sort      *autoTableSortState
-	scroll    *autoTableScroll
+	slicePtr any
+	fields   []int
+	headers  []string
+	hdrStyle Style
+	rowStyle Style
+	altStyle *Style
+	gap      int8
+	fill     Color
+	colCfgs  []*ColumnConfig
+	sort     *autoTableSortState
+	scroll   *autoTableScroll
 }
 
 type opLayer struct {
@@ -1735,8 +1990,8 @@ type opScreenEffect struct {
 }
 
 // margin helpers (avoid repeating [0]/[1]/[2]/[3] everywhere)
-func (op *Op) marginH() int16  { return op.Margin[1] + op.Margin[3] }  // left + right
-func (op *Op) marginV() int16  { return op.Margin[0] + op.Margin[2] }  // top + bottom
+func (op *Op) marginH() int16  { return op.Margin[1] + op.Margin[3] }   // left + right
+func (op *Op) marginV() int16  { return op.Margin[0] + op.Margin[2] }   // top + bottom
 func (op *Op) paddingH() int16 { return op.Padding[1] + op.Padding[3] } // left + right
 func (op *Op) paddingV() int16 { return op.Padding[0] + op.Padding[2] } // top + bottom
 
@@ -1819,6 +2074,7 @@ func (t *Template) buildWithRoot(ui any) *Template {
 		byDepth: make([][]int16, 16),
 		root:    t.evalRoot(),
 	}
+	child.exit.parent = t
 	for i := range child.byDepth {
 		child.byDepth[i] = make([]int16, 0, 8)
 	}
@@ -3752,19 +4008,6 @@ func (t *Template) Execute(buf *Buffer, screenW, screenH int16) {
 		eval()
 	}
 
-	// manage animation ticker — start at ~60fps when animating, stop when settled
-	if t.animating && t.animTicker == nil && t.requestRender != nil {
-		t.animTicker = time.NewTicker(16 * time.Millisecond)
-		go func() {
-			for range t.animTicker.C {
-				t.requestRender()
-			}
-		}()
-	} else if !t.animating && t.animTicker != nil {
-		t.animTicker.Stop()
-		t.animTicker = nil
-	}
-
 	// Phase 1: Width distribution (top → down)
 	t.distributeWidths(screenW, nil)
 
@@ -3779,6 +4022,19 @@ func (t *Template) Execute(buf *Buffer, screenW, screenH int16) {
 
 	// Phase 4: Render overlays (after main content so they appear on top)
 	t.renderOverlays(buf, screenW, screenH)
+
+	// manage animation ticker — start at ~60fps when animating, stop when settled
+	if t.animating && t.animTicker == nil && t.requestRender != nil {
+		t.animTicker = time.NewTicker(16 * time.Millisecond)
+		go func() {
+			for range t.animTicker.C {
+				t.requestRender()
+			}
+		}()
+	} else if !t.animating && t.animTicker != nil {
+		t.animTicker.Stop()
+		t.animTicker = nil
+	}
 }
 
 // distributeWidths assigns W to all ops, top-down.
@@ -4029,16 +4285,12 @@ func (t *Template) setOpWidth(op *Op, geom *Geom, availW int16, elemBase unsafe.
 		geom.W = 0
 
 	case OpIf:
-		// Calculate width from the active branch content
 		ifExt := op.Ext.(*opIf)
-		condTrue := ifExt.eval(elemBase)
-		var subTmpl *Template
-		if condTrue {
-			subTmpl = ifExt.thenTmpl
-		} else {
-			subTmpl = ifExt.elseTmpl
-		}
+		branches, requested := ifBranches(ifExt, elemBase)
+		selected, exiting := ifExt.branch.selectBranch(requested, branches)
+		subTmpl := branchAt(branches, selected)
 		if subTmpl != nil {
+			subTmpl.setExitRendering(exiting)
 			subTmpl.elemBase = elemBase
 			// computeIntrinsicWidth handles both ContentSized containers and
 			// leaf nodes (OpText, etc.) that have a computable fixed width.
@@ -4723,17 +4975,14 @@ func (t *Template) layout(_ int16) {
 					break
 				}
 				ifExt := op.Ext.(*opIf)
-				condTrue := ifExt.eval(t.elemBase)
-				if condTrue && ifExt.thenTmpl != nil {
-					ifExt.thenTmpl.elemBase = t.elemBase
-					ifExt.thenTmpl.distributeWidths(geom.W, t.elemBase)
-					ifExt.thenTmpl.layout(0)
-					geom.H = ifExt.thenTmpl.Height()
-				} else if !condTrue && ifExt.elseTmpl != nil {
-					ifExt.elseTmpl.elemBase = t.elemBase
-					ifExt.elseTmpl.distributeWidths(geom.W, t.elemBase)
-					ifExt.elseTmpl.layout(0)
-					geom.H = ifExt.elseTmpl.Height()
+				branches, requested := ifBranches(ifExt, t.elemBase)
+				selected, exiting := ifExt.branch.selectBranch(requested, branches)
+				if tmpl := branchAt(branches, selected); tmpl != nil {
+					tmpl.setExitRendering(exiting)
+					tmpl.elemBase = t.elemBase
+					tmpl.distributeWidths(geom.W, t.elemBase)
+					tmpl.layout(0)
+					geom.H = tmpl.Height()
 				}
 
 			case OpSwitch:
@@ -4743,14 +4992,11 @@ func (t *Template) layout(_ int16) {
 					break
 				}
 				swExt := op.Ext.(*opSwitch)
-				matchIdx := swExt.node.getMatchIndexWithBase(t.elemBase)
-				var switchTmpl *Template
-				if matchIdx >= 0 && matchIdx < len(swExt.cases) {
-					switchTmpl = swExt.cases[matchIdx]
-				} else {
-					switchTmpl = swExt.def
-				}
+				branches, requested := switchBranches(swExt, t.elemBase)
+				selected, exiting := swExt.branch.selectBranch(requested, branches)
+				switchTmpl := branchAt(branches, selected)
 				if switchTmpl != nil {
+					switchTmpl.setExitRendering(exiting)
 					switchTmpl.elemBase = t.elemBase
 					switchTmpl.distributeWidths(geom.W, t.elemBase)
 					switchTmpl.layout(0)
@@ -4762,14 +5008,11 @@ func (t *Template) layout(_ int16) {
 					break
 				}
 				mExt := op.Ext.(*opMatch)
-				matchIdx := mExt.node.getMatchIndexWithBase(t.elemBase)
-				var matchTmpl *Template
-				if matchIdx >= 0 && matchIdx < len(mExt.cases) {
-					matchTmpl = mExt.cases[matchIdx]
-				} else {
-					matchTmpl = mExt.def
-				}
+				branches, requested := matchBranches(mExt, t.elemBase)
+				selected, exiting := mExt.branch.selectBranch(requested, branches)
+				matchTmpl := branchAt(branches, selected)
 				if matchTmpl != nil {
+					matchTmpl.setExitRendering(exiting)
 					matchTmpl.elemBase = t.elemBase
 					matchTmpl.distributeWidths(geom.W, t.elemBase)
 					matchTmpl.layout(0)
@@ -4821,49 +5064,31 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 			// Control flow ops expand to their content
 			switch childOp.Kind {
 			case OpIf:
-				// Use evaluateWithBase for conditions in ForEach context
 				childIfExt := childOp.Ext.(*opIf)
-				condTrue := childIfExt.eval(t.elemBase)
+				branches, requested := ifBranches(childIfExt, t.elemBase)
+				selected, exiting := childIfExt.branch.selectBranch(requested, branches)
+				tmpl := branchAt(branches, selected)
 				// Use pre-calculated width if set (from flex distribution), otherwise use availW
 				ifWidth := t.geom[i].W
 				if ifWidth == 0 {
 					ifWidth = availW
 				}
-				if childIfExt.thenTmpl != nil && condTrue {
+				if tmpl != nil {
 					// Add gap before this child if needed
 					if g := op.gap(); needGap && g > 0 {
 						cursor += int16(g)
 					}
-					childIfExt.thenTmpl.elemBase = t.elemBase
-					childIfExt.thenTmpl.distributeWidths(ifWidth, t.elemBase)
-					childIfExt.thenTmpl.layout(0)
-					h := childIfExt.thenTmpl.Height()
+					tmpl.setExitRendering(exiting)
+					tmpl.elemBase = t.elemBase
+					tmpl.distributeWidths(ifWidth, t.elemBase)
+					tmpl.layout(0)
+					h := tmpl.Height()
 					t.geom[i].LocalX = contentOffX + cursor
 					t.geom[i].LocalY = contentOffY
 					t.geom[i].H = h
 					// Use sub-template width only if we didn't have a pre-set width
-					if t.geom[i].W == 0 && len(childIfExt.thenTmpl.geom) > 0 {
-						t.geom[i].W = childIfExt.thenTmpl.geom[0].W
-					}
-					cursor += t.geom[i].W
-					if h > maxH {
-						maxH = h
-					}
-					needGap = true // Next visible child needs gap
-				} else if childIfExt.elseTmpl != nil && !condTrue {
-					// Add gap before this child if needed
-					if g := op.gap(); needGap && g > 0 {
-						cursor += int16(g)
-					}
-					childIfExt.elseTmpl.elemBase = t.elemBase
-					childIfExt.elseTmpl.distributeWidths(ifWidth, t.elemBase)
-					childIfExt.elseTmpl.layout(0)
-					h := childIfExt.elseTmpl.Height()
-					t.geom[i].LocalX = contentOffX + cursor
-					t.geom[i].LocalY = contentOffY
-					t.geom[i].H = h
-					if t.geom[i].W == 0 && len(childIfExt.elseTmpl.geom) > 0 {
-						t.geom[i].W = childIfExt.elseTmpl.geom[0].W
+					if t.geom[i].W == 0 && len(tmpl.geom) > 0 {
+						t.geom[i].W = tmpl.geom[0].W
 					}
 					cursor += t.geom[i].W
 					if h > maxH {
@@ -5004,25 +5229,16 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 			// Control flow ops expand to their content
 			switch childOp.Kind {
 			case OpIf:
-				// Use evaluateWithBase for conditions in ForEach context
 				childIfExt := childOp.Ext.(*opIf)
-				condTrue := childIfExt.eval(t.elemBase)
-				if childIfExt.thenTmpl != nil && condTrue {
-					childIfExt.thenTmpl.elemBase = t.elemBase
-					childIfExt.thenTmpl.distributeWidths(availW, t.elemBase)
-					childIfExt.thenTmpl.layout(0)
-					h := childIfExt.thenTmpl.Height()
-					t.geom[i].LocalX = contentOffX
-					t.geom[i].LocalY = contentOffY + cursor
-					t.geom[i].H = h
-					t.geom[i].ContentH = h // Track content height for flex
-					t.geom[i].W = availW
-					cursor += h
-				} else if childIfExt.elseTmpl != nil && !condTrue {
-					childIfExt.elseTmpl.elemBase = t.elemBase
-					childIfExt.elseTmpl.distributeWidths(availW, t.elemBase)
-					childIfExt.elseTmpl.layout(0)
-					h := childIfExt.elseTmpl.Height()
+				branches, requested := ifBranches(childIfExt, t.elemBase)
+				selected, exiting := childIfExt.branch.selectBranch(requested, branches)
+				tmpl := branchAt(branches, selected)
+				if tmpl != nil {
+					tmpl.setExitRendering(exiting)
+					tmpl.elemBase = t.elemBase
+					tmpl.distributeWidths(availW, t.elemBase)
+					tmpl.layout(0)
+					h := tmpl.Height()
 					t.geom[i].LocalX = contentOffX
 					t.geom[i].LocalY = contentOffY + cursor
 					t.geom[i].H = h
@@ -5043,16 +5259,12 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 				cursor += h
 
 			case OpSwitch:
-				// Get matching template
 				childSwExt := childOp.Ext.(*opSwitch)
-				var tmpl *Template
-				matchIdx := childSwExt.node.getMatchIndexWithBase(t.elemBase)
-				if matchIdx >= 0 && matchIdx < len(childSwExt.cases) {
-					tmpl = childSwExt.cases[matchIdx]
-				} else {
-					tmpl = childSwExt.def
-				}
+				branches, requested := switchBranches(childSwExt, t.elemBase)
+				selected, exiting := childSwExt.branch.selectBranch(requested, branches)
+				tmpl := branchAt(branches, selected)
 				if tmpl != nil {
+					tmpl.setExitRendering(exiting)
 					tmpl.elemBase = t.elemBase
 					tmpl.distributeWidths(availW, t.elemBase)
 					tmpl.layout(0)
@@ -5068,14 +5280,11 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 
 			case OpMatch:
 				childMExt := childOp.Ext.(*opMatch)
-				var tmpl *Template
-				matchIdx := childMExt.node.getMatchIndexWithBase(t.elemBase)
-				if matchIdx >= 0 && matchIdx < len(childMExt.cases) {
-					tmpl = childMExt.cases[matchIdx]
-				} else {
-					tmpl = childMExt.def
-				}
+				branches, requested := matchBranches(childMExt, t.elemBase)
+				selected, exiting := childMExt.branch.selectBranch(requested, branches)
+				tmpl := branchAt(branches, selected)
 				if tmpl != nil {
+					tmpl.setExitRendering(exiting)
 					tmpl.elemBase = t.elemBase
 					tmpl.distributeWidths(availW, t.elemBase)
 					tmpl.layout(0)
@@ -6041,31 +6250,14 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		t.clipMaxY = oldClipMaxY
 
 	case OpIf:
-		// Render active branch if condition is true
 		ifExt := op.Ext.(*opIf)
-		condTrue := ifExt.evalStatic()
-		if ifExt.thenTmpl != nil && condTrue {
-			ifExt.thenTmpl.app = t.app
-			ifExt.thenTmpl.inheritedStyle = t.inheritedStyle // propagate inherited style
-			ifExt.thenTmpl.inheritedFill = t.inheritedFill   // propagate inherited fill
-			ifExt.thenTmpl.clipMaxY = t.clipMaxY             // propagate vertical clip
-			ifExt.thenTmpl.elemBase = t.elemBase             // propagate for offset-based text inside branch templates
-			ifExt.thenTmpl.pendingOverlays = ifExt.thenTmpl.pendingOverlays[:0]
-			ifExt.thenTmpl.pendingScreenEffects = ifExt.thenTmpl.pendingScreenEffects[:0]
-			ifExt.thenTmpl.render(buf, absX, absY, geom.W)
-			t.pendingOverlays = append(t.pendingOverlays, ifExt.thenTmpl.pendingOverlays...)
-			t.pendingScreenEffects = append(t.pendingScreenEffects, ifExt.thenTmpl.pendingScreenEffects...)
-		} else if ifExt.elseTmpl != nil && !condTrue {
-			ifExt.elseTmpl.app = t.app
-			ifExt.elseTmpl.inheritedStyle = t.inheritedStyle // propagate inherited style
-			ifExt.elseTmpl.inheritedFill = t.inheritedFill   // propagate inherited fill
-			ifExt.elseTmpl.clipMaxY = t.clipMaxY             // propagate vertical clip
-			ifExt.elseTmpl.elemBase = t.elemBase             // propagate for offset-based text inside branch templates
-			ifExt.elseTmpl.pendingOverlays = ifExt.elseTmpl.pendingOverlays[:0]
-			ifExt.elseTmpl.pendingScreenEffects = ifExt.elseTmpl.pendingScreenEffects[:0]
-			ifExt.elseTmpl.render(buf, absX, absY, geom.W)
-			t.pendingOverlays = append(t.pendingOverlays, ifExt.elseTmpl.pendingOverlays...)
-			t.pendingScreenEffects = append(t.pendingScreenEffects, ifExt.elseTmpl.pendingScreenEffects...)
+		branches, requested := ifBranches(ifExt, t.elemBase)
+		selected, exiting := ifExt.branch.selectBranch(requested, branches)
+		if tmpl := branchAt(branches, selected); tmpl != nil {
+			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, t.elemBase, exiting)
+			if exiting {
+				ifExt.branch.markExitRendered()
+			}
 		}
 
 	case OpForEach:
@@ -6115,36 +6307,27 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		}
 
 	case OpSwitch:
-		// Render matching case template
 		swExt := op.Ext.(*opSwitch)
-		var tmpl *Template
-		matchIdx := swExt.node.getMatchIndexWithBase(t.elemBase)
-		if matchIdx >= 0 && matchIdx < len(swExt.cases) {
-			tmpl = swExt.cases[matchIdx]
-		} else {
-			tmpl = swExt.def
-		}
+		branches, requested := switchBranches(swExt, t.elemBase)
+		selected, exiting := swExt.branch.selectBranch(requested, branches)
+		tmpl := branchAt(branches, selected)
 		if tmpl != nil {
-			tmpl.clipMaxY = t.clipMaxY           // propagate vertical clip
-			tmpl.inheritedFill = t.inheritedFill // propagate fill so blank cells use parent bg
-			tmpl.elemBase = t.elemBase           // propagate for offset-based text inside case templates
-			tmpl.render(buf, absX, absY, geom.W)
+			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, t.elemBase, exiting)
+			if exiting {
+				swExt.branch.markExitRendered()
+			}
 		}
 
 	case OpMatch:
 		mExt := op.Ext.(*opMatch)
-		var tmpl *Template
-		matchIdx := mExt.node.getMatchIndexWithBase(t.elemBase)
-		if matchIdx >= 0 && matchIdx < len(mExt.cases) {
-			tmpl = mExt.cases[matchIdx]
-		} else {
-			tmpl = mExt.def
-		}
+		branches, requested := matchBranches(mExt, t.elemBase)
+		selected, exiting := mExt.branch.selectBranch(requested, branches)
+		tmpl := branchAt(branches, selected)
 		if tmpl != nil {
-			tmpl.clipMaxY = t.clipMaxY
-			tmpl.inheritedFill = t.inheritedFill
-			tmpl.elemBase = t.elemBase
-			tmpl.render(buf, absX, absY, geom.W)
+			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, t.elemBase, exiting)
+			if exiting {
+				mExt.branch.markExitRendered()
+			}
 		}
 	}
 }
@@ -6152,14 +6335,28 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 // renderSubTemplate renders a sub-template (for ForEach) with element-bound data.
 func (t *Template) renderSubTemplate(buf *Buffer, sub *Template, globalX, globalY, maxW int16, elemBase unsafe.Pointer) {
 	sub.app = t.app
-	sub.clipMaxY = t.clipMaxY       // propagate vertical clip
+	sub.clipMaxY = t.clipMaxY           // propagate vertical clip
 	sub.inheritedFill = t.inheritedFill // propagate fill so blank cells use parent bg
-	sub.elemBase = elemBase         // ensure renderOp paths (e.g. via renderJump) see the correct element
+	sub.elemBase = elemBase             // ensure renderOp paths (e.g. via renderJump) see the correct element
 	for i := range sub.ops {
 		if sub.ops[i].Parent == -1 {
 			sub.renderSubOp(buf, int16(i), globalX, globalY, maxW, elemBase)
 		}
 	}
+}
+
+func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, globalY, maxW int16, elemBase unsafe.Pointer, exiting bool) {
+	sub.app = t.app
+	sub.inheritedStyle = t.inheritedStyle
+	sub.inheritedFill = t.inheritedFill
+	sub.clipMaxY = t.clipMaxY
+	sub.elemBase = elemBase
+	sub.setExitRendering(exiting)
+	sub.pendingOverlays = sub.pendingOverlays[:0]
+	sub.pendingScreenEffects = sub.pendingScreenEffects[:0]
+	sub.render(buf, globalX, globalY, maxW)
+	t.pendingOverlays = append(t.pendingOverlays, sub.pendingOverlays...)
+	t.pendingScreenEffects = append(t.pendingScreenEffects, sub.pendingScreenEffects...)
 }
 
 // renderSubOp renders a single op in a sub-template, recursing into children.
@@ -7733,7 +7930,7 @@ func opKindName(k OpKind) string {
 		OpContainer: "Container", OpIf: "If", OpForEach: "ForEach", OpSwitch: "Switch", OpMatch: "Match",
 		OpCustom: "Custom", OpLayout: "Layout", OpLayer: "Layer",
 		OpSelectionList: "SelectionList",
-		OpTable: "Table", OpAutoTable: "AutoTable", OpSparkline: "Sparkline",
+		OpTable:         "Table", OpAutoTable: "AutoTable", OpSparkline: "Sparkline",
 		OpHRule: "HRule", OpVRule: "VRule", OpSpacer: "Spacer",
 		OpSpinner: "Spinner", OpScrollbar: "Scrollbar", OpTabs: "Tabs", OpTreeView: "TreeView",
 		OpJump: "Jump", OpTextInput: "TextInput", OpOverlay: "Overlay", OpScreenEffect: "ScreenEffect",

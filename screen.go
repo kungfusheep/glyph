@@ -133,8 +133,10 @@ func (s *Screen) EnterRawMode() error {
 	s.origTermios = termios
 
 	raw := *termios
-	// Input flags: disable break, CR to NL, parity, strip, flow control
-	raw.Iflag &^= unix.BRKINT | unix.ICRNL | unix.INPCK | unix.ISTRIP | unix.IXON
+	// Input flags: disable break, NL/CR translations, parity, strip, flow control.
+	// INLCR (NL → CR) and IGNCR (drop CR) are crucial — without them, Ctrl-J
+	// arrives as Enter on systems where the tty default has INLCR set.
+	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.INPCK | unix.ISTRIP | unix.IXON
 	// Output flags: disable post processing
 	raw.Oflag &^= unix.OPOST
 	// Control flags: set 8 bit chars
@@ -251,8 +253,10 @@ func (s *Screen) EnterInlineMode() error {
 	s.origTermios = termios
 
 	raw := *termios
-	// Input flags: disable break, CR to NL, parity, strip, flow control
-	raw.Iflag &^= unix.BRKINT | unix.ICRNL | unix.INPCK | unix.ISTRIP | unix.IXON
+	// Input flags: disable break, NL/CR translations, parity, strip, flow control.
+	// INLCR (NL → CR) and IGNCR (drop CR) are crucial — without them, Ctrl-J
+	// arrives as Enter on systems where the tty default has INLCR set.
+	raw.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.INPCK | unix.ISTRIP | unix.IXON
 	// Output flags: disable post processing
 	raw.Oflag &^= unix.OPOST
 	// Control flags: set 8 bit chars

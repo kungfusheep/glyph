@@ -254,6 +254,10 @@ func (a *App) SetView(view any) *App {
 	a.template.SetApp(a) // Link for jump mode support
 	a.template.requestRender = a.RequestRender
 	a.wireBindings(a.template, a.router)
+	// SetView's view is implicitly active — there's no separate activation
+	// step for single-view apps, so push the focus manager's initial sub-router
+	// here to preserve historical behaviour.
+	a.activateTemplateFM(a.template)
 	// Create buffer pool for async clearing (or reuse existing)
 	size := a.screen.Size()
 	if a.pool == nil {
@@ -271,6 +275,14 @@ func (a *App) SetView(view any) *App {
 }
 
 // wireBindings registers all declarative component bindings on the given router.
+//
+// For the FocusManager, this only sets up routers and bindings; it does NOT
+// push the focus manager's initial sub-router onto the global input stack.
+// That push is deferred until the view is activated (see activate/deactivate
+// below). Callers who treat their root template as immediately active — i.e.
+// SetView, the single-view case — must call (*App).activateTemplateFM after
+// wireBindings to keep the existing eager-push behaviour. Multi-view callers
+// (View) leave the push to happen on Go/RunFrom/PushView.
 func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
 	for _, b := range tmpl.pendingBindings {
 		switch h := b.handler.(type) {
@@ -344,8 +356,7 @@ func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
 
 			fm.routers[i] = sub
 		}
-
-		fm.initialPush()
+		// initial push deferred to activation time; see activateTemplateFM.
 	} else if tmpl.pendingTIB != nil {
 		th := riffkey.NewTextHandler(tmpl.pendingTIB.value, tmpl.pendingTIB.cursor)
 		th.OnChange = tmpl.pendingTIB.onChange
@@ -439,12 +450,27 @@ func (a *App) UpdateView(name string, view any) {
 	if a.viewTemplates == nil {
 		return
 	}
+	// if the named view is currently active and has a focus manager pushed,
+	// deactivate it first so the input stack stays balanced across the swap.
+	wasActive := a.currentView == name
+	for _, n := range a.viewStack {
+		if n == name {
+			wasActive = true
+			break
+		}
+	}
+	if wasActive {
+		a.deactivateView(name)
+	}
 	tmpl := Build(view)
 	tmpl.SetApp(a) // Link for jump mode support
 	if router, ok := a.viewRouters[name]; ok {
 		a.wireBindings(tmpl, router)
 	}
 	a.viewTemplates[name] = tmpl
+	if wasActive {
+		a.activateView(name)
+	}
 }
 
 // Go switches to a different view.
@@ -453,13 +479,61 @@ func (a *App) Go(name string) {
 	if _, ok := a.viewTemplates[name]; !ok {
 		return // View doesn't exist
 	}
+	if a.currentView != "" {
+		a.deactivateView(a.currentView)
+	}
 	a.currentView = name
 	a.input.SetRouter(a.viewRouters[name])
+	a.activateView(name)
 	// diff flush handles view switches correctly — every changed cell gets
 	// emitted. FlushFull issues \x1b[2J (clear) which can produce a visible
 	// microflash on some terminals (Ghostty) during a sync-wrapped update.
 	// a.forceFullFlush = true
 	a.RequestRender()
+}
+
+// activateTemplateFM pushes a template's focus-manager initial sub-router onto
+// the input stack, if the template has a focus manager. Called when a view
+// becomes active. Safe to call when the template has no focus manager.
+func (a *App) activateTemplateFM(tmpl *Template) {
+	if tmpl == nil {
+		return
+	}
+	if fm := tmpl.pendingFocusManager; fm != nil {
+		fm.initialPush()
+	}
+}
+
+// deactivateTemplateFM pops a template's focus-manager sub-router from the
+// input stack, if one is currently pushed. Called when a view loses active
+// status (Go to another view, PopView, etc).
+func (a *App) deactivateTemplateFM(tmpl *Template) {
+	if tmpl == nil {
+		return
+	}
+	if fm := tmpl.pendingFocusManager; fm != nil && fm.pushed {
+		if fm.pop != nil {
+			fm.pop()
+		}
+		fm.pushed = false
+	}
+}
+
+// activateView runs activation work for the named view: focus manager push,
+// any future per-view lifecycle hooks.
+func (a *App) activateView(name string) {
+	if a.viewTemplates == nil {
+		return
+	}
+	a.activateTemplateFM(a.viewTemplates[name])
+}
+
+// deactivateView runs deactivation work for the named view.
+func (a *App) deactivateView(name string) {
+	if a.viewTemplates == nil {
+		return
+	}
+	a.deactivateTemplateFM(a.viewTemplates[name])
 }
 
 // Back returns to the previous view.
@@ -476,6 +550,7 @@ func (a *App) PushView(name string) {
 	if router, ok := a.viewRouters[name]; ok {
 		a.viewStack = append(a.viewStack, name)
 		a.input.Push(router)
+		a.activateView(name)
 		a.RequestRender()
 	}
 }
@@ -483,9 +558,16 @@ func (a *App) PushView(name string) {
 // PopView removes the top modal overlay.
 // Returns to the previous view in the stack.
 func (a *App) PopView() {
-	if len(a.viewStack) > 0 {
-		a.viewStack = a.viewStack[:len(a.viewStack)-1]
+	if len(a.viewStack) == 0 {
+		a.input.Pop()
+		a.RequestRender()
+		return
 	}
+	topName := a.viewStack[len(a.viewStack)-1]
+	// pop the focus manager's sub-router (if any) before popping the view
+	// router itself, so the input stack ends up balanced.
+	a.deactivateView(topName)
+	a.viewStack = a.viewStack[:len(a.viewStack)-1]
 	a.input.Pop()
 	a.RequestRender()
 }
@@ -778,14 +860,27 @@ func (a *App) render() {
 		}
 		a.lastFrameTime = now
 
+		// OSC 10/11 query populates a.defaultFG/BG but only if the
+		// terminal supports it. When it doesn't, effects that key off
+		// ctx.DefaultFG (anything going through lerpIfRGB) silently skip
+		// painting unstyled cells. Falling back to the explicit
+		// SetDefaultStyle values means effects work even without OSC.
+		ppFG := a.defaultFG
+		if ppFG.Mode == ColorDefault {
+			ppFG = a.defaultStyle.FG
+		}
+		ppBG := a.defaultBG
+		if ppBG.Mode == ColorDefault {
+			ppBG = a.defaultStyle.BG
+		}
 		ppCtx := PostContext{
 			Width:     size.Width,
 			Height:    int(renderHeight),
 			Frame:     a.frameCount,
 			Delta:     delta,
 			Time:      now.Sub(a.startTime),
-			DefaultFG: a.defaultFG,
-			DefaultBG: a.defaultBG,
+			DefaultFG: ppFG,
+			DefaultBG: ppBG,
 		}
 		for _, pp := range treeEffects {
 			pp.Apply(buf, ppCtx)
@@ -907,6 +1002,7 @@ func (a *App) run(startView string) error {
 		if router, ok := a.viewRouters[startView]; ok {
 			a.input.SetRouter(router)
 		}
+		a.activateView(startView)
 	}
 
 	// Clean up buffer pool on exit if using fast path

@@ -804,8 +804,8 @@ func TestV2ForEach(t *testing.T) {
 	tmpl := Build(VBox(
 		Text("List:"),
 		ForEach(&items, func(item *testItem) any {
-				return Text(&item.Name)
-			}),
+			return Text(&item.Name)
+		}),
 		Text("End"),
 	))
 
@@ -835,8 +835,8 @@ func TestV2ForEachEmpty(t *testing.T) {
 	tmpl := Build(VBox(
 		Text("List:"),
 		ForEach(&items, func(item *testItem) any {
-				return Text(&item.Name)
-			}),
+			return Text(&item.Name)
+		}),
 		Text("End"),
 	))
 
@@ -860,8 +860,8 @@ func TestV2ForEachDynamic(t *testing.T) {
 
 	tmpl := Build(VBox(
 		ForEach(&items, func(item *testItem) any {
-				return Text(&item.Name)
-			}),
+			return Text(&item.Name)
+		}),
 	))
 
 	buf := NewBuffer(40, 10)
@@ -906,7 +906,7 @@ func (s StatusBar) Build() any {
 		if i > 0 {
 			children = append(children, Text(" | "))
 		}
-		children = append(children, Text(item.Label + ": "))
+		children = append(children, Text(item.Label+": "))
 		children = append(children, Text(item.Value))
 	}
 	return HBox(children...)
@@ -960,7 +960,7 @@ func TestV2NestedCustomComponent(t *testing.T) {
 	// This is defined inline to test the pattern
 	build := func(c CardComponent) any {
 		return VBox(
-			Text("[" + c.Card.Title + "]"),
+			Text("["+c.Card.Title+"]"),
 			Text(c.Card.Content),
 		)
 	}
@@ -1506,9 +1506,9 @@ func TestJumpWrapsVBox(t *testing.T) {
 	called := false
 	tmpl := Build(VBox(
 		Jump(VBox(
-				Text("Line 1"),
-				Text("Line 2"),
-			), func() { called = true }),
+			Text("Line 1"),
+			Text("Line 2"),
+		), func() { called = true }),
 	))
 
 	buf := NewBuffer(40, 10)
@@ -1536,8 +1536,8 @@ func TestJumpInHBoxWithSibling(t *testing.T) {
 			Text("Panel 1"),
 		),
 		Jump(VBox(
-				Text("Panel 2"),
-			), func() {}),
+			Text("Panel 2"),
+		), func() {}),
 	))
 
 	buf := NewBuffer(40, 5)
@@ -2922,9 +2922,9 @@ func TestStyleInheritance(t *testing.T) {
 
 	t.Run("children inherit parent style", func(t *testing.T) {
 		tmpl := Build(VBox.CascadeStyle(&baseStyle)(
-				Text("Inherited"),
-				Text("Also inherited"),
-			))
+			Text("Inherited"),
+			Text("Also inherited"),
+		))
 
 		buf := NewBuffer(20, 3)
 		tmpl.Execute(buf, 20, 3)
@@ -2941,8 +2941,8 @@ func TestStyleInheritance(t *testing.T) {
 
 	t.Run("explicit style overrides inherited", func(t *testing.T) {
 		tmpl := Build(VBox.CascadeStyle(&baseStyle)(
-				Text("Override").Style(accentStyle),
-			))
+			Text("Override").Style(accentStyle),
+		))
 
 		buf := NewBuffer(20, 3)
 		tmpl.Execute(buf, 20, 3)
@@ -2957,12 +2957,12 @@ func TestStyleInheritance(t *testing.T) {
 		nestedStyle := Style{FG: Yellow}
 
 		tmpl := Build(VBox.CascadeStyle(&baseStyle)(
-				Text("Uses base"),
-				VBox.CascadeStyle(&nestedStyle)(
-						Text("Uses nested"),
-					),
-				Text("Back to base"),
-			))
+			Text("Uses base"),
+			VBox.CascadeStyle(&nestedStyle)(
+				Text("Uses nested"),
+			),
+			Text("Back to base"),
+		))
 
 		buf := NewBuffer(20, 5)
 		tmpl.Execute(buf, 20, 5)
@@ -2990,10 +2990,10 @@ func TestStyleInheritance(t *testing.T) {
 		visible := true
 
 		tmpl := Build(VBox.CascadeStyle(&baseStyle)(
-				If(&visible).Eq(true).Then(
-					Text("Conditional"),
-				),
-			))
+			If(&visible).Eq(true).Then(
+				Text("Conditional"),
+			),
+		))
 
 		buf := NewBuffer(20, 3)
 		tmpl.Execute(buf, 20, 3)
@@ -3008,8 +3008,8 @@ func TestStyleInheritance(t *testing.T) {
 		theme := Style{FG: Cyan}
 
 		tmpl := Build(VBox.CascadeStyle(&theme)(
-				Text("Themed"),
-			))
+			Text("Themed"),
+		))
 
 		buf := NewBuffer(20, 3)
 
@@ -3038,8 +3038,8 @@ func TestContainerFill(t *testing.T) {
 		fillStyle := Style{Fill: Red}
 
 		tmpl := Build(VBox.CascadeStyle(&fillStyle)(
-				Text("Hi"),
-			))
+			Text("Hi"),
+		))
 
 		buf := NewBuffer(10, 3)
 		tmpl.Execute(buf, 10, 3)
@@ -3063,11 +3063,11 @@ func TestContainerFill(t *testing.T) {
 		innerFill := Style{Fill: Green}
 
 		tmpl := Build(VBox.CascadeStyle(&outerFill)(
-				Text("Outer"),
-				HBox.CascadeStyle(&innerFill).Width(5).Height(1)(
-						Text("In"),
-					),
-			))
+			Text("Outer"),
+			HBox.CascadeStyle(&innerFill).Width(5).Height(1)(
+				Text("In"),
+			),
+		))
 
 		buf := NewBuffer(10, 3)
 		tmpl.Execute(buf, 10, 3)
@@ -3089,8 +3089,8 @@ func TestContainerFill(t *testing.T) {
 		buf := NewBuffer(10, 3)
 
 		tmpl := Build(VBox(
-				Text("No fill"),
-			))
+			Text("No fill"),
+		))
 		tmpl.Execute(buf, 10, 3)
 
 		// Should have default (no fill)
@@ -3106,11 +3106,11 @@ func TestContainerFill(t *testing.T) {
 		nestedStyle := Style{FG: Yellow} // no Fill - should inherit parent's Fill
 
 		tmpl := Build(VBox.CascadeStyle(&rootStyle)(
-				Text("Root"),
-				VBox.CascadeStyle(&nestedStyle)(
-						Text("Nested"),
-					),
-			))
+			Text("Root"),
+			VBox.CascadeStyle(&nestedStyle)(
+				Text("Nested"),
+			),
+		))
 
 		buf := NewBuffer(10, 3)
 		tmpl.Execute(buf, 10, 3)
@@ -3139,8 +3139,8 @@ func TestTextTransform(t *testing.T) {
 	t.Run("uppercase transform", func(t *testing.T) {
 		style := Style{Transform: TransformUppercase}
 		tmpl := Build(VBox.CascadeStyle(&style)(
-				Text("hello world"),
-			))
+			Text("hello world"),
+		))
 
 		buf := NewBuffer(20, 1)
 		tmpl.Execute(buf, 20, 1)
@@ -3154,8 +3154,8 @@ func TestTextTransform(t *testing.T) {
 	t.Run("lowercase transform", func(t *testing.T) {
 		style := Style{Transform: TransformLowercase}
 		tmpl := Build(VBox.CascadeStyle(&style)(
-				Text("HELLO WORLD"),
-			))
+			Text("HELLO WORLD"),
+		))
 
 		buf := NewBuffer(20, 1)
 		tmpl.Execute(buf, 20, 1)
@@ -3169,11 +3169,11 @@ func TestTextTransform(t *testing.T) {
 	t.Run("transform cascades to children", func(t *testing.T) {
 		style := Style{Transform: TransformUppercase}
 		tmpl := Build(VBox.CascadeStyle(&style)(
-				Text("parent"),
-				VBox(
-						Text("child"),
-					),
-			))
+			Text("parent"),
+			VBox(
+				Text("child"),
+			),
+		))
 
 		buf := NewBuffer(20, 2)
 		tmpl.Execute(buf, 20, 2)
@@ -3196,8 +3196,8 @@ func TestAttrInheritance(t *testing.T) {
 		childStyle := Style{FG: Red} // has FG but not Attr
 
 		tmpl := Build(VBox.CascadeStyle(&parentStyle)(
-				Text("X").Style(childStyle),
-			))
+			Text("X").Style(childStyle),
+		))
 
 		buf := NewBuffer(5, 1)
 		tmpl.Execute(buf, 5, 1)
@@ -4712,11 +4712,11 @@ func TestSimpleForEach(t *testing.T) {
 	}
 
 	ui := VBox(
-			Text("Simple ForEach"),
-			ForEach(&items, func(item *StressItem) any {
-				return Progress(&item.CPU).Width(8)
-			}),
-		)
+		Text("Simple ForEach"),
+		ForEach(&items, func(item *StressItem) any {
+			return Progress(&item.CPU).Width(8)
+		}),
+	)
 
 	serial := Build(ui)
 	buf := NewBuffer(100, 50)
@@ -4747,15 +4747,15 @@ func TestNestedForEach(t *testing.T) {
 	}
 
 	ui := VBox(
-			Text("Dense Grid"),
-			ForEach(&rows, func(row *[]StressItem) any {
-				return HBox(
-					ForEach(row, func(item *StressItem) any {
-						return Progress(&item.CPU).Width(8)
-					}),
-				)
-			}),
-		)
+		Text("Dense Grid"),
+		ForEach(&rows, func(row *[]StressItem) any {
+			return HBox(
+				ForEach(row, func(item *StressItem) any {
+					return Progress(&item.CPU).Width(8)
+				}),
+			)
+		}),
+	)
 
 	serial := Build(ui)
 	buf.Clear()
@@ -5132,7 +5132,7 @@ func TestAnimate(t *testing.T) {
 
 	t.Run("From int16 intro animation", func(t *testing.T) {
 		tmpl := Build(VBox(
-			VBox.Height(Animate.Duration(200 * time.Millisecond).From(int16(1))(int16(5)))(Text("hi")),
+			VBox.Height(Animate.Duration(200*time.Millisecond).From(int16(1))(int16(5)))(Text("hi")),
 			Text("Z"),
 		))
 		buf := NewBuffer(40, 20)
@@ -5167,7 +5167,7 @@ func TestAnimate(t *testing.T) {
 			Text("X").FG(RGB(200, 200, 200)),
 			ScreenEffect(
 				SEVignette().Smooth().
-					Strength(Animate.Duration(200 * time.Millisecond).From(0.0)(0.88)),
+					Strength(Animate.Duration(200*time.Millisecond).From(0.0)(0.88)),
 			),
 		))
 		buf := NewBuffer(10, 10)
@@ -5229,7 +5229,7 @@ func TestAnimate(t *testing.T) {
 			If(&active).Then(
 				ScreenEffect(
 					SEVignette().Smooth().
-						Strength(Animate.Duration(200 * time.Millisecond).From(0.0)(0.88)),
+						Strength(Animate.Duration(200*time.Millisecond).From(0.0)(0.88)),
 				),
 			),
 		))
@@ -5273,6 +5273,217 @@ func TestAnimate(t *testing.T) {
 			t.Fatalf("final: expected most dimming, got FG.R=%d vs mid=%d", fg3.R, fg2.R)
 		}
 		t.Logf("If-branch SE animation: frame1=%d, mid=%d, final=%d", fg1.R, fg2.R, fg3.R)
+	})
+
+	t.Run("SE strength Out retains If branch", func(t *testing.T) {
+		active := true
+		tmpl := Build(VBox(
+			Text("X").FG(RGB(200, 200, 200)),
+			If(&active).Then(
+				ScreenEffect(
+					SEVignette().Smooth().
+						Strength(
+							In(Animate.Duration(1*time.Millisecond).From(0.0)(0.88)).
+								Out(Animate.Duration(200*time.Millisecond)(0.0)),
+						),
+				),
+			),
+		))
+		buf := NewBuffer(10, 10)
+		pctx := PostContext{Width: 10, Height: 10}
+		applyEffects := func() {
+			for _, eff := range tmpl.ScreenEffects() {
+				eff.Apply(buf, pctx)
+			}
+		}
+
+		tmpl.Execute(buf, 10, 10)
+		applyEffects()
+		time.Sleep(10 * time.Millisecond)
+		tmpl.Execute(buf, 10, 10)
+		applyEffects()
+
+		active = false
+		tmpl.Execute(buf, 10, 10)
+		if got := len(tmpl.ScreenEffects()); got != 1 {
+			t.Fatalf("expected retained screen effect on exit, got %d", got)
+		}
+		applyEffects()
+		tmpl.Execute(buf, 10, 10)
+		applyEffects()
+		start := buf.Get(0, 0).Style.FG
+
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 10, 10)
+		if got := len(tmpl.ScreenEffects()); got != 1 {
+			t.Fatalf("expected screen effect mid-exit, got %d", got)
+		}
+		applyEffects()
+		mid := buf.Get(0, 0).Style.FG
+		if mid.R <= start.R {
+			t.Fatalf("expected exit to fade dimming, start R=%d mid R=%d", start.R, mid.R)
+		}
+
+		time.Sleep(220 * time.Millisecond)
+		tmpl.Execute(buf, 10, 10)
+		if got := len(tmpl.ScreenEffects()); got != 0 {
+			t.Fatalf("expected effect gone after exit lease, got %d", got)
+		}
+	})
+
+	t.Run("If Else waits for Out lease", func(t *testing.T) {
+		active := true
+		tmpl := Build(VBox(
+			If(&active).Then(
+				VBox(
+					Text("then"),
+					ScreenEffect(
+						SEVignette().Strength(
+							In(Animate.Duration(1*time.Millisecond).From(0.0)(0.5)).
+								Out(Animate.Duration(120*time.Millisecond)(0.0)),
+						),
+					),
+				),
+			).Else(
+				Text("else"),
+			),
+		))
+		buf := NewBuffer(20, 4)
+		pctx := PostContext{Width: 20, Height: 4}
+		applyEffects := func() {
+			for _, eff := range tmpl.ScreenEffects() {
+				eff.Apply(buf, pctx)
+			}
+		}
+
+		tmpl.Execute(buf, 20, 4)
+		applyEffects()
+		time.Sleep(10 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		applyEffects()
+
+		active = false
+		tmpl.Execute(buf, 20, 4)
+		if got := string([]rune{buf.Get(0, 0).Rune, buf.Get(1, 0).Rune, buf.Get(2, 0).Rune, buf.Get(3, 0).Rune}); got != "then" {
+			t.Fatalf("expected then branch to remain during exit, got %q", got)
+		}
+		tmpl.Execute(buf, 20, 4)
+
+		time.Sleep(150 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := string([]rune{buf.Get(0, 0).Rune, buf.Get(1, 0).Rune, buf.Get(2, 0).Rune, buf.Get(3, 0).Rune}); got != "else" {
+			t.Fatalf("expected else branch after exit lease, got %q", got)
+		}
+	})
+
+	t.Run("Out in overlay child retains If branch", func(t *testing.T) {
+		active := true
+		tmpl := Build(VBox(
+			Text("X").FG(RGB(200, 200, 200)),
+			If(&active).Then(OverlayNode{
+				Centered: true,
+				Child: VBox.Width(8).Height(1)(
+					Text("card"),
+					ScreenEffect(
+						SEVignette().Smooth().
+							Strength(
+								In(Animate.Duration(1*time.Millisecond).From(0.0)(0.88)).
+									Out(Animate.Duration(120*time.Millisecond)(0.0)),
+							),
+					),
+				),
+			}),
+		))
+		buf := NewBuffer(20, 5)
+		pctx := PostContext{Width: 20, Height: 5}
+		applyEffects := func() {
+			for _, eff := range tmpl.ScreenEffects() {
+				eff.Apply(buf, pctx)
+			}
+		}
+
+		tmpl.Execute(buf, 20, 5)
+		applyEffects()
+		time.Sleep(10 * time.Millisecond)
+		tmpl.Execute(buf, 20, 5)
+		applyEffects()
+
+		active = false
+		tmpl.Execute(buf, 20, 5)
+		if got := len(tmpl.ScreenEffects()); got != 1 {
+			t.Fatalf("expected retained overlay screen effect on first exit frame, got %d", got)
+		}
+		tmpl.Execute(buf, 20, 5)
+		if got := len(tmpl.ScreenEffects()); got != 1 {
+			t.Fatalf("expected retained overlay screen effect while exit lease starts, got %d", got)
+		}
+
+		time.Sleep(150 * time.Millisecond)
+		tmpl.Execute(buf, 20, 5)
+		if got := len(tmpl.ScreenEffects()); got != 0 {
+			t.Fatalf("expected overlay screen effect gone after exit lease, got %d", got)
+		}
+	})
+
+	t.Run("multiple Out screen effects in overlay child share exit lease", func(t *testing.T) {
+		active := true
+		ref := NodeRef{}
+		tmpl := Build(VBox(
+			Text("X").FG(RGB(200, 200, 200)),
+			If(&active).Then(OverlayNode{
+				Centered: true,
+				Child: VBox.Width(8).Height(1).NodeRef(&ref)(
+					Text("card"),
+					ScreenEffect(
+						SEVignette().Dodge(&ref).
+							Strength(
+								In(Animate.Duration(1*time.Millisecond)(0.8)).
+									Out(Animate.Duration(80*time.Millisecond)(0.0)),
+							),
+						SEVignette().Smooth().
+							Strength(
+								In(Animate.Duration(1*time.Millisecond).From(0.0)(0.6)).
+									Out(Animate.Duration(180*time.Millisecond)(0.0)),
+							),
+					),
+				),
+			}),
+		))
+		buf := NewBuffer(20, 5)
+		pctx := PostContext{Width: 20, Height: 5}
+		applyEffects := func() {
+			for _, eff := range tmpl.ScreenEffects() {
+				eff.Apply(buf, pctx)
+			}
+		}
+
+		tmpl.Execute(buf, 20, 5)
+		applyEffects()
+		time.Sleep(10 * time.Millisecond)
+		tmpl.Execute(buf, 20, 5)
+		applyEffects()
+
+		active = false
+		tmpl.Execute(buf, 20, 5)
+		if got := len(tmpl.ScreenEffects()); got != 2 {
+			t.Fatalf("expected both overlay screen effects on first exit frame, got %d", got)
+		}
+		tmpl.Execute(buf, 20, 5)
+		if got := len(tmpl.ScreenEffects()); got != 2 {
+			t.Fatalf("expected both overlay screen effects while exit leases start, got %d", got)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 5)
+		if got := len(tmpl.ScreenEffects()); got != 2 {
+			t.Fatalf("expected branch retained until longest exit lease, got %d effects", got)
+		}
+
+		time.Sleep(120 * time.Millisecond)
+		tmpl.Execute(buf, 20, 5)
+		if got := len(tmpl.ScreenEffects()); got != 0 {
+			t.Fatalf("expected both effects gone after longest exit lease, got %d", got)
+		}
 	})
 }
 

@@ -13,6 +13,7 @@ type tween struct {
 	durationPtr *time.Duration
 	ease        func(float64) float64
 	from        any    // initial value — if set, animation starts immediately
+	out         *tween // exit animation used while a conditional branch is retained
 	onComplete  func() // called once when animation reaches target
 }
 
@@ -87,16 +88,28 @@ func (f AnimateFn) From(v any) AnimateFn {
 	}
 }
 
+// In marks an enter tween when paired with Out. It returns the tween unchanged,
+// so existing Animate chains stay the thing being configured.
+func In(tw *tween) *tween { return tw }
+
+// Out attaches an exit tween. When the surrounding conditional branch becomes
+// inactive, Glyph keeps that branch rendered until this tween finishes.
+func (tw *tween) Out(out *tween) *tween {
+	tw.out = out
+	return tw
+}
+
 // tweenNode interface for the compiler to detect tween nodes
 type tweenNode interface {
 	getTarget() any
 	getTweenDuration() time.Duration
 	getTweenEasing() func(float64) float64
 	getTweenFrom() any
+	getTweenOut() tweenNode
 	getTweenOnComplete() func()
 }
 
-func (tw *tween) getTarget() any                        { return tw.target }
+func (tw *tween) getTarget() any { return tw.target }
 func (tw *tween) getTweenDuration() time.Duration {
 	if tw.durationPtr != nil {
 		return *tw.durationPtr
@@ -105,7 +118,13 @@ func (tw *tween) getTweenDuration() time.Duration {
 }
 func (tw *tween) getTweenEasing() func(float64) float64 { return tw.ease }
 func (tw *tween) getTweenFrom() any                     { return tw.from }
-func (tw *tween) getTweenOnComplete() func()            { return tw.onComplete }
+func (tw *tween) getTweenOut() tweenNode {
+	if tw.out == nil {
+		return nil
+	}
+	return tw.out
+}
+func (tw *tween) getTweenOnComplete() func() { return tw.onComplete }
 
 var _ tweenNode = (*tween)(nil)
 
@@ -137,8 +156,8 @@ func lerpStyle(from, to Style, t float64) Style {
 // --- easing functions ---
 // all take t in [0,1] and return eased value in [0,1]
 
-func EaseInQuad(t float64) float64    { return t * t }
-func EaseOutQuad(t float64) float64   { return t * (2 - t) }
+func EaseInQuad(t float64) float64  { return t * t }
+func EaseOutQuad(t float64) float64 { return t * (2 - t) }
 func EaseInOutQuad(t float64) float64 {
 	if t < 0.5 {
 		return 2 * t * t
@@ -146,8 +165,8 @@ func EaseInOutQuad(t float64) float64 {
 	return -1 + (4-2*t)*t
 }
 
-func EaseInCubic(t float64) float64    { return t * t * t }
-func EaseOutCubic(t float64) float64   { t--; return 1 + t*t*t }
+func EaseInCubic(t float64) float64  { return t * t * t }
+func EaseOutCubic(t float64) float64 { t--; return 1 + t*t*t }
 func EaseInOutCubic(t float64) float64 {
 	if t < 0.5 {
 		return 4 * t * t * t
@@ -156,8 +175,8 @@ func EaseInOutCubic(t float64) float64 {
 	return 1 + 8*t*t*t
 }
 
-func EaseInQuart(t float64) float64    { return t * t * t * t }
-func EaseOutQuart(t float64) float64   { t--; return 1 - t*t*t*t }
+func EaseInQuart(t float64) float64  { return t * t * t * t }
+func EaseOutQuart(t float64) float64 { t--; return 1 - t*t*t*t }
 func EaseInOutQuart(t float64) float64 {
 	if t < 0.5 {
 		return 8 * t * t * t * t
@@ -166,8 +185,8 @@ func EaseInOutQuart(t float64) float64 {
 	return 1 - 8*t*t*t*t
 }
 
-func EaseInQuint(t float64) float64    { return t * t * t * t * t }
-func EaseOutQuint(t float64) float64   { t--; return 1 + t*t*t*t*t }
+func EaseInQuint(t float64) float64  { return t * t * t * t * t }
+func EaseOutQuint(t float64) float64 { t--; return 1 + t*t*t*t*t }
 func EaseInOutQuint(t float64) float64 {
 	if t < 0.5 {
 		return 16 * t * t * t * t * t
@@ -207,8 +226,8 @@ func EaseInOutExpo(t float64) float64 {
 	return (2 - math.Pow(2, -20*t+10)) / 2
 }
 
-func EaseInCirc(t float64) float64    { return 1 - math.Sqrt(1-t*t) }
-func EaseOutCirc(t float64) float64   { t--; return math.Sqrt(1 - t*t) }
+func EaseInCirc(t float64) float64  { return 1 - math.Sqrt(1-t*t) }
+func EaseOutCirc(t float64) float64 { t--; return math.Sqrt(1 - t*t) }
 func EaseInOutCirc(t float64) float64 {
 	if t < 0.5 {
 		return (1 - math.Sqrt(1-4*t*t)) / 2
@@ -253,7 +272,7 @@ func EaseOutBounce(t float64) float64 {
 	}
 }
 
-func EaseInBounce(t float64) float64    { return 1 - EaseOutBounce(1-t) }
+func EaseInBounce(t float64) float64 { return 1 - EaseOutBounce(1-t) }
 func EaseInOutBounce(t float64) float64 {
 	if t < 0.5 {
 		return (1 - EaseOutBounce(1-2*t)) / 2

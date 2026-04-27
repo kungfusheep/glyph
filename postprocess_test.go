@@ -1,6 +1,7 @@
 package glyph
 
 import (
+	"math"
 	"testing"
 	"time"
 )
@@ -373,7 +374,7 @@ func TestSEScreenShake(t *testing.T) {
 
 func TestSEGradientMap(t *testing.T) {
 	buf := NewBuffer(3, 1)
-	buf.Set(0, 0, Cell{Rune: 'D', Style: Style{FG: RGB(30, 30, 30)}})   // dark
+	buf.Set(0, 0, Cell{Rune: 'D', Style: Style{FG: RGB(30, 30, 30)}})    // dark
 	buf.Set(1, 0, Cell{Rune: 'M', Style: Style{FG: RGB(128, 128, 128)}}) // mid
 	buf.Set(2, 0, Cell{Rune: 'B', Style: Style{FG: RGB(230, 230, 230)}}) // bright
 
@@ -436,8 +437,6 @@ func TestSEBloomSkipsDark(t *testing.T) {
 		t.Errorf("SEBloom: all-dark buffer should be unchanged, got R=%d", got.Style.FG.R)
 	}
 }
-
-
 func TestSEMonochrome(t *testing.T) {
 	buf := NewBuffer(1, 1)
 	buf.Set(0, 0, Cell{Rune: 'X', Style: Style{FG: RGB(255, 0, 0)}})
@@ -704,47 +703,47 @@ func TestPostContextFields(t *testing.T) {
 
 func TestParseOSCColor(t *testing.T) {
 	tests := []struct {
-		name       string
-		data       string
-		digit      byte
-		wantR      uint8
-		wantG      uint8
-		wantB      uint8
-		wantMode   ColorMode
+		name     string
+		data     string
+		digit    byte
+		wantR    uint8
+		wantG    uint8
+		wantB    uint8
+		wantMode ColorMode
 	}{
 		{
-			name:     "4-digit hex (xterm style)",
-			data:     "\x1b]10;rgb:ffff/aaaa/0000\x1b\\",
-			digit:    '0',
-			wantR:    255, wantG: 170, wantB: 0,
+			name:  "4-digit hex (xterm style)",
+			data:  "\x1b]10;rgb:ffff/aaaa/0000\x1b\\",
+			digit: '0',
+			wantR: 255, wantG: 170, wantB: 0,
 			wantMode: ColorRGB,
 		},
 		{
-			name:     "2-digit hex",
-			data:     "\x1b]10;rgb:ff/80/40\x1b\\",
-			digit:    '0',
-			wantR:    255, wantG: 128, wantB: 64,
+			name:  "2-digit hex",
+			data:  "\x1b]10;rgb:ff/80/40\x1b\\",
+			digit: '0',
+			wantR: 255, wantG: 128, wantB: 64,
 			wantMode: ColorRGB,
 		},
 		{
-			name:     "OSC 11 (BG)",
-			data:     "\x1b]11;rgb:1a1a/1a1a/2e2e\x1b\\",
-			digit:    '1',
-			wantR:    26, wantG: 26, wantB: 46,
+			name:  "OSC 11 (BG)",
+			data:  "\x1b]11;rgb:1a1a/1a1a/2e2e\x1b\\",
+			digit: '1',
+			wantR: 26, wantG: 26, wantB: 46,
 			wantMode: ColorRGB,
 		},
 		{
-			name:     "both FG and BG in one response",
-			data:     "\x1b]10;rgb:cccc/bbbb/aaaa\x1b\\\x1b]11;rgb:1111/2222/3333\x1b\\",
-			digit:    '1',
-			wantR:    17, wantG: 34, wantB: 51,
+			name:  "both FG and BG in one response",
+			data:  "\x1b]10;rgb:cccc/bbbb/aaaa\x1b\\\x1b]11;rgb:1111/2222/3333\x1b\\",
+			digit: '1',
+			wantR: 17, wantG: 34, wantB: 51,
 			wantMode: ColorRGB,
 		},
 		{
-			name:     "BEL terminator",
-			data:     "\x1b]10;rgb:8080/4040/c0c0\x07",
-			digit:    '0',
-			wantR:    128, wantG: 64, wantB: 192,
+			name:  "BEL terminator",
+			data:  "\x1b]10;rgb:8080/4040/c0c0\x07",
+			digit: '0',
+			wantR: 128, wantG: 64, wantB: 192,
 			wantMode: ColorRGB,
 		},
 		{
@@ -788,31 +787,31 @@ func TestParseOSC4Color(t *testing.T) {
 		wantMode ColorMode
 	}{
 		{
-			name:     "index 2 (green) 4-digit hex",
-			data:     "\x1b]4;2;rgb:4e4e/d2d2/8e8e\x07",
-			index:    2,
-			wantR:    78, wantG: 210, wantB: 142,
+			name:  "index 2 (green) 4-digit hex",
+			data:  "\x1b]4;2;rgb:4e4e/d2d2/8e8e\x07",
+			index: 2,
+			wantR: 78, wantG: 210, wantB: 142,
 			wantMode: ColorRGB,
 		},
 		{
-			name:     "index 3 (yellow) 2-digit hex",
-			data:     "\x1b]4;3;rgb:cc/88/00\x07",
-			index:    3,
-			wantR:    204, wantG: 136, wantB: 0,
+			name:  "index 3 (yellow) 2-digit hex",
+			data:  "\x1b]4;3;rgb:cc/88/00\x07",
+			index: 3,
+			wantR: 204, wantG: 136, wantB: 0,
 			wantMode: ColorRGB,
 		},
 		{
-			name:     "index 11 (bright yellow) double-digit index",
-			data:     "\x1b]4;11;rgb:ffff/ffff/0000\x1b\\",
-			index:    11,
-			wantR:    255, wantG: 255, wantB: 0,
+			name:  "index 11 (bright yellow) double-digit index",
+			data:  "\x1b]4;11;rgb:ffff/ffff/0000\x1b\\",
+			index: 11,
+			wantR: 255, wantG: 255, wantB: 0,
 			wantMode: ColorRGB,
 		},
 		{
-			name:     "multiple palette entries in one response",
-			data:     "\x1b]4;0;rgb:0000/0000/0000\x07\x1b]4;1;rgb:cccc/0000/0000\x07\x1b]4;2;rgb:0000/cccc/0000\x07",
-			index:    1,
-			wantR:    204, wantG: 0, wantB: 0,
+			name:  "multiple palette entries in one response",
+			data:  "\x1b]4;0;rgb:0000/0000/0000\x07\x1b]4;1;rgb:cccc/0000/0000\x07\x1b]4;2;rgb:0000/cccc/0000\x07",
+			index: 1,
+			wantR: 204, wantG: 0, wantB: 0,
 			wantMode: ColorRGB,
 		},
 		{
@@ -890,5 +889,113 @@ func TestResolveFG(t *testing.T) {
 	c = resolveFG(orig, detected)
 	if c.R != 255 || c.G != 0 || c.B != 0 {
 		t.Errorf("resolveFG(explicit): should pass through, got (%d,%d,%d)", c.R, c.G, c.B)
+	}
+}
+
+func TestSESpinGlow(t *testing.T) {
+	newBuf := func() *Buffer {
+		buf := NewBuffer(40, 20)
+		grey := RGB(200, 200, 200)
+		for y := range 20 {
+			for x := range 40 {
+				buf.Set(x, y, Cell{Rune: 'X', Style: Style{FG: grey}})
+			}
+		}
+		return buf
+	}
+	ref := NodeRef{X: 15, Y: 8, W: 10, H: 4}
+
+	// cells inside the focus ref must be completely unaffected.
+	buf := newBuf()
+	SESpinGlow(&ref, RGB(255, 0, 0)).Strength(1.0).Radius(8).Speed(0).
+		Apply(buf, PostContext{Width: 40, Height: 20})
+	for y := ref.Y; y < ref.Y+ref.H; y++ {
+		for x := ref.X; x < ref.X+ref.W; x++ {
+			c := buf.Get(x, y)
+			if c.Style.FG.R != 200 || c.Style.FG.G != 200 || c.Style.FG.B != 200 {
+				t.Errorf("SESpinGlow: cell inside ref (%d,%d) mutated, got (%d,%d,%d)", x, y, c.Style.FG.R, c.Style.FG.G, c.Style.FG.B)
+			}
+		}
+	}
+
+	// cells just outside should be shifted toward the tint colour,
+	// cells far beyond radius should stay at the original grey.
+	near := buf.Get(ref.X+ref.W, ref.Y+ref.H/2)
+	if near.Style.FG.R <= 200 {
+		t.Errorf("SESpinGlow: cell near ref should shift toward red, got R=%d", near.Style.FG.R)
+	}
+	far := buf.Get(0, 0)
+	if far.Style.FG.R != 200 {
+		t.Errorf("SESpinGlow: cell far beyond radius should be untouched, got R=%d", far.Style.FG.R)
+	}
+
+	// zero-arg palette must fall back to the default palette (no crash, effect applies).
+	buf = newBuf()
+	SESpinGlow(&ref).Strength(1.0).Radius(8).Speed(0).
+		Apply(buf, PostContext{Width: 40, Height: 20})
+	near = buf.Get(ref.X+ref.W, ref.Y+ref.H/2)
+	if near.Style.FG.R == 200 && near.Style.FG.G == 200 && near.Style.FG.B == 200 {
+		t.Error("SESpinGlow: default palette should still tint surrounding cells")
+	}
+
+	// rim side cells must not be attenuated relative to top/bottom cells.
+	// A prior compensation branch mixed full-block side cells 50/50 with
+	// the halo background, making vertical rims visibly dimmer in terminals.
+	buf = NewBuffer(40, 20)
+	rimBG := RGB(26, 26, 26)
+	grey := RGB(200, 200, 200)
+	for y := range 20 {
+		for x := range 40 {
+			buf.Set(x, y, Cell{Rune: 'X', Style: Style{FG: grey, BG: rimBG, Attr: AttrDim}})
+		}
+	}
+	tint := RGB(255, 0, 0)
+	SESpinGlow(&ref, tint).Strength(1.0).Radius(8).Speed(0).Rim(true).
+		Apply(buf, PostContext{Width: 40, Height: 20, DefaultFG: grey, DefaultBG: rimBG})
+	side := buf.Get(ref.X+ref.W, ref.Y+ref.H/2)
+	top := buf.Get(ref.X+ref.W/2, ref.Y-1)
+	if side.Rune != '█' {
+		t.Fatalf("SESpinGlow rim side rune = %q, want █", side.Rune)
+	}
+	if side.Style.FG != tint {
+		t.Errorf("SESpinGlow rim side FG = %+v, want full tint %+v", side.Style.FG, tint)
+	}
+	if top.Style.FG != tint {
+		t.Errorf("SESpinGlow rim top FG = %+v, want full tint %+v", top.Style.FG, tint)
+	}
+	if side.Style.Attr != AttrNone || top.Style.Attr != AttrNone {
+		t.Errorf("SESpinGlow rim should clear inherited attrs; side attr=%v top attr=%v", side.Style.Attr, top.Style.Attr)
+	}
+	if top.Style.BG == rimBG {
+		t.Errorf("SESpinGlow top rim BG should receive halo colour behind half-block; got original BG %+v", rimBG)
+	}
+
+	// rotation: colour positions around the ring shift with time. with a
+	// red/blue two-stop palette, a cell right of the ref should be red-
+	// dominated at t=0 and blue-dominated at t=π/speed (or vice versa).
+	speed := 1.0
+	buf1 := newBuf()
+	SESpinGlow(&ref, RGB(255, 0, 0), RGB(0, 0, 255)).Strength(1.0).Radius(8).Speed(speed).
+		Apply(buf1, PostContext{Width: 40, Height: 20, Time: 0})
+
+	halfTurn := time.Duration(float64(time.Second) * math.Pi / speed)
+	buf2 := newBuf()
+	SESpinGlow(&ref, RGB(255, 0, 0), RGB(0, 0, 255)).Strength(1.0).Radius(8).Speed(speed).
+		Apply(buf2, PostContext{Width: 40, Height: 20, Time: halfTurn})
+
+	// pick a cell right of the ref — its R/B balance must differ between
+	// the two frames because the conic has rotated 180°.
+	right1 := buf1.Get(ref.X+ref.W+1, ref.Y+ref.H/2)
+	right2 := buf2.Get(ref.X+ref.W+1, ref.Y+ref.H/2)
+	if right1.Style.FG.R == right2.Style.FG.R && right1.Style.FG.B == right2.Style.FG.B {
+		t.Errorf("SESpinGlow: rotation should change palette position — t=0 R=%d B=%d, t=halfTurn R=%d B=%d",
+			right1.Style.FG.R, right1.Style.FG.B, right2.Style.FG.R, right2.Style.FG.B)
+	}
+
+	// nil focus must be a safe no-op.
+	buf = newBuf()
+	SESpinGlow(nil).Apply(buf, PostContext{Width: 40, Height: 20})
+	if buf.Get(0, 0).Style.FG.R != 200 {
+		t.Error("SESpinGlow(nil): should not mutate the buffer")
 	}
 }
