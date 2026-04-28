@@ -173,10 +173,11 @@ func (t *Template) evalRoot() *Template {
 }
 
 type exitScope struct {
-	tweenCount   int
-	activeLeases int
-	rendering    bool
-	parent       *Template
+	tweenCount     int
+	activeLeases   int
+	rendering      bool
+	renderingItems map[unsafe.Pointer]bool
+	parent         *Template
 }
 
 func (t *Template) registerExitTween(tw tweenNode) {
@@ -241,6 +242,62 @@ func (t *Template) setExitRendering(active bool) {
 			}
 			ext.def.setExitRendering(active)
 		}
+	}
+}
+
+func (t *Template) setExitRenderingFor(elemBase unsafe.Pointer, active bool) {
+	if t == nil {
+		return
+	}
+	if elemBase == nil {
+		t.setExitRendering(active)
+		return
+	}
+	if t.exit.renderingItems == nil {
+		t.exit.renderingItems = make(map[unsafe.Pointer]bool)
+	}
+	if active {
+		t.exit.renderingItems[elemBase] = true
+	} else {
+		delete(t.exit.renderingItems, elemBase)
+	}
+	for i := range t.ops {
+		switch ext := t.ops[i].Ext.(type) {
+		case *opOverlay:
+			if ext.childTmpl != nil {
+				ext.childTmpl.setExitRenderingFor(elemBase, active)
+			}
+		case *opIf:
+			ext.thenTmpl.setExitRenderingFor(elemBase, active)
+			ext.elseTmpl.setExitRenderingFor(elemBase, active)
+		case *opSwitch:
+			for _, tmpl := range ext.cases {
+				tmpl.setExitRenderingFor(elemBase, active)
+			}
+			ext.def.setExitRenderingFor(elemBase, active)
+		case *opMatch:
+			for _, tmpl := range ext.cases {
+				tmpl.setExitRenderingFor(elemBase, active)
+			}
+			ext.def.setExitRenderingFor(elemBase, active)
+		}
+	}
+}
+
+func (t *Template) isExitRenderingFor(elemBase unsafe.Pointer) bool {
+	if t == nil {
+		return false
+	}
+	if elemBase != nil && t.exit.renderingItems != nil && t.exit.renderingItems[elemBase] {
+		return true
+	}
+	return t.exit.rendering
+}
+
+func (t *Template) runItemEvals(elemBase unsafe.Pointer) {
+	t.elemBase = elemBase
+	for _, eval := range t.itemEvals {
+		eval()
 	}
 }
 
@@ -628,44 +685,44 @@ func anyToInt8(v any) int8 {
 // compileDyn resolves a dynamic property value (conditionNode or tweenNode) to a pointer.
 // used by compile sites where Cond fields can hold either type.
 
-func (t *Template) compileDynInt16(v any) *int16 {
+func (t *Template) compileDynInt16(v any, elemBase unsafe.Pointer, elemSize uintptr) *int16 {
 	switch c := v.(type) {
 	case conditionNode:
 		return t.compileCondInt16(c)
 	case tweenNode:
-		return t.compileTweenInt16(c)
+		return t.compileTweenInt16(c, elemBase, elemSize)
 	}
 	return nil
 }
 
-func (t *Template) compileDynFloat32(v any) *float32 {
+func (t *Template) compileDynFloat32(v any, elemBase unsafe.Pointer, elemSize uintptr) *float32 {
 	switch c := v.(type) {
 	case conditionNode:
 		return t.compileCondFloat32(c)
 	case tweenNode:
-		return t.compileTweenFloat32(c)
+		return t.compileTweenFloat32(c, elemBase, elemSize)
 	}
 	return nil
 }
 
-func (t *Template) compileDynFloat64(v any) *float64 {
+func (t *Template) compileDynFloat64(v any, elemBase unsafe.Pointer, elemSize uintptr) *float64 {
 	switch c := v.(type) {
 	case *float64:
 		return c
 	case conditionNode:
 		return t.compileCondFloat64(c)
 	case tweenNode:
-		return t.compileTweenFloat64(c, nil)
+		return t.compileTweenFloat64(c, nil, elemBase, elemSize)
 	}
 	return nil
 }
 
-func (t *Template) compileDynInt8(v any) *int8 {
+func (t *Template) compileDynInt8(v any, elemBase unsafe.Pointer, elemSize uintptr) *int8 {
 	switch c := v.(type) {
 	case conditionNode:
 		return t.compileCondInt8(c)
 	case tweenNode:
-		return t.compileTweenInt8(c)
+		return t.compileTweenInt8(c, elemBase, elemSize)
 	}
 	return nil
 }
@@ -715,9 +772,8 @@ func (t *Template) compileStyleDyn(baseStyle Style, styleDyn, fgDyn, bgDyn any, 
 	if bgDyn != nil {
 		bgPtr = t.compileDynColor(bgDyn, elemBase, elemSize)
 	}
-	root := t.evalRoot()
 	base := baseStyle
-	root.evals = append(root.evals, func() {
+	eval := func() {
 		s := base
 		if fgPtr != nil {
 			s.FG = *fgPtr
@@ -726,7 +782,13 @@ func (t *Template) compileStyleDyn(baseStyle Style, styleDyn, fgDyn, bgDyn any, 
 			s.BG = *bgPtr
 		}
 		*storage = s
-	})
+	}
+	if elemBase != nil && elemSize > 0 {
+		t.itemEvals = append(t.itemEvals, eval)
+	} else {
+		root := t.evalRoot()
+		root.evals = append(root.evals, eval)
+	}
 	return storage
 }
 
@@ -933,133 +995,223 @@ func (t *Template) Animating() bool { return t.animating }
 // interpolation storage, and registers a per-frame evaluator that watches the
 // target and lerps toward it. all tweens in a frame share t.frameTime.
 
-func (t *Template) compileTweenInt16(tw tweenNode) *int16 {
+func (t *Template) compileTweenScalar(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr, target func() float64, assign func(float64), current func() float64, convert func(any) float64, resolveOut func(tweenNode) func() float64) {
 	root := t.evalRoot()
+	durVal := tw.getTweenDuration()
+	durPtr := tw.getTweenDurationPtr()
+	onComplete := tw.getTweenOnComplete()
+	ease := tw.getTweenEasing()
+	outTw := tw.getTweenOut()
+	var outTarget func() float64
+	var outDurVal time.Duration
+	var outDurPtr *time.Duration
+	var outEase func(float64) float64
+	var outOnComplete func()
+	if outTw != nil {
+		t.registerExitTween(tw)
+		outTarget = resolveOut(outTw)
+		outDurVal = outTw.getTweenDuration()
+		outDurPtr = outTw.getTweenDurationPtr()
+		outEase = outTw.getTweenEasing()
+		outOnComplete = outTw.getTweenOnComplete()
+	}
+
+	fromVal := 0.0
+	hasFrom := false
+	if from := tw.getTweenFrom(); from != nil {
+		hasFrom = true
+		fromVal = convert(from)
+		assign(fromVal)
+	}
+
+	run := func(state *perItemFloat64State, exiting bool, key unsafe.Pointer) {
+		dur := durVal
+		if durPtr != nil {
+			dur = *durPtr
+		}
+		targetVal := target()
+		now := root.frameTime
+		if outTw != nil && exiting {
+			outDur := outDurVal
+			if outDurPtr != nil {
+				outDur = *outDurPtr
+			}
+			outVal := outTarget()
+			if state.exitComplete {
+				state.current = outVal
+				assign(state.current)
+				t.setExitLease(&state.exitLeaseActive, false)
+				return
+			}
+			if !state.exitActive {
+				state.exitActive = true
+				state.startVal = state.current
+				if from := outTw.getTweenFrom(); from != nil {
+					state.startVal = convert(from)
+					state.current = state.startVal
+				}
+				state.lastTarget = outVal
+				state.startTime = now
+			} else if outVal != state.lastTarget {
+				state.startVal = state.current
+				state.lastTarget = outVal
+				state.startTime = now
+			}
+			t.setExitLease(&state.exitLeaseActive, true)
+			if state.startTime.IsZero() {
+				assign(state.current)
+				return
+			}
+			elapsed := now.Sub(state.startTime)
+			if elapsed >= outDur {
+				state.current = outVal
+				assign(state.current)
+				state.startTime = time.Time{}
+				state.exitActive = false
+				state.exitComplete = true
+				t.setExitLease(&state.exitLeaseActive, false)
+				if outOnComplete != nil {
+					outOnComplete()
+				}
+				return
+			}
+			progress := float64(elapsed) / float64(outDur)
+			if outEase != nil {
+				progress = outEase(progress)
+			}
+			state.current = state.startVal + progress*(outVal-state.startVal)
+			assign(state.current)
+			root.animating = true
+			return
+		}
+		if outTw != nil {
+			state.exitActive = false
+			state.exitComplete = false
+			t.setExitLease(&state.exitLeaseActive, false)
+		}
+		if state.needsFirstFrame {
+			state.startVal = state.current
+			state.lastTarget = targetVal
+			state.startTime = now
+			state.needsFirstFrame = false
+		} else if targetVal != state.lastTarget {
+			state.startVal = state.current
+			state.lastTarget = targetVal
+			state.startTime = now
+		}
+		if state.startTime.IsZero() {
+			state.current = targetVal
+			assign(state.current)
+			return
+		}
+		elapsed := now.Sub(state.startTime)
+		if elapsed >= dur {
+			state.current = targetVal
+			assign(state.current)
+			state.startTime = time.Time{}
+			if onComplete != nil {
+				onComplete()
+			}
+			return
+		}
+		progress := float64(elapsed) / float64(dur)
+		if ease != nil {
+			progress = ease(progress)
+		}
+		state.current = state.startVal + progress*(targetVal-state.startVal)
+		assign(state.current)
+		root.animating = true
+	}
+
+	if elemBase != nil && elemSize > 0 {
+		items := make(map[unsafe.Pointer]*perItemFloat64State)
+		t.itemEvals = append(t.itemEvals, func() {
+			key := t.elemBase
+			if key == nil {
+				return
+			}
+			state, ok := items[key]
+			if !ok {
+				initial := target()
+				state = &perItemFloat64State{
+					lastTarget:      initial,
+					startVal:        initial,
+					current:         initial,
+					needsFirstFrame: hasFrom,
+				}
+				if hasFrom {
+					state.startVal = fromVal
+					state.current = fromVal
+				}
+				items[key] = state
+			}
+			run(state, t.isExitRenderingFor(key), key)
+		})
+		return
+	}
+
+	state := &perItemFloat64State{
+		lastTarget:      target(),
+		startVal:        current(),
+		current:         current(),
+		needsFirstFrame: hasFrom,
+	}
+	if hasFrom {
+		state.startVal = fromVal
+		state.current = fromVal
+	}
+	root.evals = append(root.evals, func() {
+		run(state, t.exit.rendering, nil)
+	})
+}
+
+func (t *Template) compileTweenInt16(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr) *int16 {
 	watchPtr := t.resolveTweenTargetInt16(tw.getTarget())
 	storage := new(int16)
 	*storage = *watchPtr
-	durVal := tw.getTweenDuration()
-	durPtr := tw.(*tween).durationPtr
-	onComplete := tw.getTweenOnComplete()
-	ease := tw.getTweenEasing()
-
-	lastTarget := *watchPtr
-	startVal := float64(*watchPtr)
-	var startTime time.Time
-
-	needsFirstFrame := false
-	if from := tw.getTweenFrom(); from != nil {
-		*storage = anyToInt16(from)
-		startVal = float64(*storage)
-		needsFirstFrame = true
-	}
-
-	root.evals = append(root.evals, func() {
-		dur := durVal
-		if durPtr != nil {
-			dur = *durPtr
-		}
-		target := *watchPtr
-		now := root.frameTime
-		if needsFirstFrame {
-			startVal = float64(*storage)
-			lastTarget = target
-			startTime = now
-			needsFirstFrame = false
-		} else if target != lastTarget {
-			startVal = float64(*storage)
-			lastTarget = target
-			startTime = now
-		}
-		if startTime.IsZero() {
-			return
-		}
-		elapsed := now.Sub(startTime)
-		if elapsed >= dur {
-			*storage = target
-			startTime = time.Time{}
-			if onComplete != nil {
-				onComplete()
-			}
-			return
-		}
-		progress := float64(elapsed) / float64(dur)
-		if ease != nil {
-			progress = ease(progress)
-		}
-		*storage = int16(startVal + progress*(float64(target)-startVal))
-		root.animating = true
-	})
+	t.compileTweenScalar(
+		tw,
+		elemBase,
+		elemSize,
+		func() float64 { return float64(*watchPtr) },
+		func(v float64) { *storage = int16(v) },
+		func() float64 { return float64(*storage) },
+		func(v any) float64 { return float64(anyToInt16(v)) },
+		func(out tweenNode) func() float64 {
+			outPtr := t.resolveTweenTargetInt16(out.getTarget())
+			return func() float64 { return float64(*outPtr) }
+		},
+	)
 	return storage
 }
 
-func (t *Template) compileTweenFloat32(tw tweenNode) *float32 {
-	root := t.evalRoot()
+func (t *Template) compileTweenFloat32(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr) *float32 {
 	watchPtr := t.resolveTweenTargetFloat32(tw.getTarget())
 	storage := new(float32)
 	*storage = *watchPtr
-	durVal := tw.getTweenDuration()
-	durPtr := tw.(*tween).durationPtr
-	onComplete := tw.getTweenOnComplete()
-	ease := tw.getTweenEasing()
-
-	lastTarget := *watchPtr
-	startVal := float64(*watchPtr)
-	var startTime time.Time
-	needsFirstFrame := false
-
-	if from := tw.getTweenFrom(); from != nil {
-		*storage = anyToFloat32(from)
-		startVal = float64(*storage)
-		needsFirstFrame = true
-	}
-
-	root.evals = append(root.evals, func() {
-		dur := durVal
-		if durPtr != nil {
-			dur = *durPtr
-		}
-		target := *watchPtr
-		now := root.frameTime
-		if needsFirstFrame {
-			startVal = float64(*storage)
-			lastTarget = target
-			startTime = now
-			needsFirstFrame = false
-		} else if target != lastTarget {
-			startVal = float64(*storage)
-			lastTarget = target
-			startTime = now
-		}
-		if startTime.IsZero() {
-			return
-		}
-		elapsed := now.Sub(startTime)
-		if elapsed >= dur {
-			*storage = target
-			startTime = time.Time{}
-			if onComplete != nil {
-				onComplete()
-			}
-			return
-		}
-		progress := float64(elapsed) / float64(dur)
-		if ease != nil {
-			progress = ease(progress)
-		}
-		*storage = float32(startVal + progress*(float64(target)-startVal))
-		root.animating = true
-	})
+	t.compileTweenScalar(
+		tw,
+		elemBase,
+		elemSize,
+		func() float64 { return float64(*watchPtr) },
+		func(v float64) { *storage = float32(v) },
+		func() float64 { return float64(*storage) },
+		anyToFloat64,
+		func(out tweenNode) func() float64 {
+			outPtr := t.resolveTweenTargetFloat32(out.getTarget())
+			return func() float64 { return float64(*outPtr) }
+		},
+	)
 	return storage
 }
 
-func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool) *float64 {
+func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsafe.Pointer, elemSize uintptr) *float64 {
 	root := t.evalRoot()
 	watchPtr := t.resolveTweenTargetFloat64(tw.getTarget())
 	storage := new(float64)
 	*storage = *watchPtr
 	durVal := tw.getTweenDuration()
-	durPtr := tw.(*tween).durationPtr
+	durPtr := tw.getTweenDurationPtr()
 	onComplete := tw.getTweenOnComplete()
 	ease := tw.getTweenEasing()
 	outTw := tw.getTweenOut()
@@ -1072,11 +1224,157 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool) *float64 {
 		t.registerExitTween(tw)
 		outWatchPtr = t.resolveTweenTargetFloat64(outTw.getTarget())
 		outDurVal = outTw.getTweenDuration()
-		if out, ok := outTw.(*tween); ok {
-			outDurPtr = out.durationPtr
-		}
+		outDurPtr = outTw.getTweenDurationPtr()
 		outEase = outTw.getTweenEasing()
 		outOnComplete = outTw.getTweenOnComplete()
+	}
+
+	var fromVal float64
+	hasFrom := false
+	if from := tw.getTweenFrom(); from != nil {
+		hasFrom = true
+		fromVal = anyToFloat64(from)
+		*storage = fromVal
+	}
+
+	inForEach := elemBase != nil && elemSize > 0
+	if inForEach {
+		items := make(map[unsafe.Pointer]*perItemFloat64State)
+		t.itemEvals = append(t.itemEvals, func() {
+			key := t.elemBase
+			if key == nil {
+				return
+			}
+			state, ok := items[key]
+			if !ok {
+				initial := *watchPtr
+				state = &perItemFloat64State{
+					lastTarget:      initial,
+					startVal:        initial,
+					current:         initial,
+					needsFirstFrame: hasFrom,
+					wasActive:       armed == nil,
+				}
+				if hasFrom {
+					state.startVal = fromVal
+					state.current = fromVal
+				}
+				items[key] = state
+			}
+
+			dur := durVal
+			if durPtr != nil {
+				dur = *durPtr
+			}
+			target := *watchPtr
+			now := root.frameTime
+
+			if outTw != nil && t.isExitRenderingFor(key) {
+				outDur := outDurVal
+				if outDurPtr != nil {
+					outDur = *outDurPtr
+				}
+				outTarget := *outWatchPtr
+				if state.exitComplete {
+					state.current = outTarget
+					*storage = state.current
+					t.setExitLease(&state.exitLeaseActive, false)
+					return
+				}
+				if !state.exitActive {
+					state.exitActive = true
+					state.startVal = state.current
+					if from := outTw.getTweenFrom(); from != nil {
+						state.startVal = anyToFloat64(from)
+						state.current = state.startVal
+					}
+					state.lastTarget = outTarget
+					state.startTime = now
+				} else if outTarget != state.lastTarget {
+					state.startVal = state.current
+					state.lastTarget = outTarget
+					state.startTime = now
+				}
+				t.setExitLease(&state.exitLeaseActive, true)
+				if state.startTime.IsZero() {
+					*storage = state.current
+					return
+				}
+				elapsed := now.Sub(state.startTime)
+				if elapsed >= outDur {
+					state.current = outTarget
+					*storage = state.current
+					state.startTime = time.Time{}
+					state.exitActive = false
+					state.exitComplete = true
+					t.setExitLease(&state.exitLeaseActive, false)
+					if outOnComplete != nil {
+						outOnComplete()
+					}
+					return
+				}
+				progress := float64(elapsed) / float64(outDur)
+				if outEase != nil {
+					progress = outEase(progress)
+				}
+				state.current = state.startVal + progress*(outTarget-state.startVal)
+				*storage = state.current
+				root.animating = true
+				return
+			}
+
+			if outTw != nil {
+				state.exitActive = false
+				state.exitComplete = false
+				t.setExitLease(&state.exitLeaseActive, false)
+			}
+
+			if armed != nil && !state.wasActive {
+				state.wasActive = true
+				if hasFrom {
+					state.current = fromVal
+					state.startVal = fromVal
+				} else {
+					state.startVal = state.current
+				}
+				state.lastTarget = target
+				state.startTime = now
+				state.needsFirstFrame = false
+			} else if state.needsFirstFrame {
+				state.startVal = state.current
+				state.lastTarget = target
+				state.startTime = now
+				state.needsFirstFrame = false
+			} else if target != state.lastTarget {
+				state.startVal = state.current
+				state.lastTarget = target
+				state.startTime = now
+			}
+
+			if state.startTime.IsZero() {
+				state.current = target
+				*storage = state.current
+				return
+			}
+			elapsed := now.Sub(state.startTime)
+			if elapsed >= dur {
+				state.current = target
+				*storage = state.current
+				state.startTime = time.Time{}
+				if onComplete != nil {
+					onComplete()
+				}
+				return
+			}
+			progress := float64(elapsed) / float64(dur)
+			if ease != nil {
+				progress = ease(progress)
+			}
+			state.current = state.startVal + progress*(target-state.startVal)
+			*storage = state.current
+			root.animating = true
+		})
+		return storage
 	}
 
 	lastTarget := *watchPtr
@@ -1087,9 +1385,7 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool) *float64 {
 	exitComplete := false
 	exitLeaseActive := false
 
-	var fromVal float64
-	if from := tw.getTweenFrom(); from != nil {
-		fromVal = anyToFloat64(from)
+	if hasFrom {
 		*storage = fromVal
 		startVal = fromVal
 		needsFirstFrame = true
@@ -1217,63 +1513,23 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool) *float64 {
 	return storage
 }
 
-func (t *Template) compileTweenInt8(tw tweenNode) *int8 {
-	root := t.evalRoot()
+func (t *Template) compileTweenInt8(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr) *int8 {
 	watchPtr := t.resolveTweenTargetInt8(tw.getTarget())
 	storage := new(int8)
 	*storage = *watchPtr
-	durVal := tw.getTweenDuration()
-	durPtr := tw.(*tween).durationPtr
-	onComplete := tw.getTweenOnComplete()
-	ease := tw.getTweenEasing()
-
-	lastTarget := *watchPtr
-	startVal := float64(*watchPtr)
-	var startTime time.Time
-
-	needsFirstFrame := false
-	if from := tw.getTweenFrom(); from != nil {
-		*storage = anyToInt8(from)
-		startVal = float64(*storage)
-		needsFirstFrame = true
-	}
-
-	root.evals = append(root.evals, func() {
-		dur := durVal
-		if durPtr != nil {
-			dur = *durPtr
-		}
-		target := *watchPtr
-		now := root.frameTime
-		if needsFirstFrame {
-			startVal = float64(*storage)
-			lastTarget = target
-			startTime = now
-			needsFirstFrame = false
-		} else if target != lastTarget {
-			startVal = float64(*storage)
-			lastTarget = target
-			startTime = now
-		}
-		if startTime.IsZero() {
-			return
-		}
-		elapsed := now.Sub(startTime)
-		if elapsed >= dur {
-			*storage = target
-			startTime = time.Time{}
-			if onComplete != nil {
-				onComplete()
-			}
-			return
-		}
-		progress := float64(elapsed) / float64(dur)
-		if ease != nil {
-			progress = ease(progress)
-		}
-		*storage = int8(startVal + progress*(float64(target)-startVal))
-		root.animating = true
-	})
+	t.compileTweenScalar(
+		tw,
+		elemBase,
+		elemSize,
+		func() float64 { return float64(*watchPtr) },
+		func(v float64) { *storage = int8(v) },
+		func() float64 { return float64(*storage) },
+		func(v any) float64 { return float64(anyToInt8(v)) },
+		func(out tweenNode) func() float64 {
+			outPtr := t.resolveTweenTargetInt8(out.getTarget())
+			return func() float64 { return float64(*outPtr) }
+		},
+	)
 	return storage
 }
 
@@ -1337,18 +1593,38 @@ func (t *Template) resolveTweenTargetInt8(target any) *int8 {
 }
 
 type perItemColorState struct {
-	lastTarget    Color
-	startVal      Color
-	current       Color
-	startTime     time.Time
-	lastDisplayed Color // what the property actually showed for this item last frame
+	lastTarget      Color
+	startVal        Color
+	current         Color
+	startTime       time.Time
+	lastDisplayed   Color // what the property actually showed for this item last frame
+	needsFirstFrame bool
+	exitActive      bool
+	exitComplete    bool
+	exitLeaseActive bool
+}
+
+type perItemFloat64State struct {
+	lastTarget      float64
+	startVal        float64
+	current         float64
+	startTime       time.Time
+	needsFirstFrame bool
+	exitActive      bool
+	exitComplete    bool
+	exitLeaseActive bool
+	wasActive       bool
 }
 
 type perItemStyleState struct {
-	lastTarget Style
-	startVal   Style
-	current    Style
-	startTime  time.Time
+	lastTarget      Style
+	startVal        Style
+	current         Style
+	startTime       time.Time
+	needsFirstFrame bool
+	exitActive      bool
+	exitComplete    bool
+	exitLeaseActive bool
 }
 
 func (t *Template) compileTweenColorItems(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr) (*Color, map[unsafe.Pointer]*perItemColorState) {
@@ -1370,12 +1646,138 @@ func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer,
 	storage := new(Color)
 	*storage = *watchPtr
 	durVal := tw.getTweenDuration()
-	durPtr := tw.(*tween).durationPtr
+	durPtr := tw.getTweenDurationPtr()
 	onComplete := tw.getTweenOnComplete()
 	ease := tw.getTweenEasing()
+	outTw := tw.getTweenOut()
+	var outWatchPtr *Color
+	var outDurVal time.Duration
+	var outDurPtr *time.Duration
+	var outEase func(float64) float64
+	var outOnComplete func()
+	if outTw != nil {
+		t.registerExitTween(tw)
+		outWatchPtr = t.resolveTweenTargetColor(outTw.getTarget(), elemBase, elemSize)
+		outDurVal = outTw.getTweenDuration()
+		outDurPtr = outTw.getTweenDurationPtr()
+		outEase = outTw.getTweenEasing()
+		outOnComplete = outTw.getTweenOnComplete()
+	}
+
+	fromVal := Color{}
+	hasFrom := false
+	if from := tw.getTweenFrom(); from != nil {
+		hasFrom = true
+		fromVal = anyToColor(from)
+		*storage = fromVal
+	}
 
 	// detect ForEach context
 	inForEach := elemBase != nil && elemSize > 0
+
+	run := func(state *perItemColorState, exiting bool) {
+		dur := durVal
+		if durPtr != nil {
+			dur = *durPtr
+		}
+		target := *watchPtr
+		now := root.frameTime
+		if outTw != nil && exiting {
+			outDur := outDurVal
+			if outDurPtr != nil {
+				outDur = *outDurPtr
+			}
+			outTarget := *outWatchPtr
+			if state.exitComplete {
+				state.current = outTarget
+				*storage = state.current
+				t.setExitLease(&state.exitLeaseActive, false)
+				return
+			}
+			if !state.exitActive {
+				state.exitActive = true
+				state.startVal = state.current
+				if from := outTw.getTweenFrom(); from != nil {
+					state.startVal = anyToColor(from)
+					state.current = state.startVal
+				}
+				state.lastTarget = outTarget
+				state.startTime = now
+			} else if outTarget != state.lastTarget {
+				state.startVal = state.current
+				state.lastTarget = outTarget
+				state.startTime = now
+			}
+			t.setExitLease(&state.exitLeaseActive, true)
+			if state.startTime.IsZero() {
+				*storage = state.current
+				return
+			}
+			elapsed := now.Sub(state.startTime)
+			if elapsed >= outDur {
+				state.current = outTarget
+				*storage = state.current
+				state.startTime = time.Time{}
+				state.exitActive = false
+				state.exitComplete = true
+				t.setExitLease(&state.exitLeaseActive, false)
+				if outOnComplete != nil {
+					outOnComplete()
+				}
+				return
+			}
+			progress := float64(elapsed) / float64(outDur)
+			if outEase != nil {
+				progress = outEase(progress)
+			}
+			state.current = lerpColor(state.startVal, outTarget, progress)
+			*storage = state.current
+			root.animating = true
+			return
+		}
+		if outTw != nil {
+			state.exitActive = false
+			state.exitComplete = false
+			t.setExitLease(&state.exitLeaseActive, false)
+		}
+		if state.lastDisplayed != (Color{}) && state.lastDisplayed != state.current {
+			state.startVal = state.lastDisplayed
+			state.current = state.lastDisplayed
+			state.startTime = now
+		}
+		if state.needsFirstFrame {
+			state.startVal = state.current
+			state.lastTarget = target
+			state.startTime = now
+			state.needsFirstFrame = false
+		} else if target != state.lastTarget {
+			state.startVal = state.current
+			state.lastTarget = target
+			state.startTime = now
+		}
+		if state.startTime.IsZero() {
+			state.current = target
+			*storage = target
+			return
+		}
+		elapsed := now.Sub(state.startTime)
+		if elapsed >= dur {
+			state.current = target
+			*storage = target
+			state.startTime = time.Time{}
+			if onComplete != nil {
+				onComplete()
+			}
+			return
+		}
+		progress := float64(elapsed) / float64(dur)
+		if ease != nil {
+			progress = ease(progress)
+		}
+		state.current = lerpColor(state.startVal, target, progress)
+		*storage = state.current
+		root.animating = true
+	}
 
 	if inForEach {
 		items := sharedItems
@@ -1383,99 +1785,27 @@ func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer,
 			items = make(map[unsafe.Pointer]*perItemColorState)
 		}
 		t.itemEvals = append(t.itemEvals, func() {
-			dur := durVal
-			if durPtr != nil {
-				dur = *durPtr
-			}
 			key := t.elemBase
 			target := *watchPtr
-			now := root.frameTime
 			state, ok := items[key]
 			if !ok {
-				state = &perItemColorState{lastTarget: target, current: target}
+				state = &perItemColorState{lastTarget: target, startVal: target, current: target, needsFirstFrame: hasFrom}
+				if hasFrom {
+					state.startVal = fromVal
+					state.current = fromVal
+				}
 				items[key] = state
 			}
-			// if the property was displaying a different value last frame
-			// (e.g. a parent condition's Then branch was active), animate from there
-			if state.lastDisplayed != (Color{}) && state.lastDisplayed != state.current {
-				state.startVal = state.lastDisplayed
-				state.current = state.lastDisplayed
-				state.startTime = now
-			}
-			if target != state.lastTarget {
-				state.startVal = state.current
-				state.lastTarget = target
-				state.startTime = now
-			}
-			if state.startTime.IsZero() {
-				state.current = target
-				*storage = target
-				return
-			}
-			elapsed := now.Sub(state.startTime)
-			if elapsed >= dur {
-				state.current = target
-				*storage = target
-				state.startTime = time.Time{}
-				return
-			}
-			progress := float64(elapsed) / float64(dur)
-			if ease != nil {
-				progress = ease(progress)
-			}
-			state.current = lerpColor(state.startVal, target, progress)
-			*storage = state.current
-			root.animating = true
+			run(state, t.isExitRenderingFor(key))
 		})
 	} else {
-		lastTarget := *watchPtr
-		startVal := *watchPtr
-		var startTime time.Time
-
-		needsFirstFrame := false
-		if from := tw.getTweenFrom(); from != nil {
-			if c, ok := from.(Color); ok {
-				*storage = c
-				startVal = c
-				needsFirstFrame = true
-			}
+		state := &perItemColorState{lastTarget: *watchPtr, startVal: *storage, current: *storage, needsFirstFrame: hasFrom}
+		if hasFrom {
+			state.startVal = fromVal
+			state.current = fromVal
 		}
-
 		root.evals = append(root.evals, func() {
-			dur := durVal
-			if durPtr != nil {
-				dur = *durPtr
-			}
-			target := *watchPtr
-			now := root.frameTime
-			if needsFirstFrame {
-				startVal = *storage
-				lastTarget = target
-				startTime = now
-				needsFirstFrame = false
-			} else if target != lastTarget {
-				startVal = *storage
-				lastTarget = target
-				startTime = now
-			}
-			if startTime.IsZero() {
-				return
-			}
-			elapsed := now.Sub(startTime)
-			if elapsed >= dur {
-				*storage = target
-				startTime = time.Time{}
-				if onComplete != nil {
-					onComplete()
-				}
-				return
-			}
-			progress := float64(elapsed) / float64(dur)
-			if ease != nil {
-				progress = ease(progress)
-			}
-			*storage = lerpColor(startVal, target, progress)
-			root.animating = true
+			run(state, t.exit.rendering)
 		})
 	}
 	return storage
@@ -1487,102 +1817,158 @@ func (t *Template) compileTweenStyle(tw tweenNode, elemBase unsafe.Pointer, elem
 	storage := new(Style)
 	*storage = *watchPtr
 	durVal := tw.getTweenDuration()
-	durPtr := tw.(*tween).durationPtr
+	durPtr := tw.getTweenDurationPtr()
 	onComplete := tw.getTweenOnComplete()
 	ease := tw.getTweenEasing()
+	outTw := tw.getTweenOut()
+	var outWatchPtr *Style
+	var outDurVal time.Duration
+	var outDurPtr *time.Duration
+	var outEase func(float64) float64
+	var outOnComplete func()
+	if outTw != nil {
+		t.registerExitTween(tw)
+		outWatchPtr = t.resolveTweenTargetStyle(outTw.getTarget(), elemBase, elemSize)
+		outDurVal = outTw.getTweenDuration()
+		outDurPtr = outTw.getTweenDurationPtr()
+		outEase = outTw.getTweenEasing()
+		outOnComplete = outTw.getTweenOnComplete()
+	}
+
+	fromVal := Style{}
+	hasFrom := false
+	if from := tw.getTweenFrom(); from != nil {
+		hasFrom = true
+		fromVal = anyToStyle(from)
+		*storage = fromVal
+	}
 
 	// detect ForEach context
 	inForEach := elemBase != nil && elemSize > 0
 
-	if inForEach {
-		items := make(map[unsafe.Pointer]*perItemStyleState)
-		t.itemEvals = append(t.itemEvals, func() {
-			dur := durVal
-			if durPtr != nil {
-				dur = *durPtr
+	run := func(state *perItemStyleState, exiting bool) {
+		dur := durVal
+		if durPtr != nil {
+			dur = *durPtr
+		}
+		target := *watchPtr
+		now := root.frameTime
+		if outTw != nil && exiting {
+			outDur := outDurVal
+			if outDurPtr != nil {
+				outDur = *outDurPtr
 			}
-			key := t.elemBase
-			target := *watchPtr
-			now := root.frameTime
-			state, ok := items[key]
-			if !ok {
-				state = &perItemStyleState{lastTarget: target, current: target}
-				items[key] = state
+			outTarget := *outWatchPtr
+			if state.exitComplete {
+				state.current = outTarget
+				*storage = state.current
+				t.setExitLease(&state.exitLeaseActive, false)
+				return
 			}
-			if target != state.lastTarget {
+			if !state.exitActive {
+				state.exitActive = true
 				state.startVal = state.current
-				state.lastTarget = target
+				if from := outTw.getTweenFrom(); from != nil {
+					state.startVal = anyToStyle(from)
+					state.current = state.startVal
+				}
+				state.lastTarget = outTarget
+				state.startTime = now
+			} else if outTarget != state.lastTarget {
+				state.startVal = state.current
+				state.lastTarget = outTarget
 				state.startTime = now
 			}
+			t.setExitLease(&state.exitLeaseActive, true)
 			if state.startTime.IsZero() {
-				state.current = target
-				*storage = target
+				*storage = state.current
 				return
 			}
 			elapsed := now.Sub(state.startTime)
-			if elapsed >= dur {
-				state.current = target
-				*storage = target
+			if elapsed >= outDur {
+				state.current = outTarget
+				*storage = state.current
 				state.startTime = time.Time{}
-				return
-			}
-			progress := float64(elapsed) / float64(dur)
-			if ease != nil {
-				progress = ease(progress)
-			}
-			state.current = lerpStyle(state.startVal, target, progress)
-			*storage = state.current
-			root.animating = true
-		})
-	} else {
-		lastTarget := *watchPtr
-		startVal := *watchPtr
-		var startTime time.Time
-
-		needsFirstFrame := false
-		if from := tw.getTweenFrom(); from != nil {
-			if s, ok := from.(Style); ok {
-				*storage = s
-				startVal = s
-				needsFirstFrame = true
-			}
-		}
-
-		root.evals = append(root.evals, func() {
-			dur := durVal
-			if durPtr != nil {
-				dur = *durPtr
-			}
-			target := *watchPtr
-			now := root.frameTime
-			if needsFirstFrame {
-				startVal = *storage
-				lastTarget = target
-				startTime = now
-				needsFirstFrame = false
-			} else if target != lastTarget {
-				startVal = *storage
-				lastTarget = target
-				startTime = now
-			}
-			if startTime.IsZero() {
-				return
-			}
-			elapsed := now.Sub(startTime)
-			if elapsed >= dur {
-				*storage = target
-				startTime = time.Time{}
-				if onComplete != nil {
-					onComplete()
+				state.exitActive = false
+				state.exitComplete = true
+				t.setExitLease(&state.exitLeaseActive, false)
+				if outOnComplete != nil {
+					outOnComplete()
 				}
 				return
 			}
-			progress := float64(elapsed) / float64(dur)
-			if ease != nil {
-				progress = ease(progress)
+			progress := float64(elapsed) / float64(outDur)
+			if outEase != nil {
+				progress = outEase(progress)
 			}
-			*storage = lerpStyle(startVal, target, progress)
+			state.current = lerpStyle(state.startVal, outTarget, progress)
+			*storage = state.current
 			root.animating = true
+			return
+		}
+		if outTw != nil {
+			state.exitActive = false
+			state.exitComplete = false
+			t.setExitLease(&state.exitLeaseActive, false)
+		}
+		if state.needsFirstFrame {
+			state.startVal = state.current
+			state.lastTarget = target
+			state.startTime = now
+			state.needsFirstFrame = false
+		} else if target != state.lastTarget {
+			state.startVal = state.current
+			state.lastTarget = target
+			state.startTime = now
+		}
+		if state.startTime.IsZero() {
+			state.current = target
+			*storage = target
+			return
+		}
+		elapsed := now.Sub(state.startTime)
+		if elapsed >= dur {
+			state.current = target
+			*storage = target
+			state.startTime = time.Time{}
+			if onComplete != nil {
+				onComplete()
+			}
+			return
+		}
+		progress := float64(elapsed) / float64(dur)
+		if ease != nil {
+			progress = ease(progress)
+		}
+		state.current = lerpStyle(state.startVal, target, progress)
+		*storage = state.current
+		root.animating = true
+	}
+
+	if inForEach {
+		items := make(map[unsafe.Pointer]*perItemStyleState)
+		t.itemEvals = append(t.itemEvals, func() {
+			key := t.elemBase
+			target := *watchPtr
+			state, ok := items[key]
+			if !ok {
+				state = &perItemStyleState{lastTarget: target, startVal: target, current: target, needsFirstFrame: hasFrom}
+				if hasFrom {
+					state.startVal = fromVal
+					state.current = fromVal
+				}
+				items[key] = state
+			}
+			run(state, t.isExitRenderingFor(key))
+		})
+	} else {
+		state := &perItemStyleState{lastTarget: *watchPtr, startVal: *storage, current: *storage, needsFirstFrame: hasFrom}
+		if hasFrom {
+			state.startVal = fromVal
+			state.current = fromVal
+		}
+		root.evals = append(root.evals, func() {
+			run(state, t.exit.rendering)
 		})
 	}
 
@@ -1665,11 +2051,12 @@ const (
 )
 
 type opIf struct {
-	condPtr  *bool
-	condNode conditionNode
-	thenTmpl *Template
-	elseTmpl *Template
-	branch   branchSelector
+	condPtr      *bool
+	condNode     conditionNode
+	thenTmpl     *Template
+	elseTmpl     *Template
+	branch       branchSelector
+	itemBranches map[unsafe.Pointer]*branchSelector
 }
 
 func (c *opIf) eval(elemBase unsafe.Pointer) bool {
@@ -1682,6 +2069,21 @@ func (c *opIf) evalStatic() bool {
 		(c.condNode != nil && c.condNode.evaluate())
 }
 
+func (c *opIf) selector(elemBase unsafe.Pointer) *branchSelector {
+	if elemBase == nil {
+		return &c.branch
+	}
+	if c.itemBranches == nil {
+		c.itemBranches = make(map[unsafe.Pointer]*branchSelector)
+	}
+	selector := c.itemBranches[elemBase]
+	if selector == nil {
+		selector = &branchSelector{}
+		c.itemBranches[elemBase] = selector
+	}
+	return selector
+}
+
 type opForEach struct {
 	iterTmpl  *Template
 	slicePtr  unsafe.Pointer
@@ -1691,17 +2093,49 @@ type opForEach struct {
 }
 
 type opSwitch struct {
-	node   switchNodeInterface
-	cases  []*Template
-	def    *Template
-	branch branchSelector
+	node         switchNodeInterface
+	cases        []*Template
+	def          *Template
+	branch       branchSelector
+	itemBranches map[unsafe.Pointer]*branchSelector
 }
 
 type opMatch struct {
-	node   matchNodeInterface
-	cases  []*Template
-	def    *Template
-	branch branchSelector
+	node         matchNodeInterface
+	cases        []*Template
+	def          *Template
+	branch       branchSelector
+	itemBranches map[unsafe.Pointer]*branchSelector
+}
+
+func (s *opSwitch) selector(elemBase unsafe.Pointer) *branchSelector {
+	if elemBase == nil {
+		return &s.branch
+	}
+	if s.itemBranches == nil {
+		s.itemBranches = make(map[unsafe.Pointer]*branchSelector)
+	}
+	selector := s.itemBranches[elemBase]
+	if selector == nil {
+		selector = &branchSelector{}
+		s.itemBranches[elemBase] = selector
+	}
+	return selector
+}
+
+func (m *opMatch) selector(elemBase unsafe.Pointer) *branchSelector {
+	if elemBase == nil {
+		return &m.branch
+	}
+	if m.itemBranches == nil {
+		m.itemBranches = make(map[unsafe.Pointer]*branchSelector)
+	}
+	selector := m.itemBranches[elemBase]
+	if selector == nil {
+		selector = &branchSelector{}
+		m.itemBranches[elemBase] = selector
+	}
+	return selector
 }
 
 type opCustomRenderer struct {
@@ -2966,16 +3400,16 @@ func (t *Template) compileForEach(items any, render any, parent int16, depth int
 func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	f := flex{percentWidth: v.percentWidth, width: v.width, height: v.height, flexGrow: v.flexGrow, fitContent: v.fitContent, widthPtr: v.widthPtr, heightPtr: v.heightPtr, percentWidthPtr: v.percentWidthPtr, flexGrowPtr: v.flexGrowPtr}
 	if v.heightCond != nil {
-		f.heightPtr = t.compileDynInt16(v.heightCond)
+		f.heightPtr = t.compileDynInt16(v.heightCond, elemBase, elemSize)
 	}
 	if v.widthCond != nil {
-		f.widthPtr = t.compileDynInt16(v.widthCond)
+		f.widthPtr = t.compileDynInt16(v.widthCond, elemBase, elemSize)
 	}
 	if v.percentWidthCond != nil {
-		f.percentWidthPtr = t.compileDynFloat32(v.percentWidthCond)
+		f.percentWidthPtr = t.compileDynFloat32(v.percentWidthCond, elemBase, elemSize)
 	}
 	if v.flexGrowCond != nil {
-		f.flexGrowPtr = t.compileDynFloat32(v.flexGrowCond)
+		f.flexGrowPtr = t.compileDynFloat32(v.flexGrowCond, elemBase, elemSize)
 	}
 	bfg := v.borderFG
 	if v.borderFGDyn != nil {
@@ -3012,7 +3446,7 @@ func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsaf
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Gap = t.compileDynInt8(v.gapCond)
+		t.ops[idx].Dyn.Gap = t.compileDynInt8(v.gapCond, elemBase, elemSize)
 	}
 	if v.fillCond != nil {
 		if t.ops[idx].Dyn == nil {
@@ -3033,7 +3467,7 @@ func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsaf
 		t.ops[idx].LocalStyle = v.localStyle
 	}
 	if v.opacity.dyn != nil {
-		v.opacity.compileArmed(t)
+		v.opacity.compileArmed(t, elemBase, elemSize)
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
@@ -3052,16 +3486,16 @@ func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsaf
 func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	f := flex{percentWidth: v.percentWidth, width: v.width, height: v.height, flexGrow: v.flexGrow, fitContent: v.fitContent, widthPtr: v.widthPtr, heightPtr: v.heightPtr, percentWidthPtr: v.percentWidthPtr, flexGrowPtr: v.flexGrowPtr}
 	if v.heightCond != nil {
-		f.heightPtr = t.compileDynInt16(v.heightCond)
+		f.heightPtr = t.compileDynInt16(v.heightCond, elemBase, elemSize)
 	}
 	if v.widthCond != nil {
-		f.widthPtr = t.compileDynInt16(v.widthCond)
+		f.widthPtr = t.compileDynInt16(v.widthCond, elemBase, elemSize)
 	}
 	if v.percentWidthCond != nil {
-		f.percentWidthPtr = t.compileDynFloat32(v.percentWidthCond)
+		f.percentWidthPtr = t.compileDynFloat32(v.percentWidthCond, elemBase, elemSize)
 	}
 	if v.flexGrowCond != nil {
-		f.flexGrowPtr = t.compileDynFloat32(v.flexGrowCond)
+		f.flexGrowPtr = t.compileDynFloat32(v.flexGrowCond, elemBase, elemSize)
 	}
 	idx := t.compileContainer(
 		v.children,
@@ -3094,7 +3528,7 @@ func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsaf
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Gap = t.compileDynInt8(v.gapCond)
+		t.ops[idx].Dyn.Gap = t.compileDynInt8(v.gapCond, elemBase, elemSize)
 	}
 	if v.fillCond != nil {
 		if t.ops[idx].Dyn == nil {
@@ -3115,7 +3549,7 @@ func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsaf
 		t.ops[idx].LocalStyle = v.localStyle
 	}
 	if v.opacity.dyn != nil {
-		v.opacity.compileArmed(t)
+		v.opacity.compileArmed(t, elemBase, elemSize)
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
@@ -3171,7 +3605,7 @@ func (t *Template) compileTextC(v TextC, parent int16, depth int, elemBase unsaf
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond)
+		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond, elemBase, elemSize)
 	} else if v.widthPtr != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3231,17 +3665,17 @@ func (t *Template) compileSpacerC(v SpacerC, parent int16, depth int) int16 {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
 		if v.widthCond != nil {
-			t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond)
+			t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond, nil, 0)
 		} else if v.widthPtr != nil {
 			t.ops[idx].Dyn.Width = v.widthPtr
 		}
 		if v.heightCond != nil {
-			t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightCond)
+			t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightCond, nil, 0)
 		} else if v.heightPtr != nil {
 			t.ops[idx].Dyn.Height = v.heightPtr
 		}
 		if v.flexGrowCond != nil {
-			t.ops[idx].Dyn.FlexGrow = t.compileDynFloat32(v.flexGrowCond)
+			t.ops[idx].Dyn.FlexGrow = t.compileDynFloat32(v.flexGrowCond, nil, 0)
 		} else if v.flexGrowPtr != nil {
 			t.ops[idx].Dyn.FlexGrow = v.flexGrowPtr
 		}
@@ -3282,7 +3716,7 @@ func (t *Template) compileVRuleC(v VRuleC, parent int16, depth int) int16 {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightCond)
+		t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightCond, nil, 0)
 	} else if v.heightPtr != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3315,7 +3749,7 @@ func (t *Template) compileProgressC(v ProgressC, parent int16, depth int, elemBa
 		}
 	case tweenNode:
 		ext.mode = progInt16Ptr
-		ext.int16Ptr = t.compileTweenInt16(val)
+		ext.int16Ptr = t.compileTweenInt16(val, elemBase, elemSize)
 	}
 
 	idx := t.addOp(Op{
@@ -3329,7 +3763,7 @@ func (t *Template) compileProgressC(v ProgressC, parent int16, depth int, elemBa
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond)
+		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond, elemBase, elemSize)
 	} else if v.widthPtr != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3405,7 +3839,7 @@ func (t *Template) compileLeaderC(v LeaderC, parent int16, depth int) int16 {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond)
+		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond, nil, 0)
 	} else if v.widthPtr != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3457,12 +3891,12 @@ func (t *Template) compileSparklineC(v SparklineC, parent int16, depth int) int1
 			t.ops[idx].Dyn = &OpDyn{}
 		}
 		if v.widthCond != nil {
-			t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond)
+			t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond, nil, 0)
 		} else if v.widthPtr != nil {
 			t.ops[idx].Dyn.Width = v.widthPtr
 		}
 		if v.heightCond != nil {
-			t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightCond)
+			t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightCond, nil, 0)
 		} else if v.heightPtr != nil {
 			t.ops[idx].Dyn.Height = v.heightPtr
 		}
@@ -3503,7 +3937,7 @@ func (t *Template) compileLayerViewC(v LayerViewC, parent int16, depth int) int1
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.FlexGrow = t.compileDynFloat32(v.flexGrowCond)
+		t.ops[idx].Dyn.FlexGrow = t.compileDynFloat32(v.flexGrowCond, nil, 0)
 	} else if v.flexGrowPtr != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3569,7 +4003,7 @@ func (t *Template) compileTabsC(v TabsC, parent int16, depth int) int16 {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Gap = t.compileDynInt8(v.gapCond)
+		t.ops[idx].Dyn.Gap = t.compileDynInt8(v.gapCond, nil, 0)
 	} else if v.gapPtr != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3714,7 +4148,7 @@ func (t *Template) compileAutoTableReactive(v AutoTableC, rv reflect.Value, pare
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Gap = t.compileDynInt8(v.gapCond)
+		t.ops[idx].Dyn.Gap = t.compileDynInt8(v.gapCond, nil, 0)
 	} else if v.gapPtr != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3985,7 +4419,7 @@ func (t *Template) compileInputC(v *InputC, parent int16, depth int) int16 {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond)
+		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond, nil, 0)
 	} else if v.widthPtr != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -4287,11 +4721,12 @@ func (t *Template) setOpWidth(op *Op, geom *Geom, availW int16, elemBase unsafe.
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
 		branches, requested := ifBranches(ifExt, elemBase)
-		selected, exiting := ifExt.branch.selectBranch(requested, branches)
+		selected, exiting := ifExt.selector(elemBase).selectBranch(requested, branches)
 		subTmpl := branchAt(branches, selected)
 		if subTmpl != nil {
-			subTmpl.setExitRendering(exiting)
+			subTmpl.setExitRenderingFor(elemBase, exiting)
 			subTmpl.elemBase = elemBase
+			subTmpl.runItemEvals(elemBase)
 			// computeIntrinsicWidth handles both ContentSized containers and
 			// leaf nodes (OpText, etc.) that have a computable fixed width.
 			// Falls back to 0 for truly flexible content (Space, unsized containers).
@@ -4381,12 +4816,10 @@ func (t *Template) distributeVBoxChildWidths(idx int16, op *Op, availW int16, el
 // Returns nil if condition is false and no else branch, or if template is empty.
 func (t *Template) getIfContentOp(childOp *Op, elemBase unsafe.Pointer) *Op {
 	childIfExt := childOp.Ext.(*opIf)
-	condTrue := childIfExt.eval(elemBase)
-
-	if condTrue && childIfExt.thenTmpl != nil && len(childIfExt.thenTmpl.ops) > 0 {
-		return &childIfExt.thenTmpl.ops[0]
-	} else if !condTrue && childIfExt.elseTmpl != nil && len(childIfExt.elseTmpl.ops) > 0 {
-		return &childIfExt.elseTmpl.ops[0]
+	branches, requested := ifBranches(childIfExt, elemBase)
+	selected, _ := childIfExt.selector(elemBase).selectBranch(requested, branches)
+	if tmpl := branchAt(branches, selected); tmpl != nil && len(tmpl.ops) > 0 {
+		return &tmpl.ops[0]
 	}
 	return nil
 }
@@ -4976,13 +5409,16 @@ func (t *Template) layout(_ int16) {
 				}
 				ifExt := op.Ext.(*opIf)
 				branches, requested := ifBranches(ifExt, t.elemBase)
-				selected, exiting := ifExt.branch.selectBranch(requested, branches)
+				selected, exiting := ifExt.selector(t.elemBase).selectBranch(requested, branches)
 				if tmpl := branchAt(branches, selected); tmpl != nil {
-					tmpl.setExitRendering(exiting)
+					tmpl.setExitRenderingFor(t.elemBase, exiting)
 					tmpl.elemBase = t.elemBase
+					tmpl.runItemEvals(t.elemBase)
 					tmpl.distributeWidths(geom.W, t.elemBase)
 					tmpl.layout(0)
 					geom.H = tmpl.Height()
+				} else {
+					geom.H = 0
 				}
 
 			case OpSwitch:
@@ -4993,14 +5429,17 @@ func (t *Template) layout(_ int16) {
 				}
 				swExt := op.Ext.(*opSwitch)
 				branches, requested := switchBranches(swExt, t.elemBase)
-				selected, exiting := swExt.branch.selectBranch(requested, branches)
+				selected, exiting := swExt.selector(t.elemBase).selectBranch(requested, branches)
 				switchTmpl := branchAt(branches, selected)
 				if switchTmpl != nil {
-					switchTmpl.setExitRendering(exiting)
+					switchTmpl.setExitRenderingFor(t.elemBase, exiting)
 					switchTmpl.elemBase = t.elemBase
+					switchTmpl.runItemEvals(t.elemBase)
 					switchTmpl.distributeWidths(geom.W, t.elemBase)
 					switchTmpl.layout(0)
 					geom.H = switchTmpl.Height()
+				} else {
+					geom.H = 0
 				}
 
 			case OpMatch:
@@ -5009,14 +5448,17 @@ func (t *Template) layout(_ int16) {
 				}
 				mExt := op.Ext.(*opMatch)
 				branches, requested := matchBranches(mExt, t.elemBase)
-				selected, exiting := mExt.branch.selectBranch(requested, branches)
+				selected, exiting := mExt.selector(t.elemBase).selectBranch(requested, branches)
 				matchTmpl := branchAt(branches, selected)
 				if matchTmpl != nil {
-					matchTmpl.setExitRendering(exiting)
+					matchTmpl.setExitRenderingFor(t.elemBase, exiting)
 					matchTmpl.elemBase = t.elemBase
+					matchTmpl.runItemEvals(t.elemBase)
 					matchTmpl.distributeWidths(geom.W, t.elemBase)
 					matchTmpl.layout(0)
 					geom.H = matchTmpl.Height()
+				} else {
+					geom.H = 0
 				}
 
 			case OpLayout:
@@ -5066,7 +5508,7 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 			case OpIf:
 				childIfExt := childOp.Ext.(*opIf)
 				branches, requested := ifBranches(childIfExt, t.elemBase)
-				selected, exiting := childIfExt.branch.selectBranch(requested, branches)
+				selected, exiting := childIfExt.selector(t.elemBase).selectBranch(requested, branches)
 				tmpl := branchAt(branches, selected)
 				// Use pre-calculated width if set (from flex distribution), otherwise use availW
 				ifWidth := t.geom[i].W
@@ -5078,8 +5520,9 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 					if g := op.gap(); needGap && g > 0 {
 						cursor += int16(g)
 					}
-					tmpl.setExitRendering(exiting)
+					tmpl.setExitRenderingFor(t.elemBase, exiting)
 					tmpl.elemBase = t.elemBase
+					tmpl.runItemEvals(t.elemBase)
 					tmpl.distributeWidths(ifWidth, t.elemBase)
 					tmpl.layout(0)
 					h := tmpl.Height()
@@ -5231,11 +5674,12 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 			case OpIf:
 				childIfExt := childOp.Ext.(*opIf)
 				branches, requested := ifBranches(childIfExt, t.elemBase)
-				selected, exiting := childIfExt.branch.selectBranch(requested, branches)
+				selected, exiting := childIfExt.selector(t.elemBase).selectBranch(requested, branches)
 				tmpl := branchAt(branches, selected)
 				if tmpl != nil {
-					tmpl.setExitRendering(exiting)
+					tmpl.setExitRenderingFor(t.elemBase, exiting)
 					tmpl.elemBase = t.elemBase
+					tmpl.runItemEvals(t.elemBase)
 					tmpl.distributeWidths(availW, t.elemBase)
 					tmpl.layout(0)
 					h := tmpl.Height()
@@ -5261,11 +5705,12 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 			case OpSwitch:
 				childSwExt := childOp.Ext.(*opSwitch)
 				branches, requested := switchBranches(childSwExt, t.elemBase)
-				selected, exiting := childSwExt.branch.selectBranch(requested, branches)
+				selected, exiting := childSwExt.selector(t.elemBase).selectBranch(requested, branches)
 				tmpl := branchAt(branches, selected)
 				if tmpl != nil {
-					tmpl.setExitRendering(exiting)
+					tmpl.setExitRenderingFor(t.elemBase, exiting)
 					tmpl.elemBase = t.elemBase
+					tmpl.runItemEvals(t.elemBase)
 					tmpl.distributeWidths(availW, t.elemBase)
 					tmpl.layout(0)
 					h := tmpl.Height()
@@ -5281,11 +5726,12 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 			case OpMatch:
 				childMExt := childOp.Ext.(*opMatch)
 				branches, requested := matchBranches(childMExt, t.elemBase)
-				selected, exiting := childMExt.branch.selectBranch(requested, branches)
+				selected, exiting := childMExt.selector(t.elemBase).selectBranch(requested, branches)
 				tmpl := branchAt(branches, selected)
 				if tmpl != nil {
-					tmpl.setExitRendering(exiting)
+					tmpl.setExitRenderingFor(t.elemBase, exiting)
 					tmpl.elemBase = t.elemBase
+					tmpl.runItemEvals(t.elemBase)
 					tmpl.distributeWidths(availW, t.elemBase)
 					tmpl.layout(0)
 					h := tmpl.Height()
@@ -6252,11 +6698,12 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
 		branches, requested := ifBranches(ifExt, t.elemBase)
-		selected, exiting := ifExt.branch.selectBranch(requested, branches)
+		selector := ifExt.selector(t.elemBase)
+		selected, exiting := selector.selectBranch(requested, branches)
 		if tmpl := branchAt(branches, selected); tmpl != nil {
 			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, t.elemBase, exiting)
 			if exiting {
-				ifExt.branch.markExitRendered()
+				selector.markExitRendered()
 			}
 		}
 
@@ -6309,24 +6756,26 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpSwitch:
 		swExt := op.Ext.(*opSwitch)
 		branches, requested := switchBranches(swExt, t.elemBase)
-		selected, exiting := swExt.branch.selectBranch(requested, branches)
+		selector := swExt.selector(t.elemBase)
+		selected, exiting := selector.selectBranch(requested, branches)
 		tmpl := branchAt(branches, selected)
 		if tmpl != nil {
 			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, t.elemBase, exiting)
 			if exiting {
-				swExt.branch.markExitRendered()
+				selector.markExitRendered()
 			}
 		}
 
 	case OpMatch:
 		mExt := op.Ext.(*opMatch)
 		branches, requested := matchBranches(mExt, t.elemBase)
-		selected, exiting := mExt.branch.selectBranch(requested, branches)
+		selector := mExt.selector(t.elemBase)
+		selected, exiting := selector.selectBranch(requested, branches)
 		tmpl := branchAt(branches, selected)
 		if tmpl != nil {
 			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, t.elemBase, exiting)
 			if exiting {
-				mExt.branch.markExitRendered()
+				selector.markExitRendered()
 			}
 		}
 	}
@@ -6351,9 +6800,10 @@ func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, glo
 	sub.inheritedFill = t.inheritedFill
 	sub.clipMaxY = t.clipMaxY
 	sub.elemBase = elemBase
-	sub.setExitRendering(exiting)
+	sub.setExitRenderingFor(elemBase, exiting)
 	sub.pendingOverlays = sub.pendingOverlays[:0]
 	sub.pendingScreenEffects = sub.pendingScreenEffects[:0]
+	sub.runItemEvals(elemBase)
 	sub.render(buf, globalX, globalY, maxW)
 	t.pendingOverlays = append(t.pendingOverlays, sub.pendingOverlays...)
 	t.pendingScreenEffects = append(t.pendingScreenEffects, sub.pendingScreenEffects...)
@@ -6715,17 +7165,15 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		sub.inheritedFill = oldInheritedFill
 
 	case OpIf:
-		// Use evaluateWithBase for conditions inside ForEach
 		ifExt := op.Ext.(*opIf)
-		condTrue := ifExt.eval(elemBase)
-		if ifExt.thenTmpl != nil && condTrue {
-			ifExt.thenTmpl.inheritedStyle = sub.inheritedStyle // propagate inherited style
-			ifExt.thenTmpl.inheritedFill = sub.inheritedFill   // propagate inherited fill
-			sub.renderSubTemplate(buf, ifExt.thenTmpl, absX, absY, geom.W, elemBase)
-		} else if ifExt.elseTmpl != nil && !condTrue {
-			ifExt.elseTmpl.inheritedStyle = sub.inheritedStyle // propagate inherited style
-			ifExt.elseTmpl.inheritedFill = sub.inheritedFill   // propagate inherited fill
-			sub.renderSubTemplate(buf, ifExt.elseTmpl, absX, absY, geom.W, elemBase)
+		branches, requested := ifBranches(ifExt, elemBase)
+		selector := ifExt.selector(elemBase)
+		selected, exiting := selector.selectBranch(requested, branches)
+		if tmpl := branchAt(branches, selected); tmpl != nil {
+			sub.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
+			if exiting {
+				selector.markExitRendered()
+			}
 		}
 
 	case OpForEach:
@@ -6746,30 +7194,29 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		}
 
 	case OpSwitch:
-		// Render matching case template within ForEach context
 		swExt := op.Ext.(*opSwitch)
-		var tmpl *Template
-		matchIdx := swExt.node.getMatchIndexWithBase(elemBase)
-		if matchIdx >= 0 && matchIdx < len(swExt.cases) {
-			tmpl = swExt.cases[matchIdx]
-		} else {
-			tmpl = swExt.def
-		}
+		branches, requested := switchBranches(swExt, elemBase)
+		selector := swExt.selector(elemBase)
+		selected, exiting := selector.selectBranch(requested, branches)
+		tmpl := branchAt(branches, selected)
 		if tmpl != nil {
-			sub.renderSubTemplate(buf, tmpl, absX, absY, geom.W, elemBase)
+			sub.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
+			if exiting {
+				selector.markExitRendered()
+			}
 		}
 
 	case OpMatch:
 		mExt := op.Ext.(*opMatch)
-		var tmpl *Template
-		matchIdx := mExt.node.getMatchIndexWithBase(elemBase)
-		if matchIdx >= 0 && matchIdx < len(mExt.cases) {
-			tmpl = mExt.cases[matchIdx]
-		} else {
-			tmpl = mExt.def
-		}
+		branches, requested := matchBranches(mExt, elemBase)
+		selector := mExt.selector(elemBase)
+		selected, exiting := selector.selectBranch(requested, branches)
+		tmpl := branchAt(branches, selected)
 		if tmpl != nil {
-			sub.renderSubTemplate(buf, tmpl, absX, absY, geom.W, elemBase)
+			sub.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
+			if exiting {
+				selector.markExitRendered()
+			}
 		}
 	}
 }

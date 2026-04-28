@@ -88,9 +88,20 @@ func (f AnimateFn) From(v any) AnimateFn {
 	}
 }
 
-// In marks an enter tween when paired with Out. It returns the tween unchanged,
-// so existing Animate chains stay the thing being configured.
-func In(tw *tween) *tween { return tw }
+type presence struct {
+	in  any
+	out *tween
+}
+
+// In marks the active value used while a conditional branch is present.
+// Pass a tween to animate in, or a plain value to snap in and only animate out.
+func In(v any) *presence { return &presence{in: v} }
+
+// Out attaches an exit tween to a presence value.
+func (p *presence) Out(out *tween) *presence {
+	p.out = out
+	return p
+}
 
 // Out attaches an exit tween. When the surrounding conditional branch becomes
 // inactive, Glyph keeps that branch rendered until this tween finishes.
@@ -103,6 +114,7 @@ func (tw *tween) Out(out *tween) *tween {
 type tweenNode interface {
 	getTarget() any
 	getTweenDuration() time.Duration
+	getTweenDurationPtr() *time.Duration
 	getTweenEasing() func(float64) float64
 	getTweenFrom() any
 	getTweenOut() tweenNode
@@ -116,6 +128,7 @@ func (tw *tween) getTweenDuration() time.Duration {
 	}
 	return tw.duration
 }
+func (tw *tween) getTweenDurationPtr() *time.Duration   { return tw.durationPtr }
 func (tw *tween) getTweenEasing() func(float64) float64 { return tw.ease }
 func (tw *tween) getTweenFrom() any                     { return tw.from }
 func (tw *tween) getTweenOut() tweenNode {
@@ -127,6 +140,64 @@ func (tw *tween) getTweenOut() tweenNode {
 func (tw *tween) getTweenOnComplete() func() { return tw.onComplete }
 
 var _ tweenNode = (*tween)(nil)
+
+func (p *presence) getTweenIn() tweenNode {
+	if tw, ok := p.in.(tweenNode); ok {
+		return tw
+	}
+	return nil
+}
+
+func (p *presence) getTarget() any {
+	if tw := p.getTweenIn(); tw != nil {
+		return tw.getTarget()
+	}
+	return p.in
+}
+
+func (p *presence) getTweenDuration() time.Duration {
+	if tw := p.getTweenIn(); tw != nil {
+		return tw.getTweenDuration()
+	}
+	return 0
+}
+
+func (p *presence) getTweenDurationPtr() *time.Duration {
+	if tw := p.getTweenIn(); tw != nil {
+		return tw.getTweenDurationPtr()
+	}
+	return nil
+}
+
+func (p *presence) getTweenEasing() func(float64) float64 {
+	if tw := p.getTweenIn(); tw != nil {
+		return tw.getTweenEasing()
+	}
+	return nil
+}
+
+func (p *presence) getTweenFrom() any {
+	if tw := p.getTweenIn(); tw != nil {
+		return tw.getTweenFrom()
+	}
+	return nil
+}
+
+func (p *presence) getTweenOut() tweenNode {
+	if p.out == nil {
+		return nil
+	}
+	return p.out
+}
+
+func (p *presence) getTweenOnComplete() func() {
+	if tw := p.getTweenIn(); tw != nil {
+		return tw.getTweenOnComplete()
+	}
+	return nil
+}
+
+var _ tweenNode = (*presence)(nil)
 
 // --- color and style interpolation ---
 

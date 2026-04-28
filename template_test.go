@@ -5331,6 +5331,47 @@ func TestAnimate(t *testing.T) {
 		}
 	})
 
+	t.Run("static In with Out snaps active value", func(t *testing.T) {
+		active := true
+		tmpl := Build(VBox(
+			Text("X").FG(RGB(200, 200, 200)),
+			If(&active).Then(
+				ScreenEffect(
+					SEVignette().Smooth().
+						Strength(In(0.88).Out(Animate.Duration(120*time.Millisecond)(0.0))),
+				),
+			),
+		))
+		buf := NewBuffer(10, 10)
+		pctx := PostContext{Width: 10, Height: 10}
+		applyEffects := func() {
+			for _, eff := range tmpl.ScreenEffects() {
+				eff.Apply(buf, pctx)
+			}
+		}
+
+		tmpl.Execute(buf, 10, 10)
+		applyEffects()
+		tmpl.Execute(buf, 10, 10)
+		applyEffects()
+		activeFG := buf.Get(0, 0).Style.FG
+		if activeFG.R > 80 {
+			t.Fatalf("expected static In value to apply without enter animation, got FG.R=%d", activeFG.R)
+		}
+
+		active = false
+		tmpl.Execute(buf, 10, 10)
+		if got := len(tmpl.ScreenEffects()); got != 1 {
+			t.Fatalf("expected retained effect on exit, got %d", got)
+		}
+		tmpl.Execute(buf, 10, 10)
+		time.Sleep(150 * time.Millisecond)
+		tmpl.Execute(buf, 10, 10)
+		if got := len(tmpl.ScreenEffects()); got != 0 {
+			t.Fatalf("expected effect gone after static In exit lease, got %d", got)
+		}
+	})
+
 	t.Run("If Else waits for Out lease", func(t *testing.T) {
 		active := true
 		tmpl := Build(VBox(
@@ -5373,6 +5414,295 @@ func TestAnimate(t *testing.T) {
 		tmpl.Execute(buf, 20, 4)
 		if got := string([]rune{buf.Get(0, 0).Rune, buf.Get(1, 0).Rune, buf.Get(2, 0).Rune, buf.Get(3, 0).Rune}); got != "else" {
 			t.Fatalf("expected else branch after exit lease, got %q", got)
+		}
+	})
+
+	t.Run("ForEach If branches keep independent Out leases", func(t *testing.T) {
+		type row struct {
+			Active bool
+		}
+		rows := []row{
+			{Active: true},
+			{Active: true},
+		}
+		tmpl := Build(VBox(
+			ForEach(&rows, func(item *row) any {
+				return If(&item.Active).Then(
+					VBox.Opacity(
+						In(1.0).Out(Animate.Duration(80 * time.Millisecond)(0.0)),
+					)(
+						Text("then").FG(RGB(200, 200, 200)),
+					),
+				).Else(
+					Text("else").FG(RGB(200, 200, 200)),
+				)
+			}),
+		))
+		buf := NewBuffer(20, 4)
+		rowText := func(y int) string {
+			runes := make([]rune, 0, 4)
+			for x := 0; x < 4; x++ {
+				runes = append(runes, buf.Get(x, y).Rune)
+			}
+			return string(runes)
+		}
+
+		tmpl.Execute(buf, 20, 4)
+		tmpl.Execute(buf, 20, 4)
+
+		rows[0].Active = false
+		tmpl.Execute(buf, 20, 4)
+		if got := rowText(0); got != "then" {
+			t.Fatalf("expected first row retained while exiting, got %q", got)
+		}
+		if got := rowText(1); got != "then" {
+			t.Fatalf("expected second row to stay on active branch, got %q", got)
+		}
+		tmpl.Execute(buf, 20, 4)
+		time.Sleep(40 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		exitingFG := buf.Get(0, 0).Style.FG
+		siblingFG := buf.Get(0, 1).Style.FG
+		if exitingFG.R >= siblingFG.R {
+			t.Fatalf("expected only exiting row to fade, row0 R=%d row1 R=%d", exitingFG.R, siblingFG.R)
+		}
+		if siblingFG.R < 180 {
+			t.Fatalf("expected sibling row to remain fully visible, got R=%d", siblingFG.R)
+		}
+
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := rowText(0); got != "else" {
+			t.Fatalf("expected first row to switch after exit lease, got %q", got)
+		}
+		if got := rowText(1); got != "then" {
+			t.Fatalf("expected second row to remain active after sibling exit, got %q", got)
+		}
+	})
+
+	t.Run("ForEach text FG tween stays per item", func(t *testing.T) {
+		type row struct {
+			Active bool
+		}
+		rows := []row{
+			{Active: true},
+			{Active: false},
+			{Active: true},
+		}
+		hot := RGB(240, 200, 80)
+		cool := RGB(180, 180, 180)
+		tmpl := Build(VBox(
+			ForEach(&rows, func(item *row) any {
+				fg := Animate.Duration(1 * time.Millisecond)(
+					If(&item.Active).Then(hot).Else(cool),
+				)
+				return Text("row").FG(fg)
+			}),
+		))
+		buf := NewBuffer(20, 4)
+
+		tmpl.Execute(buf, 20, 4)
+		time.Sleep(5 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Style.FG; got != hot {
+			t.Fatalf("row 0 expected active colour, got %#v", got)
+		}
+		if got := buf.Get(0, 1).Style.FG; got != cool {
+			t.Fatalf("row 1 expected inactive colour, got %#v", got)
+		}
+		if got := buf.Get(0, 2).Style.FG; got != hot {
+			t.Fatalf("row 2 expected active colour, got %#v", got)
+		}
+
+		rows[2].Active = false
+		tmpl.Execute(buf, 20, 4)
+		time.Sleep(5 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Style.FG; got != hot {
+			t.Fatalf("row 0 should stay active when last row changes, got %#v", got)
+		}
+		if got := buf.Get(0, 1).Style.FG; got != cool {
+			t.Fatalf("row 1 should stay inactive when last row changes, got %#v", got)
+		}
+		if got := buf.Get(0, 2).Style.FG; got != cool {
+			t.Fatalf("row 2 expected inactive colour after change, got %#v", got)
+		}
+	})
+
+	t.Run("Out works for int16 height", func(t *testing.T) {
+		active := true
+		tmpl := Build(VBox(
+			If(&active).Then(
+				VBox.Height(
+					In(int16(2)).Out(Animate.Duration(80*time.Millisecond)(int16(0))),
+				)(
+					Text("a"),
+					Text("b"),
+				),
+			).Else(Text("done")),
+		))
+		buf := NewBuffer(20, 4)
+
+		tmpl.Execute(buf, 20, 4)
+		active = false
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Rune; got != 'a' {
+			t.Fatalf("expected retained height branch during exit, got %q", got)
+		}
+		tmpl.Execute(buf, 20, 4)
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Rune; got != 'd' {
+			t.Fatalf("expected else branch after height exit, got %q", got)
+		}
+	})
+
+	t.Run("ForEach no-else Out height closes gap", func(t *testing.T) {
+		type row struct {
+			Label  string
+			Active bool
+		}
+		rows := []row{
+			{Label: "a", Active: true},
+			{Label: "b", Active: true},
+			{Label: "c", Active: true},
+		}
+		tmpl := Build(VBox(
+			ForEach(&rows, func(item *row) any {
+				return If(&item.Active).Then(
+					VBox.Height(
+						In(int16(1)).Out(Animate.Duration(80 * time.Millisecond)(int16(0))),
+					)(
+						Text(&item.Label),
+					),
+				)
+			}),
+		))
+		buf := NewBuffer(20, 4)
+
+		tmpl.Execute(buf, 20, 4)
+		rows[1].Active = false
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 1).Rune; got != 'b' {
+			t.Fatalf("expected removed row retained while exiting, got %q", got)
+		}
+		tmpl.Execute(buf, 20, 4)
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Rune; got != 'a' {
+			t.Fatalf("expected first row to remain, got %q", got)
+		}
+		if got := buf.Get(0, 1).Rune; got != 'c' {
+			t.Fatalf("expected third row to close gap, got %q", got)
+		}
+	})
+
+	t.Run("Out works for color FG", func(t *testing.T) {
+		active := true
+		hot := RGB(240, 200, 80)
+		cool := RGB(120, 120, 120)
+		tmpl := Build(VBox(
+			If(&active).Then(
+				Text("x").FG(
+					In(hot).Out(Animate.Duration(80 * time.Millisecond)(cool)),
+				),
+			).Else(Text("done")),
+		))
+		buf := NewBuffer(20, 4)
+
+		tmpl.Execute(buf, 20, 4)
+		active = false
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Style.FG; got != hot {
+			t.Fatalf("expected retained colour to start hot, got %#v", got)
+		}
+		tmpl.Execute(buf, 20, 4)
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Rune; got != 'd' {
+			t.Fatalf("expected else branch after colour exit, got %q", got)
+		}
+	})
+
+	t.Run("Out works for float32 width pct", func(t *testing.T) {
+		active := true
+		tmpl := Build(VBox.Width(20)(
+			If(&active).Then(
+				VBox.WidthPct(
+					In(float32(0.5)).Out(Animate.Duration(80 * time.Millisecond)(float32(0))),
+				)(
+					Text("wide"),
+				),
+			).Else(Text("done")),
+		))
+		buf := NewBuffer(20, 4)
+
+		tmpl.Execute(buf, 20, 4)
+		active = false
+		tmpl.Execute(buf, 20, 4)
+		if got := string([]rune{buf.Get(0, 0).Rune, buf.Get(1, 0).Rune, buf.Get(2, 0).Rune, buf.Get(3, 0).Rune}); got != "wide" {
+			t.Fatalf("expected retained float32 branch during exit, got %q", got)
+		}
+		tmpl.Execute(buf, 20, 4)
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Rune; got != 'd' {
+			t.Fatalf("expected else branch after float32 exit, got %q", got)
+		}
+	})
+
+	t.Run("Out works for int8 gap", func(t *testing.T) {
+		active := true
+		tmpl := Build(VBox(
+			If(&active).Then(
+				HBox.Gap(
+					In(int8(2)).Out(Animate.Duration(80*time.Millisecond)(int8(0))),
+				)(
+					Text("a"),
+					Text("b"),
+				),
+			).Else(Text("done")),
+		))
+		buf := NewBuffer(20, 4)
+
+		tmpl.Execute(buf, 20, 4)
+		active = false
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Rune; got != 'a' {
+			t.Fatalf("expected retained int8 branch during exit, got %q", got)
+		}
+		tmpl.Execute(buf, 20, 4)
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Rune; got != 'd' {
+			t.Fatalf("expected else branch after int8 exit, got %q", got)
+		}
+	})
+
+	t.Run("Out works for Style", func(t *testing.T) {
+		active := true
+		hot := Style{FG: RGB(240, 200, 80)}
+		cool := Style{FG: RGB(120, 120, 120)}
+		tmpl := Build(VBox(
+			If(&active).Then(
+				Text("x").Style(
+					In(hot).Out(Animate.Duration(80 * time.Millisecond)(cool)),
+				),
+			).Else(Text("done")),
+		))
+		buf := NewBuffer(20, 4)
+
+		tmpl.Execute(buf, 20, 4)
+		active = false
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Style.FG; got != hot.FG {
+			t.Fatalf("expected retained style to start hot, got %#v", got)
+		}
+		tmpl.Execute(buf, 20, 4)
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := buf.Get(0, 0).Rune; got != 'd' {
+			t.Fatalf("expected else branch after style exit, got %q", got)
 		}
 	})
 
@@ -5483,6 +5813,92 @@ func TestAnimate(t *testing.T) {
 		tmpl.Execute(buf, 20, 5)
 		if got := len(tmpl.ScreenEffects()); got != 0 {
 			t.Fatalf("expected both effects gone after longest exit lease, got %d", got)
+		}
+	})
+
+	t.Run("Switch waits for Out lease", func(t *testing.T) {
+		mode := "send"
+		tmpl := Build(VBox(
+			Switch(&mode).
+				Case("send", VBox(
+					Text("send"),
+					ScreenEffect(
+						SEVignette().Strength(
+							In(Animate.Duration(1*time.Millisecond)(0.5)).
+								Out(Animate.Duration(80*time.Millisecond)(0.0)),
+						),
+					),
+				)).
+				Default(Text("idle")),
+		))
+		buf := NewBuffer(20, 4)
+		pctx := PostContext{Width: 20, Height: 4}
+		applyEffects := func() {
+			for _, eff := range tmpl.ScreenEffects() {
+				eff.Apply(buf, pctx)
+			}
+		}
+
+		tmpl.Execute(buf, 20, 4)
+		applyEffects()
+		time.Sleep(10 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		applyEffects()
+
+		mode = "idle"
+		tmpl.Execute(buf, 20, 4)
+		if got := string([]rune{buf.Get(0, 0).Rune, buf.Get(1, 0).Rune, buf.Get(2, 0).Rune, buf.Get(3, 0).Rune}); got != "send" {
+			t.Fatalf("expected switch case to remain during exit, got %q", got)
+		}
+		tmpl.Execute(buf, 20, 4)
+
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := string([]rune{buf.Get(0, 0).Rune, buf.Get(1, 0).Rune, buf.Get(2, 0).Rune, buf.Get(3, 0).Rune}); got != "idle" {
+			t.Fatalf("expected switch default after exit lease, got %q", got)
+		}
+	})
+
+	t.Run("Match waits for Out lease", func(t *testing.T) {
+		status := 1
+		tmpl := Build(VBox(
+			Match(&status,
+				Eq(1, VBox(
+					Text("busy"),
+					ScreenEffect(
+						SEVignette().Strength(
+							In(Animate.Duration(1*time.Millisecond)(0.5)).
+								Out(Animate.Duration(80*time.Millisecond)(0.0)),
+						),
+					),
+				)),
+			).Default(Text("done")),
+		))
+		buf := NewBuffer(20, 4)
+		pctx := PostContext{Width: 20, Height: 4}
+		applyEffects := func() {
+			for _, eff := range tmpl.ScreenEffects() {
+				eff.Apply(buf, pctx)
+			}
+		}
+
+		tmpl.Execute(buf, 20, 4)
+		applyEffects()
+		time.Sleep(10 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		applyEffects()
+
+		status = 2
+		tmpl.Execute(buf, 20, 4)
+		if got := string([]rune{buf.Get(0, 0).Rune, buf.Get(1, 0).Rune, buf.Get(2, 0).Rune, buf.Get(3, 0).Rune}); got != "busy" {
+			t.Fatalf("expected match case to remain during exit, got %q", got)
+		}
+		tmpl.Execute(buf, 20, 4)
+
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 4)
+		if got := string([]rune{buf.Get(0, 0).Rune, buf.Get(1, 0).Rune, buf.Get(2, 0).Rune, buf.Get(3, 0).Rune}); got != "done" {
+			t.Fatalf("expected match default after exit lease, got %q", got)
 		}
 	})
 }

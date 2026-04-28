@@ -1,6 +1,9 @@
 package glyph
 
-import "math"
+import (
+	"math"
+	"unsafe"
+)
 
 // dynFloat64 bundles a static float64 with optional dynamic source (pointer,
 // condition, or tween). replaces the repeated 3-field pattern across effects.
@@ -30,21 +33,21 @@ func (d *dynFloat64) set(v any) {
 
 func (d *dynFloat64) compile(tmpl *Template) {
 	if d.dyn != nil {
-		d.ptr = tmpl.compileDynFloat64(d.dyn)
+		d.ptr = tmpl.compileDynFloat64(d.dyn, nil, 0)
 	}
 }
 
 // compileArmed is for screen effects whose Apply calls resolve(). From/Out
 // tweens inside conditional branches are tied to that activation.
-func (d *dynFloat64) compileArmed(tmpl *Template) {
+func (d *dynFloat64) compileArmed(tmpl *Template, elemBase unsafe.Pointer, elemSize uintptr) {
 	if d.dyn == nil {
 		return
 	}
 	if tw, ok := d.dyn.(tweenNode); ok && (tw.getTweenFrom() != nil || tw.getTweenOut() != nil) && tmpl.root != nil {
 		d.armed = new(bool)
-		d.ptr = tmpl.compileTweenFloat64(tw, d.armed)
+		d.ptr = tmpl.compileTweenFloat64(tw, d.armed, elemBase, elemSize)
 	} else {
-		d.ptr = tmpl.compileDynFloat64(d.dyn)
+		d.ptr = tmpl.compileDynFloat64(d.dyn, elemBase, elemSize)
 	}
 }
 
@@ -82,7 +85,7 @@ func (d *dynInt) set(v any) {
 
 func (d *dynInt) compile(tmpl *Template) {
 	if d.dyn != nil {
-		d.ptr = tmpl.compileDynInt16(d.dyn)
+		d.ptr = tmpl.compileDynInt16(d.dyn, nil, 0)
 	}
 }
 
@@ -160,7 +163,7 @@ func (t tintEffect) Strength(s any) tintEffect { t.strength.set(s); return t }
 func (t tintEffect) Dodge(ref *NodeRef) tintEffect { t.dodge = ref; return t }
 
 func (t tintEffect) compileEffect(tmpl *Template) Effect {
-	t.strength.compileArmed(tmpl)
+	t.strength.compileArmed(tmpl, nil, 0)
 	return t
 }
 
@@ -194,7 +197,7 @@ func SEVignette() vignetteEffect {
 func (v vignetteEffect) Strength(s any) vignetteEffect { v.strength.set(s); return v }
 
 func (v vignetteEffect) compileEffect(tmpl *Template) Effect {
-	v.strength.compileArmed(tmpl)
+	v.strength.compileArmed(tmpl, nil, 0)
 	return v
 }
 
@@ -262,7 +265,7 @@ func SEDesaturate() desaturateEffect { return desaturateEffect{strength: dynFloa
 func (d desaturateEffect) Strength(s any) desaturateEffect { d.strength.set(s); return d }
 
 func (d desaturateEffect) compileEffect(tmpl *Template) Effect {
-	d.strength.compileArmed(tmpl)
+	d.strength.compileArmed(tmpl, nil, 0)
 	return d
 }
 
@@ -295,7 +298,7 @@ func SEContrast() contrastEffect { return contrastEffect{strength: dynFloat64{va
 func (h contrastEffect) Strength(s any) contrastEffect { h.strength.set(s); return h }
 
 func (h contrastEffect) compileEffect(tmpl *Template) Effect {
-	h.strength.compileArmed(tmpl)
+	h.strength.compileArmed(tmpl, nil, 0)
 	return h
 }
 
@@ -357,8 +360,8 @@ func (p pulseEffect) Speed(s any) pulseEffect { p.speed.set(s); return p }
 func (p pulseEffect) Strength(s any) pulseEffect { p.strength.set(s); return p }
 
 func (p pulseEffect) compileEffect(tmpl *Template) Effect {
-	p.speed.compileArmed(tmpl)
-	p.strength.compileArmed(tmpl)
+	p.speed.compileArmed(tmpl, nil, 0)
+	p.strength.compileArmed(tmpl, nil, 0)
 	return p
 }
 
@@ -428,7 +431,7 @@ func SEDropShadow() dropShadowEffect {
 func (d dropShadowEffect) Strength(s any) dropShadowEffect { d.strength.set(s); return d }
 
 func (d dropShadowEffect) compileEffect(tmpl *Template) Effect {
-	d.strength.compileArmed(tmpl)
+	d.strength.compileArmed(tmpl, nil, 0)
 	d.radius.compile(tmpl)
 	d.tint.compile(tmpl)
 	return d
@@ -507,9 +510,9 @@ func SEGlow() glowEffect {
 func (g glowEffect) Strength(s any) glowEffect { g.strength.set(s); return g }
 
 func (g glowEffect) compileEffect(tmpl *Template) Effect {
-	g.strength.compileArmed(tmpl)
+	g.strength.compileArmed(tmpl, nil, 0)
 	g.radius.compile(tmpl)
-	g.brightness.compileArmed(tmpl)
+	g.brightness.compileArmed(tmpl, nil, 0)
 	return g
 }
 
@@ -652,10 +655,10 @@ func (s spinGlowEffect) PaletteRef(p *[]Color) spinGlowEffect {
 }
 
 func (s spinGlowEffect) compileEffect(tmpl *Template) Effect {
-	s.strength.compileArmed(tmpl)
+	s.strength.compileArmed(tmpl, nil, 0)
 	s.radius.compile(tmpl)
-	s.speed.compileArmed(tmpl)
-	s.falloff.compileArmed(tmpl)
+	s.speed.compileArmed(tmpl, nil, 0)
+	s.falloff.compileArmed(tmpl, nil, 0)
 	return s
 }
 
@@ -926,8 +929,8 @@ func (b bloomEffect) Strength(s any) bloomEffect { b.strength.set(s); return b }
 
 func (b bloomEffect) compileEffect(tmpl *Template) Effect {
 	b.radius.compile(tmpl)
-	b.threshold.compileArmed(tmpl)
-	b.strength.compileArmed(tmpl)
+	b.threshold.compileArmed(tmpl, nil, 0)
+	b.strength.compileArmed(tmpl, nil, 0)
 	return b
 }
 
