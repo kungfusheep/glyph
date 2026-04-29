@@ -37,7 +37,7 @@ func main() {
 	app := NewInlineApp()
 
 	app.SetView(VBox(
-		ForEach(&steps, func(s *step) any {
+		ForEach(&steps, func(s *step) Component {
 			return HBox.Gap(1)(
 				Text(&s.icon).Width(1).Bold(),
 				Text(&s.name).Width(15),

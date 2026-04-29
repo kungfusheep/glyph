@@ -803,7 +803,7 @@ func TestV2ForEach(t *testing.T) {
 
 	tmpl := Build(VBox(
 		Text("List:"),
-		ForEach(&items, func(item *testItem) any {
+		ForEach(&items, func(item *testItem) Component {
 			return Text(&item.Name)
 		}),
 		Text("End"),
@@ -834,7 +834,7 @@ func TestV2ForEachEmpty(t *testing.T) {
 
 	tmpl := Build(VBox(
 		Text("List:"),
-		ForEach(&items, func(item *testItem) any {
+		ForEach(&items, func(item *testItem) Component {
 			return Text(&item.Name)
 		}),
 		Text("End"),
@@ -859,7 +859,7 @@ func TestV2ForEachDynamic(t *testing.T) {
 	}
 
 	tmpl := Build(VBox(
-		ForEach(&items, func(item *testItem) any {
+		ForEach(&items, func(item *testItem) Component {
 			return Text(&item.Name)
 		}),
 	))
@@ -900,8 +900,8 @@ type StatusItem struct {
 	Value *string
 }
 
-func (s StatusBar) Build() any {
-	children := make([]any, 0, len(s.Items)*3)
+func (s StatusBar) Build() Component {
+	children := make([]Component, 0, len(s.Items)*3)
 	for i, item := range s.Items {
 		if i > 0 {
 			children = append(children, Text(" | "))
@@ -958,7 +958,7 @@ func TestV2NestedCustomComponent(t *testing.T) {
 	}
 
 	// This is defined inline to test the pattern
-	build := func(c CardComponent) any {
+	build := func(c CardComponent) Component {
 		return VBox(
 			Text("["+c.Card.Title+"]"),
 			Text(c.Card.Content),
@@ -968,7 +968,7 @@ func TestV2NestedCustomComponent(t *testing.T) {
 	// Wrapper that implements Component
 	type cardWrapper struct {
 		card *Card
-		fn   func(CardComponent) any
+		fn   func(CardComponent) Component
 	}
 
 	wrap := func(c *Card) cardWrapper {
@@ -1000,6 +1000,8 @@ type CustomSparkline struct {
 	Values *[]float64
 	Width  int
 }
+
+func (s CustomSparkline) Build() Component { return s }
 
 func (s CustomSparkline) MinSize() (width, height int) {
 	return s.Width, 1
@@ -1148,7 +1150,7 @@ func TestV2CustomLayout(t *testing.T) {
 	// Create a 3-column grid layout using Box
 	tmpl := Build(Box{
 		Layout: Grid(3, 10, 1),
-		Children: []any{
+		Children: []Component{
 			Text("A"),
 			Text("B"),
 			Text("C"),
@@ -1192,7 +1194,7 @@ func TestV2CustomLayoutNested(t *testing.T) {
 		Text("Header"),
 		Box{
 			Layout: Grid(2, 15, 1),
-			Children: []any{
+			Children: []Component{
 				Text("Item1"),
 				Text("Item2"),
 				Text("Item3"),
@@ -1244,7 +1246,7 @@ func TestV2BoxInlineLayout(t *testing.T) {
 			}
 			return rects
 		},
-		Children: []any{
+		Children: []Component{
 			Text("A"),
 			Text("B"),
 			Text("C"),
@@ -1275,7 +1277,7 @@ func TestV2ConditionInsideForEach(t *testing.T) {
 	}
 
 	tmpl := Build(VBox(
-		ForEach(&items, func(item *Item) any {
+		ForEach(&items, func(item *Item) Component {
 			return HBox(
 				If(&item.Selected).Eq(true).Then(
 					Text(">"),
@@ -1572,7 +1574,7 @@ func TestForEachMultipleStringFields(t *testing.T) {
 	}
 
 	tmpl := Build(VBox(
-		ForEach(&items, func(item *Item) any {
+		ForEach(&items, func(item *Item) Component {
 			return HBox.Gap(1)(
 				Text(&item.Icon),
 				Text(&item.Label),
@@ -1638,7 +1640,7 @@ func TestSelectionListMultipleFields(t *testing.T) {
 		Selected:   &selected,
 		Marker:     "> ",
 		MaxVisible: 10,
-		Render: func(item *Item) any {
+		Render: func(item *Item) Component {
 			return HBox.Gap(1)(
 				Text(&item.Icon),
 				Text(&item.Label),
@@ -1970,7 +1972,7 @@ func TestComplexNestedLayouts(t *testing.T) {
 		}
 
 		tmpl := Build(VBox(
-			ForEach(&rows, func(r *Row) any {
+			ForEach(&rows, func(r *Row) Component {
 				return HBox.Gap(1)(
 					Text(&r.Key),
 					Space().Char('.'),
@@ -2012,7 +2014,7 @@ func TestComplexNestedLayouts(t *testing.T) {
 			Selected:   &selected,
 			Marker:     "> ",
 			MaxVisible: 10,
-			Render: func(item *MenuItem) any {
+			Render: func(item *MenuItem) Component {
 				// Complex nested layout: HBox with VBox inside
 				return HBox.Gap(1)(
 					Text(&item.Icon),
@@ -2315,7 +2317,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 					Items:    &items,
 					Selected: &selected,
 					Marker:   "> ",
-					Render: func(item *FileItem) any {
+					Render: func(item *FileItem) Component {
 						return Text(&item.Display)
 					},
 				},
@@ -2426,7 +2428,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "> ",
-			Render: func(item *FileItem) any {
+			Render: func(item *FileItem) Component {
 				return Text(&item.Display)
 			},
 		}
@@ -4713,7 +4715,7 @@ func TestSimpleForEach(t *testing.T) {
 
 	ui := VBox(
 		Text("Simple ForEach"),
-		ForEach(&items, func(item *StressItem) any {
+		ForEach(&items, func(item *StressItem) Component {
 			return Progress(&item.CPU).Width(8)
 		}),
 	)
@@ -4748,9 +4750,9 @@ func TestNestedForEach(t *testing.T) {
 
 	ui := VBox(
 		Text("Dense Grid"),
-		ForEach(&rows, func(row *[]StressItem) any {
+		ForEach(&rows, func(row *[]StressItem) Component {
 			return HBox(
-				ForEach(row, func(item *StressItem) any {
+				ForEach(row, func(item *StressItem) Component {
 					return Progress(&item.CPU).Width(8)
 				}),
 			)
@@ -5426,7 +5428,7 @@ func TestAnimate(t *testing.T) {
 			{Active: true},
 		}
 		tmpl := Build(VBox(
-			ForEach(&rows, func(item *row) any {
+			ForEach(&rows, func(item *row) Component {
 				return If(&item.Active).Then(
 					VBox.Opacity(
 						In(1.0).Out(Animate.Duration(80 * time.Millisecond)(0.0)),
@@ -5492,7 +5494,7 @@ func TestAnimate(t *testing.T) {
 		hot := RGB(240, 200, 80)
 		cool := RGB(180, 180, 180)
 		tmpl := Build(VBox(
-			ForEach(&rows, func(item *row) any {
+			ForEach(&rows, func(item *row) Component {
 				fg := Animate.Duration(1 * time.Millisecond)(
 					If(&item.Active).Then(hot).Else(cool),
 				)
@@ -5568,7 +5570,7 @@ func TestAnimate(t *testing.T) {
 			{Label: "c", Active: true},
 		}
 		tmpl := Build(VBox(
-			ForEach(&rows, func(item *row) any {
+			ForEach(&rows, func(item *row) Component {
 				return If(&item.Active).Then(
 					VBox.Height(
 						In(int16(1)).Out(Animate.Duration(80 * time.Millisecond)(int16(0))),

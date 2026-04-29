@@ -52,7 +52,7 @@ func BenchmarkBuildForEach(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = Build(VBox(
 			Text("Header"),
-			ForEach(&items, func(item *Item) any {
+			ForEach(&items, func(item *Item) Component {
 				return Text(&item.Name)
 			}),
 		))
@@ -148,7 +148,7 @@ func benchmarkV2ForEach(b *testing.B, n int) {
 	}
 
 	tmpl := Build(VBox(
-		ForEach(&items, func(item *Item) any {
+		ForEach(&items, func(item *Item) Component {
 			return Text(&item.Name)
 		}),
 	))
@@ -209,7 +209,7 @@ func BenchmarkV2ExecuteComplex(b *testing.B) {
 			Progress(&progress).Width(20),
 		),
 		If(&showCompleted).Eq(true).Then(Text("Showing all tasks")),
-		ForEach(&tasks, func(t *Task) any {
+		ForEach(&tasks, func(t *Task) Component {
 			return HBox.Gap(1)(
 				Text(&t.Name),
 				Text(&t.Status),

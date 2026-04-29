@@ -55,9 +55,9 @@ type App struct {
 	viewStack     []string // pushed views (for modal overlays)
 
 	// State
-	running      bool
-	renderMu     sync.Mutex
-	renderChan   chan struct{}
+	running        bool
+	renderMu       sync.Mutex
+	renderChan     chan struct{}
 	frameFlushed   atomic.Bool // set when input renders directly, cleared by debounce timer
 	forceFullFlush bool        // set by Go() to force full redraw on next frame
 
@@ -239,12 +239,12 @@ func (a *App) SetViewLimit(n int) *App {
 //
 //	state := &MyState{Title: "Hello", Progress: 50}
 //	app.SetView(
-//	    Col{Children: []any{
+//	    Col{Children: []Component{
 //	        Text{Content: &state.Title},
 //	        Progress{Value: &state.Progress},
 //	    }},
 //	)
-func (a *App) SetView(view any) *App {
+func (a *App) SetView(view Component) *App {
 	a.setViewCount++
 	if a.setViewLimit > 0 && a.setViewCount > a.setViewLimit {
 		panic(fmt.Sprintf("SetView called %d times, limit is %d. Use reactive updates via pointers instead of calling SetView repeatedly.", a.setViewCount, a.setViewLimit))
@@ -384,7 +384,7 @@ type ViewBuilder struct {
 //	app.View("home", homeView).
 //	    Handle("j", moveDown).
 //	    Handle("s", func(_ riffkey.Match) { app.Go("settings") })
-func (a *App) View(name string, view any) *ViewBuilder {
+func (a *App) View(name string, view Component) *ViewBuilder {
 	// Initialize maps if needed
 	if a.viewTemplates == nil {
 		a.viewTemplates = make(map[string]*Template)
@@ -446,7 +446,7 @@ func (vb *ViewBuilder) Handle(pattern string, handler any) *ViewBuilder {
 
 // UpdateView recompiles a view with a new view definition.
 // Use this when the view's structure changes and needs re-compilation.
-func (a *App) UpdateView(name string, view any) {
+func (a *App) UpdateView(name string, view Component) {
 	if a.viewTemplates == nil {
 		return
 	}

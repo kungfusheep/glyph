@@ -22,8 +22,8 @@ func main() {
 	sparkData := []float64{0.2, 0.5, 0.8, 0.3, 0.6, 0.9, 0.4, 0.7, 0.5, 0.3, 0.8, 0.6, 0.4, 0.9, 0.7}
 
 	// Colors for gradients
-	gradientStart := RGB(0, 255, 128)  // cyan-green
-	gradientEnd := RGB(255, 0, 128)    // magenta-red
+	gradientStart := RGB(0, 255, 128) // cyan-green
+	gradientEnd := RGB(255, 0, 128)   // magenta-red
 
 	// Smooth gradient progress bar with sub-character precision
 	gradientBar := Widget(
@@ -258,9 +258,10 @@ func main() {
 // brailleBit returns the bit position for a dot in a braille character
 // row: 0-3, col: 0-1 (left/right)
 // braille layout:  0 3
-//                  1 4
-//                  2 5
-//                  6 7
+//
+//	1 4
+//	2 5
+//	6 7
 func brailleBit(row, col int) int {
 	if col == 0 {
 		if row < 3 {

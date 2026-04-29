@@ -16,13 +16,13 @@ func TestSwitchInHBoxForEachLayout(t *testing.T) {
 	}
 
 	items := []item{
-		{Name: "alpha", Status: "ok"},   // Default: "  ok" = 4 chars
-		{Name: "beta", Status: "warn"},  // Case:    "! warn" = 6 chars
-		{Name: "gamma", Status: "ok"},   // Default: "  ok" = 4 chars
+		{Name: "alpha", Status: "ok"},  // Default: "  ok" = 4 chars
+		{Name: "beta", Status: "warn"}, // Case:    "! warn" = 6 chars
+		{Name: "gamma", Status: "ok"},  // Default: "  ok" = 4 chars
 	}
 
 	view := HBox(
-		ForEach(&items, func(it *item) any {
+		ForEach(&items, func(it *item) Component {
 			return HBox.Gap(1)(
 				Text(&it.Name),
 				Switch(&it.Status).

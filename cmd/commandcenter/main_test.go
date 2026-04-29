@@ -58,7 +58,7 @@ func TestCommandCenterLayout(t *testing.T) {
 	restarting := false
 	spinnerFrame := 0
 
-	metricPanel := func(title string, data *[]float64, label *string, col Color) any {
+	metricPanel := func(title string, data *[]float64, label *string, col Color) Component {
 		return VBox.Grow(1).Border(BorderSingle).BorderFG(BrightBlack).Title(title)(
 			Sparkline(data).FG(col),
 			Text(label).FG(BrightBlack),
@@ -91,7 +91,7 @@ func TestCommandCenterLayout(t *testing.T) {
 				Text("STATUS").FG(BrightBlack).Width(11),
 			),
 			HRule().FG(BrightBlack),
-			ForEach(&services, func(svc *service) any {
+			ForEach(&services, func(svc *service) Component {
 				return Jump(
 					HBox.Gap(2)(
 						VBox.Width(1)(Switch(&svc.Status).
@@ -114,7 +114,7 @@ func TestCommandCenterLayout(t *testing.T) {
 		),
 
 		VBox.Border(BorderSingle).BorderFG(BrightBlack).Title("log")(
-			ForEach(&logLines, func(l *string) any {
+			ForEach(&logLines, func(l *string) Component {
 				return Text(l).FG(BrightBlack)
 			}),
 		),

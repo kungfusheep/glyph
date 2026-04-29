@@ -21,7 +21,7 @@ func TestConditionFillInsideForEach(t *testing.T) {
 
 	buf := NewBuffer(20, 4)
 	tmpl := Build(VBox(
-		ForEach(&items, func(item *Item) any {
+		ForEach(&items, func(item *Item) Component {
 			bg := If(&item.Selected).Then(selBG).Else(defBG)
 			return VBox.Fill(bg)(
 				Text(&item.Label),
@@ -59,7 +59,7 @@ func TestTweenInsideConditionElse(t *testing.T) {
 
 	buf := NewBuffer(20, 4)
 	tmpl := Build(VBox(
-		ForEach(&items, func(item *Item) any {
+		ForEach(&items, func(item *Item) Component {
 			bg := If(&item.Selected).Then(selBG).Else(fade(defBG))
 			return VBox.Fill(bg)(
 				Text(&item.Label),

@@ -460,20 +460,20 @@ type flex struct {
 // Render is optional - if nil, items are rendered using fmt.Sprintf("%v", item).
 // Marker defaults to "> " if not specified.
 type SelectionList struct {
-	Items         any       // *[]T - pointer to slice of items
-	Selected      *int      // pointer to selected index
-	Marker        string    // selection marker (default "> ", use " " for no visible marker)
-	MarkerStyle   Style     // style for marker text (merged with SelectedStyle.BG for selected rows)
-	Render        any       // func(*T) any - optional, renders each item
-	MaxVisible    int       // max items to show (0 = all)
+	Items            any      // *[]T - pointer to slice of items
+	Selected         *int     // pointer to selected index
+	Marker           string   // selection marker (default "> ", use " " for no visible marker)
+	MarkerStyle      Style    // style for marker text (merged with SelectedStyle.BG for selected rows)
+	Render           any      // func(*T) Component - optional, renders each item
+	MaxVisible       int      // max items to show (0 = all)
 	Style            Style    // default style for non-selected rows
 	SelectedStyle    Style    // style for selected row
 	StyleDyn         any      // dynamic value (compiled eval writes into Style)
 	SelectedStyleDyn any      // dynamic value (compiled eval writes into SelectedStyle)
 	SelectedRef      *NodeRef // tracks position of the selected row each frame
-	len           int       // cached length for bounds checking
-	offset        int       // scroll offset for windowing
-	onMove        func()    // called after selection index changes
+	len              int      // cached length for bounds checking
+	offset           int      // scroll offset for windowing
+	onMove           func()   // called after selection index changes
 }
 
 // ensureVisible adjusts scroll offset so selected item is visible.
@@ -720,14 +720,14 @@ type TextInput struct {
 //
 //	glyph.If(&showModal).Eq(true).Then(glyph.Overlay{Child: ...})
 type OverlayNode struct {
-	Centered   bool  // true = center on screen (default behavior if X/Y not set)
-	X, Y       int   // explicit position (used if Centered is false)
-	Width      int   // explicit width (0 = auto from content)
-	Height     int   // explicit height (0 = auto from content)
-	Backdrop   bool  // draw dimmed backdrop behind overlay
-	BackdropFG Color // backdrop dim color (default: BrightBlack)
-	BG         Color // background color for overlay content area (fills before rendering child)
-	Child      any   // overlay content
+	Centered   bool      // true = center on screen (default behavior if X/Y not set)
+	X, Y       int       // explicit position (used if Centered is false)
+	Width      int       // explicit width (0 = auto from content)
+	Height     int       // explicit height (0 = auto from content)
+	Backdrop   bool      // draw dimmed backdrop behind overlay
+	BackdropFG Color     // backdrop dim color (default: BrightBlack)
+	BG         Color     // background color for overlay content area (fills before rendering child)
+	Child      Component // overlay content
 }
 
 // sliceHeader is the runtime representation of a slice.

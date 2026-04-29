@@ -16,13 +16,15 @@ import (
 // External packages can implement this to create custom components
 // that expand to built-in primitives at compile time.
 type Component interface {
-	Build() any
+	Build() Component
 }
 
 // Renderer is the extension interface for components that render directly.
 // Unlike Component (which expands to primitives), Renderer draws to the
 // buffer itself. This is useful for custom widgets like charts, sparklines, etc.
 type Renderer interface {
+	Component
+
 	// MinSize returns the minimum dimensions needed by this component.
 	// Called during layout phase.
 	MinSize() (width, height int)
@@ -55,7 +57,13 @@ type textInputBindable interface {
 // templateTree is implemented by compound components that compose existing
 // building blocks into a template subtree.
 type templateTree interface {
-	toTemplate() any
+	toTemplate() Component
+}
+
+type valueBranchNode interface {
+	getMatchIndex() int
+	getCaseNodes() []any
+	getDefaultNode() any
 }
 
 // LayoutFunc positions children given their sizes and available space.
@@ -80,7 +88,7 @@ type NodeRef = Rect
 // Use this when HBox/VBox don't fit your needs.
 type Box struct {
 	Layout   LayoutFunc
-	Children []any
+	Children []Component
 }
 
 // Template is a compiled UI template.
@@ -630,6 +638,78 @@ func (t *Template) compileCondInt8(cond conditionNode) *int8 {
 	return storage
 }
 
+func (t *Template) compileBranchInt16(branch valueBranchNode) *int16 {
+	root := t.evalRoot()
+	storage := new(int16)
+	cases := branch.getCaseNodes()
+	def := branch.getDefaultNode()
+	eval := func() {
+		idx := branch.getMatchIndex()
+		if idx >= 0 && idx < len(cases) {
+			*storage = anyToInt16(cases[idx])
+			return
+		}
+		*storage = anyToInt16(def)
+	}
+	eval()
+	root.evals = append(root.evals, eval)
+	return storage
+}
+
+func (t *Template) compileBranchFloat32(branch valueBranchNode) *float32 {
+	root := t.evalRoot()
+	storage := new(float32)
+	cases := branch.getCaseNodes()
+	def := branch.getDefaultNode()
+	eval := func() {
+		idx := branch.getMatchIndex()
+		if idx >= 0 && idx < len(cases) {
+			*storage = anyToFloat32(cases[idx])
+			return
+		}
+		*storage = anyToFloat32(def)
+	}
+	eval()
+	root.evals = append(root.evals, eval)
+	return storage
+}
+
+func (t *Template) compileBranchFloat64(branch valueBranchNode) *float64 {
+	root := t.evalRoot()
+	storage := new(float64)
+	cases := branch.getCaseNodes()
+	def := branch.getDefaultNode()
+	eval := func() {
+		idx := branch.getMatchIndex()
+		if idx >= 0 && idx < len(cases) {
+			*storage = anyToFloat64(cases[idx])
+			return
+		}
+		*storage = anyToFloat64(def)
+	}
+	eval()
+	root.evals = append(root.evals, eval)
+	return storage
+}
+
+func (t *Template) compileBranchInt8(branch valueBranchNode) *int8 {
+	root := t.evalRoot()
+	storage := new(int8)
+	cases := branch.getCaseNodes()
+	def := branch.getDefaultNode()
+	eval := func() {
+		idx := branch.getMatchIndex()
+		if idx >= 0 && idx < len(cases) {
+			*storage = anyToInt8(cases[idx])
+			return
+		}
+		*storage = anyToInt8(def)
+	}
+	eval()
+	root.evals = append(root.evals, eval)
+	return storage
+}
+
 func anyToInt16(v any) int16 {
 	switch val := v.(type) {
 	case int16:
@@ -689,6 +769,8 @@ func (t *Template) compileDynInt16(v any, elemBase unsafe.Pointer, elemSize uint
 	switch c := v.(type) {
 	case conditionNode:
 		return t.compileCondInt16(c)
+	case valueBranchNode:
+		return t.compileBranchInt16(c)
 	case tweenNode:
 		return t.compileTweenInt16(c, elemBase, elemSize)
 	}
@@ -699,6 +781,8 @@ func (t *Template) compileDynFloat32(v any, elemBase unsafe.Pointer, elemSize ui
 	switch c := v.(type) {
 	case conditionNode:
 		return t.compileCondFloat32(c)
+	case valueBranchNode:
+		return t.compileBranchFloat32(c)
 	case tweenNode:
 		return t.compileTweenFloat32(c, elemBase, elemSize)
 	}
@@ -711,6 +795,8 @@ func (t *Template) compileDynFloat64(v any, elemBase unsafe.Pointer, elemSize ui
 		return c
 	case conditionNode:
 		return t.compileCondFloat64(c)
+	case valueBranchNode:
+		return t.compileBranchFloat64(c)
 	case tweenNode:
 		return t.compileTweenFloat64(c, nil, elemBase, elemSize)
 	}
@@ -721,6 +807,8 @@ func (t *Template) compileDynInt8(v any, elemBase unsafe.Pointer, elemSize uintp
 	switch c := v.(type) {
 	case conditionNode:
 		return t.compileCondInt8(c)
+	case valueBranchNode:
+		return t.compileBranchInt8(c)
 	case tweenNode:
 		return t.compileTweenInt8(c, elemBase, elemSize)
 	}
@@ -733,8 +821,8 @@ func (t *Template) compileDynColor(v any, elemBase unsafe.Pointer, elemSize uint
 		return c
 	case conditionNode:
 		return t.compileCondColor(c, elemBase, elemSize)
-	case switchNodeInterface:
-		return t.compileSwitchColor(c)
+	case valueBranchNode:
+		return t.compileBranchColor(c)
 	case tweenNode:
 		return t.compileTweenColor(c, elemBase, elemSize)
 	}
@@ -747,6 +835,8 @@ func (t *Template) compileDynStyle(v any, elemBase unsafe.Pointer, elemSize uint
 		return c
 	case conditionNode:
 		return t.compileCondStyle(c, elemBase, elemSize)
+	case valueBranchNode:
+		return t.compileBranchStyle(c)
 	case tweenNode:
 		return t.compileTweenStyle(c, elemBase, elemSize)
 	}
@@ -949,18 +1039,36 @@ func (t *Template) compileCondStyle(cond conditionNode, elemBase unsafe.Pointer,
 	return storage
 }
 
-func (t *Template) compileSwitchColor(sw switchNodeInterface) *Color {
+func (t *Template) compileBranchColor(branch valueBranchNode) *Color {
 	root := t.evalRoot()
 	storage := new(Color)
-	cases := sw.getCaseNodes()
-	def := sw.getDefaultNode()
+	cases := branch.getCaseNodes()
+	def := branch.getDefaultNode()
 	eval := func() {
-		idx := sw.getMatchIndex()
+		idx := branch.getMatchIndex()
 		if idx >= 0 && idx < len(cases) {
 			*storage = anyToColor(cases[idx])
 		} else {
 			*storage = anyToColor(def)
 		}
+	}
+	eval()
+	root.evals = append(root.evals, eval)
+	return storage
+}
+
+func (t *Template) compileBranchStyle(branch valueBranchNode) *Style {
+	root := t.evalRoot()
+	storage := new(Style)
+	cases := branch.getCaseNodes()
+	def := branch.getDefaultNode()
+	eval := func() {
+		idx := branch.getMatchIndex()
+		if idx >= 0 && idx < len(cases) {
+			*storage = anyToStyle(cases[idx])
+			return
+		}
+		*storage = anyToStyle(def)
 	}
 	eval()
 	root.evals = append(root.evals, eval)
@@ -2473,7 +2581,7 @@ const (
 
 // Build compiles a declarative UI tree into a Template ready for Execute.
 // All reflection happens here at compile time; Execute is pure pointer reads.
-func Build(ui any) *Template {
+func Build(ui Component) *Template {
 	t := &Template{
 		ops:     make([]Op, 0, 32),
 		byDepth: make([][]int16, 16),
@@ -2502,7 +2610,7 @@ func Build(ui any) *Template {
 // buildWithRoot compiles a child UI tree into a sub-template that shares
 // evaluators with this template's root. used by overlays and other sites
 // that need an independent template but shared animation/condition state.
-func (t *Template) buildWithRoot(ui any) *Template {
+func (t *Template) buildWithRoot(ui Component) *Template {
 	child := &Template{
 		ops:     make([]Op, 0, 32),
 		byDepth: make([][]int16, 16),
@@ -2580,8 +2688,6 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		}
 		ext := &opScreenEffect{fns: v.Effects}
 		return t.addOp(Op{Kind: OpScreenEffect, Parent: parent, Ext: ext}, depth)
-	case Component:
-		return t.compile(v.Build(), parent, depth, elemBase, elemSize)
 
 	case VBoxC:
 		return t.compileVBoxC(v, parent, depth, elemBase, elemSize)
@@ -2674,6 +2780,10 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		return t.compileMatch(mn, parent, depth, elemBase, elemSize)
 	}
 
+	if c, ok := node.(Component); ok {
+		return t.compile(c.Build(), parent, depth, elemBase, elemSize)
+	}
+
 	return -1
 }
 
@@ -2690,6 +2800,8 @@ type customWrapper struct {
 	measure func(availW int16) (w, h int16)
 	render  func(buf *Buffer, x, y, w, h int16)
 }
+
+func (c *customWrapper) Build() Component { return c }
 
 func (c *customWrapper) MinSize() (width, height int) {
 	if c.measure == nil {
@@ -3078,7 +3190,7 @@ func (t *Template) compileOverlay(v OverlayNode, parent int16, depth int) int16 
 	}, depth)
 }
 
-func (t *Template) compileContainer(children []any, gap int8, isRow bool, f flex, border BorderStyle, title string, borderFG, borderBG *Color, fill Color, inheritStyle *Style, margin [4]int16, padding [4]int16, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *Template) compileContainer(children []Component, gap int8, isRow bool, f flex, border BorderStyle, title string, borderFG, borderBG *Color, fill Color, inheritStyle *Style, margin [4]int16, padding [4]int16, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	op := Op{
 		Kind:         OpContainer,
 		Parent:       parent,
@@ -4284,9 +4396,9 @@ func (t *Template) compileAutoTableStatic(v AutoTableC, rv reflect.Value, parent
 		}
 	}
 
-	var rows []any
+	var rows []Component
 
-	var headerCells []any
+	var headerCells []Component
 	for i, h := range headers {
 		hdrStyle := v.headerStyle
 		if cfg := colCfgs[i]; cfg != nil {
@@ -4317,7 +4429,7 @@ func (t *Template) compileAutoTableStatic(v AutoTableC, rv reflect.Value, parent
 			rowStyle = *v.altRowStyle
 		}
 
-		var cells []any
+		var cells []Component
 		for j, col := range columns {
 			field := elem.FieldByName(col)
 			var str string
@@ -4361,7 +4473,7 @@ func (t *Template) compileAutoTableStatic(v AutoTableC, rv reflect.Value, parent
 func (t *Template) compileCheckboxC(v *CheckboxC, parent int16, depth int, elemBase unsafe.Pointer) int16 {
 	// Checkbox is: [mark] [label]
 	// The mark is conditional based on checked state
-	var labelNode any
+	var labelNode Component
 	if v.labelPtr != nil {
 		labelNode = Text(v.labelPtr)
 	} else {
@@ -4383,7 +4495,7 @@ func (t *Template) compileRadioC(v *RadioC, parent int16, depth int) int16 {
 		return t.compileTextC(Text("(no options)"), parent, depth, nil, 0)
 	}
 
-	var items []any
+	var items []Component
 	for i, opt := range opts {
 		idx := i // capture for closure
 		mark := IfOrd(v.selected).Eq(idx).Then(Text(v.selectedMark)).Else(Text(v.unselected))

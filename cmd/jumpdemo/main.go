@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/kungfusheep/riffkey"
 	. "github.com/kungfusheep/glyph"
+	"github.com/kungfusheep/riffkey"
 )
 
 func main() {
@@ -16,7 +16,7 @@ func main() {
 	app := NewApp()
 
 	// build UI with Jump-wrapped items
-	children := make([]any, 0, len(items)+4)
+	children := make([]Component, 0, len(items)+4)
 	children = append(children, Text("Jump Labels Demo").FG(Cyan).Bold())
 	children = append(children, SpaceH(1))
 

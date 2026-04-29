@@ -202,7 +202,7 @@ func main() {
 	)
 
 	// Market row with sparkline
-	marketRow := func(m *Market, isAlt bool) any {
+	marketRow := func(m *Market, isAlt bool) Component {
 		bg := rowBG
 		if isAlt {
 			bg = altRowBG
@@ -414,4 +414,3 @@ func joinWith(parts []string, sep string) string {
 	}
 	return result
 }
-

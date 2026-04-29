@@ -82,7 +82,7 @@ func main() {
 	}
 }
 
-func buildUI(state *State) any {
+func buildUI(state *State) Component {
 	dim := RGB(0, 100, 0)
 
 	return VBox(

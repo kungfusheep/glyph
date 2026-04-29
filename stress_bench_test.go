@@ -49,7 +49,7 @@ func BenchmarkStress100Items(b *testing.B) {
 
 	ui := VBox(
 		Text(&stressData.Title),
-		ForEach(&stressData.Items, func(item *StressItem) any {
+		ForEach(&stressData.Items, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(30),
@@ -85,7 +85,7 @@ func BenchmarkStressWideProgress(b *testing.B) {
 
 	ui := VBox(
 		Text("Wide Progress Bars"),
-		ForEach(&items, func(item *StressItem) any {
+		ForEach(&items, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(100),
@@ -124,9 +124,9 @@ func BenchmarkStressDenseGrid(b *testing.B) {
 
 	ui := VBox(
 		Text("Dense Grid"),
-		ForEach(&rows, func(row *[]StressItem) any {
+		ForEach(&rows, func(row *[]StressItem) Component {
 			return HBox(
-				ForEach(row, func(item *StressItem) any {
+				ForEach(row, func(item *StressItem) Component {
 					return Progress(&item.CPU).Width(8)
 				}),
 			)
@@ -160,7 +160,7 @@ func BenchmarkStressHeavyDashboard(b *testing.B) {
 		Text(&stressData.Title),
 		Text("═══════════════════════════════════════════════════════════════"),
 		Text("CPU Cores"),
-		ForEach(&cpuCores, func(item *StressItem) any {
+		ForEach(&cpuCores, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(50),
@@ -168,7 +168,7 @@ func BenchmarkStressHeavyDashboard(b *testing.B) {
 		}),
 		Text(""),
 		Text("Memory Banks"),
-		ForEach(&memBanks, func(item *StressItem) any {
+		ForEach(&memBanks, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(50),
@@ -176,7 +176,7 @@ func BenchmarkStressHeavyDashboard(b *testing.B) {
 		}),
 		Text(""),
 		Text("Process List"),
-		ForEach(&procList, func(item *StressItem) any {
+		ForEach(&procList, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(40),
@@ -209,7 +209,7 @@ func BenchmarkStressTextHeavy(b *testing.B) {
 
 	ui := VBox(
 		Text("Text Heavy Benchmark"),
-		ForEach(&lines, func(line *string) any {
+		ForEach(&lines, func(line *string) Component {
 			return Text(line)
 		}),
 	)
@@ -243,7 +243,7 @@ func BenchmarkAsyncClearHeavy(b *testing.B) {
 		Text(&stressData.Title),
 		Text("═══════════════════════════════════════════════════════════════"),
 		Text("CPU Cores"),
-		ForEach(&cpuCores, func(item *StressItem) any {
+		ForEach(&cpuCores, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(50),
@@ -251,7 +251,7 @@ func BenchmarkAsyncClearHeavy(b *testing.B) {
 		}),
 		Text(""),
 		Text("Memory Banks"),
-		ForEach(&memBanks, func(item *StressItem) any {
+		ForEach(&memBanks, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(50),
@@ -259,7 +259,7 @@ func BenchmarkAsyncClearHeavy(b *testing.B) {
 		}),
 		Text(""),
 		Text("Process List"),
-		ForEach(&procList, func(item *StressItem) any {
+		ForEach(&procList, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(40),
@@ -277,7 +277,7 @@ func BenchmarkAsyncClearHeavy(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		buf := pool.Swap()  // async clear of old buffer
+		buf := pool.Swap() // async clear of old buffer
 		serial.Execute(buf, 120, 80)
 	}
 }
@@ -294,7 +294,7 @@ func BenchmarkSyncClearHeavy(b *testing.B) {
 		Text(&stressData.Title),
 		Text("═══════════════════════════════════════════════════════════════"),
 		Text("CPU Cores"),
-		ForEach(&cpuCores, func(item *StressItem) any {
+		ForEach(&cpuCores, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(50),
@@ -302,7 +302,7 @@ func BenchmarkSyncClearHeavy(b *testing.B) {
 		}),
 		Text(""),
 		Text("Memory Banks"),
-		ForEach(&memBanks, func(item *StressItem) any {
+		ForEach(&memBanks, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(50),
@@ -310,7 +310,7 @@ func BenchmarkSyncClearHeavy(b *testing.B) {
 		}),
 		Text(""),
 		Text("Process List"),
-		ForEach(&procList, func(item *StressItem) any {
+		ForEach(&procList, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(40),
@@ -327,7 +327,7 @@ func BenchmarkSyncClearHeavy(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		buf.ClearDirty()  // sync clear
+		buf.ClearDirty() // sync clear
 		serial.Execute(buf, 120, 80)
 	}
 }
@@ -339,7 +339,7 @@ func BenchmarkAsyncClear100Items(b *testing.B) {
 
 	ui := VBox(
 		Text(&stressData.Title),
-		ForEach(&stressData.Items, func(item *StressItem) any {
+		ForEach(&stressData.Items, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(30),
@@ -368,7 +368,7 @@ func BenchmarkSyncClear100Items(b *testing.B) {
 
 	ui := VBox(
 		Text(&stressData.Title),
-		ForEach(&stressData.Items, func(item *StressItem) any {
+		ForEach(&stressData.Items, func(item *StressItem) Component {
 			return HBox(
 				Text(&item.Name),
 				Progress(&item.CPU).Width(30),
@@ -642,7 +642,7 @@ func BenchmarkStaticDashboard(b *testing.B) {
 		HBox.Height(20)(
 			VBox.Width(40).Border(BorderSingle).Title("LEFT")(
 				Text(&content),
-				ForEach(&items, func(item *StressItem) any {
+				ForEach(&items, func(item *StressItem) Component {
 					return HBox(
 						Text(&item.Name),
 						Progress(&item.CPU).Width(20),
@@ -692,7 +692,7 @@ func BenchmarkDynamicDashboard(b *testing.B) {
 		HBox.Height(&midH)(
 			VBox.Width(&leftW).Border(BorderSingle).Title("LEFT")(
 				Text(&content),
-				ForEach(&items, func(item *StressItem) any {
+				ForEach(&items, func(item *StressItem) Component {
 					return HBox(
 						Text(&item.Name),
 						Progress(&item.CPU).Width(20),
@@ -774,7 +774,7 @@ func BenchmarkConditionalDashboard(b *testing.B) {
 		HBox.Height(If(&detailed).Then(int16(30)).Else(int16(10)))(
 			VBox.Width(If(&detailed).Then(int16(50)).Else(int16(30))).Border(BorderSingle).Title("LEFT")(
 				Text(&content),
-				ForEach(&items, func(item *StressItem) any {
+				ForEach(&items, func(item *StressItem) Component {
 					return HBox(
 						Text(&item.Name),
 						Progress(&item.CPU).Width(If(&detailed).Then(int16(30)).Else(int16(15))),
@@ -811,13 +811,13 @@ func BenchmarkAnimateIdle(b *testing.B) {
 
 	ui := VBox.Height(50)(
 		Text("Header"),
-		VBox.Height(Animate.Duration(200 * time.Millisecond)(&target)).Border(BorderSingle).Title("A").Grow(1)(
+		VBox.Height(Animate.Duration(200*time.Millisecond)(&target)).Border(BorderSingle).Title("A").Grow(1)(
 			Text(&content),
 		),
-		VBox.Height(Animate.Duration(200 * time.Millisecond)(&target)).Border(BorderSingle).Title("B").Grow(2)(
+		VBox.Height(Animate.Duration(200*time.Millisecond)(&target)).Border(BorderSingle).Title("B").Grow(2)(
 			Text(&content),
 		),
-		VBox.Height(Animate.Duration(200 * time.Millisecond)(&target)).Border(BorderSingle).Title("C").Grow(1)(
+		VBox.Height(Animate.Duration(200*time.Millisecond)(&target)).Border(BorderSingle).Title("C").Grow(1)(
 			Text(&content),
 		),
 		Text("Footer"),
@@ -843,13 +843,13 @@ func BenchmarkAnimateActive(b *testing.B) {
 
 	ui := VBox.Height(50)(
 		Text("Header"),
-		VBox.Height(Animate.Duration(200 * time.Millisecond)(&target)).Border(BorderSingle).Title("A").Grow(1)(
+		VBox.Height(Animate.Duration(200*time.Millisecond)(&target)).Border(BorderSingle).Title("A").Grow(1)(
 			Text(&content),
 		),
-		VBox.Height(Animate.Duration(200 * time.Millisecond)(&target)).Border(BorderSingle).Title("B").Grow(2)(
+		VBox.Height(Animate.Duration(200*time.Millisecond)(&target)).Border(BorderSingle).Title("B").Grow(2)(
 			Text(&content),
 		),
-		VBox.Height(Animate.Duration(200 * time.Millisecond)(&target)).Border(BorderSingle).Title("C").Grow(1)(
+		VBox.Height(Animate.Duration(200*time.Millisecond)(&target)).Border(BorderSingle).Title("C").Grow(1)(
 			Text(&content),
 		),
 		Text("Footer"),
@@ -929,7 +929,7 @@ func BenchmarkAnimateDashboard(b *testing.B) {
 		HBox.Height(smooth(If(&detailed).Then(int16(30)).Else(int16(10))))(
 			VBox.Width(smooth(If(&detailed).Then(int16(50)).Else(int16(30)))).Border(BorderSingle).Title("LEFT")(
 				Text(&content),
-				ForEach(&items, func(item *StressItem) any {
+				ForEach(&items, func(item *StressItem) Component {
 					return HBox(
 						Text(&item.Name),
 						Progress(&item.CPU).Width(smooth(If(&detailed).Then(int16(30)).Else(int16(15)))),

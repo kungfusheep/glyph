@@ -27,7 +27,7 @@ func main() {
 	app := NewInlineApp()
 
 	app.SetView(VBox(
-		ForEach(&layers, func(l *layer) any {
+		ForEach(&layers, func(l *layer) Component {
 			return HBox.Gap(1)(
 				Text(&l.name).FG(BrightBlack).Width(15),
 				Progress(&l.pct).Width(30).FG(Cyan),

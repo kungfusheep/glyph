@@ -14,7 +14,7 @@ import (
 //
 //	FilterList(&items, func(p *Profile) string { return p.Name }).
 //	    Placeholder("filter...").
-//	    Render(func(p *Profile) any { return Text(p.Name) }).
+//	    Render(func(p *Profile) Component { return Text(p.Name) }).
 //	    MaxVisible(20).
 //	    Handle("<Enter>", func(p *Profile) { ... })
 //
@@ -68,7 +68,7 @@ func FilterList[T any](source *[]T, extract func(*T) string) *FilterListC[T] {
 }
 
 // toTemplate returns the template tree for compilation.
-func (fl *FilterListC[T]) toTemplate() any {
+func (fl *FilterListC[T]) toTemplate() Component {
 	fl.input.placeholder = fl.placeholder
 	if fl.maxVisible > 0 {
 		fl.list.maxVisible = fl.maxVisible
@@ -84,7 +84,7 @@ func (fl *FilterListC[T]) toTemplate() any {
 		Streaming(&fl.isStreaming)
 	counter.framePtr = &fl.spinnerFrame
 
-	children := []any{inputRow, counter, fl.list}
+	children := []Component{inputRow, counter, fl.list}
 
 	box := VBox
 	if fl.border.Horizontal != 0 {
@@ -213,9 +213,9 @@ func (fl *FilterListC[T]) Placeholder(p string) *FilterListC[T] {
 }
 
 // Render customises how each item appears in the list.
-// fn: func(item *T) any. return a component tree for the item row.
-func (fl *FilterListC[T]) Render(fn func(*T) any) *FilterListC[T] {
-	fl.list.Render(func(pp **T) any { return fn(*pp) })
+// fn: func(item *T) Component. return a component tree for the item row.
+func (fl *FilterListC[T]) Render(fn func(*T) Component) *FilterListC[T] {
+	fl.list.Render(func(pp **T) Component { return fn(*pp) })
 	return fl
 }
 

@@ -13,12 +13,12 @@ func TestSwitchInsideForEach(t *testing.T) {
 
 	items := []item{
 		{Label: "alpha", Active: false},
-		{Label: "beta",  Active: true},
+		{Label: "beta", Active: true},
 		{Label: "gamma", Active: false},
 	}
 
 	view := VBox(
-		ForEach(&items, func(it *item) any {
+		ForEach(&items, func(it *item) Component {
 			return If(&it.Active).
 				Then(Text(&it.Label).FG(Green)).
 				Else(Text(&it.Label).FG(BrightBlack))

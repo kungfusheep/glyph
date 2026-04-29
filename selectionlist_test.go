@@ -14,7 +14,7 @@ func TestV2SelectionListBasic(t *testing.T) {
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "> ",
-			Render: func(s *string) any {
+			Render: func(s *string) Component {
 				return Text(s)
 			},
 		},
@@ -58,7 +58,7 @@ func TestV2SelectionListWithRender(t *testing.T) {
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "* ",
-			Render: func(s *string) any {
+			Render: func(s *string) Component {
 				return Text(s)
 			},
 		},
@@ -86,7 +86,7 @@ func TestV2SelectionListMaxVisible(t *testing.T) {
 		Selected:   &selected,
 		Marker:     "> ",
 		MaxVisible: 3,
-		Render: func(s *string) any {
+		Render: func(s *string) Component {
 			return Text(s)
 		},
 	}
@@ -129,7 +129,7 @@ func TestV2SelectionListScrolling(t *testing.T) {
 		Selected:   &selected,
 		Marker:     "> ",
 		MaxVisible: 3,
-		Render: func(s *string) any {
+		Render: func(s *string) Component {
 			return Text(s)
 		},
 	}
@@ -179,18 +179,18 @@ func TestSelectionListOverflowClipped(t *testing.T) {
 		Selected:   &selected,
 		Marker:     "> ",
 		MaxVisible: 20,
-		Render: func(s *string) any {
+		Render: func(s *string) Component {
 			return Text(s)
 		},
 	}
 
 	// Layout mirrors pprofin: bordered root, header, grow list, footer
 	view := VBox.Border(BorderSingle).Title("test")(
-		Text("header"),         // 1 line
-		HRule(),                // 1 line
-		VBox.Grow(1)(list),     // flex fill
-		HRule(),                // 1 line
-		Text("footer"),         // 1 line
+		Text("header"),     // 1 line
+		HRule(),            // 1 line
+		VBox.Grow(1)(list), // flex fill
+		HRule(),            // 1 line
+		Text("footer"),     // 1 line
 	)
 
 	screenH := int16(15)
@@ -249,7 +249,7 @@ func TestSelectionListVariableHeight(t *testing.T) {
 		Items:    &items,
 		Selected: &selected,
 		Marker:   "> ",
-		Render: func(it *item) any {
+		Render: func(it *item) Component {
 			// 2-row item: title on first line, description on second
 			return VBox(
 				Text(&it.Title),
@@ -329,7 +329,7 @@ func TestSelectionListVariableHeightMaxVisible(t *testing.T) {
 		Selected:   &selected,
 		Marker:     "> ",
 		MaxVisible: 3,
-		Render: func(it *item) any {
+		Render: func(it *item) Component {
 			return VBox(
 				Text(&it.Title),
 				Text(&it.Desc),
@@ -384,7 +384,7 @@ func TestSelectionListVariableHeightScrolling(t *testing.T) {
 		Selected:   &selected,
 		Marker:     "> ",
 		MaxVisible: 3,
-		Render: func(it *item) any {
+		Render: func(it *item) Component {
 			return VBox(
 				Text(&it.Title),
 				Text(&it.Desc),
@@ -445,7 +445,7 @@ func TestSelectionListVariableHeightSelectedRef(t *testing.T) {
 		Selected:    &selected,
 		Marker:      "> ",
 		SelectedRef: ref,
-		Render: func(it *item) any {
+		Render: func(it *item) Component {
 			return VBox(
 				Text(&it.Title),
 				Text(&it.Desc),
@@ -493,7 +493,7 @@ func TestSelectionListVariableHeightClipped(t *testing.T) {
 		Selected:   &selected,
 		Marker:     "> ",
 		MaxVisible: 20,
-		Render: func(it *item) any {
+		Render: func(it *item) Component {
 			return VBox(
 				Text(&it.Title),
 				Text(&it.Desc),
@@ -553,7 +553,7 @@ func TestSelectionListOverflowScrolling(t *testing.T) {
 		Selected:   &selected,
 		Marker:     "> ",
 		MaxVisible: 20,
-		Render: func(s *string) any {
+		Render: func(s *string) Component {
 			return Text(s)
 		},
 	}

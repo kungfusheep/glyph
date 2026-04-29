@@ -206,7 +206,7 @@ func main() {
 
 	colorAnim := Animate.Duration(&s.colorAnimDur).Ease(EaseOutCubic)
 
-	metricPanel := func(title string, data *[]float64, label *string, col any) any {
+	metricPanel := func(title string, data *[]float64, label *string, col any) Component {
 		return VBox.Grow(1).Border(BorderRounded).BorderFG(&s.pal.overlay).Title(title)(
 			Sparkline(data).FG(col).Height(
 				Animate.Duration(200*time.Millisecond).Ease(EaseOutCubic)(
@@ -219,7 +219,7 @@ func main() {
 
 	svcList := FilterList(&s.services, func(svc *service) string { return svc.Name }).
 		Placeholder("filter...").
-		Render(func(svc *service) any {
+		Render(func(svc *service) Component {
 			return HBox.Gap(2)(
 				VBox.Width(1)(Switch(&svc.Status).
 					Case("warn", Text("○").FG(&s.pal.gold)).

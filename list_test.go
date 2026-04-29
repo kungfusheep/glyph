@@ -19,7 +19,7 @@ func TestListCNavigation(t *testing.T) {
 
 	var list *ListC[TestItem]
 
-	listComp := List(&items).Render(func(item *TestItem) any {
+	listComp := List(&items).Render(func(item *TestItem) Component {
 		return Text(&item.Name)
 	}).Ref(func(l *ListC[TestItem]) { list = l })
 
@@ -84,7 +84,7 @@ func TestListCRendersText(t *testing.T) {
 		{Name: "Banana", Done: true},
 	}
 
-	listComp := List(&items).Render(func(item *TestItem) any {
+	listComp := List(&items).Render(func(item *TestItem) Component {
 		return Text(&item.Name)
 	})
 
@@ -119,7 +119,7 @@ func TestListCOnSelect(t *testing.T) {
 	var selected string
 	callCount := 0
 
-	listComp := List(&items).Render(func(item *TestItem) any {
+	listComp := List(&items).Render(func(item *TestItem) Component {
 		return Text(&item.Name)
 	}).OnSelect(func(item *TestItem) {
 		selected = item.Name
@@ -186,7 +186,7 @@ func TestListCDelete(t *testing.T) {
 
 	var list *ListC[TestItem]
 
-	listComp := List(&items).Render(func(item *TestItem) any {
+	listComp := List(&items).Render(func(item *TestItem) Component {
 		return Text(&item.Name)
 	}).Ref(func(l *ListC[TestItem]) { list = l })
 

@@ -47,7 +47,7 @@ func main() {
 				Text("STATUS").Bold().Width(12).Align(AlignRight),
 			),
 			HRule(),
-			ForEach(&services, func(s *service) any {
+			ForEach(&services, func(s *service) Component {
 				return HBox.Gap(2)(
 					Text(&s.Name).Width(16),
 

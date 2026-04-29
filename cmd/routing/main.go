@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
-	"github.com/kungfusheep/riffkey"
 	. "github.com/kungfusheep/glyph"
+	"github.com/kungfusheep/riffkey"
 )
 
 // Home view state
@@ -88,7 +88,7 @@ func main() {
 	}
 }
 
-func homeView() any {
+func homeView() Component {
 	return VBox(
 		Text(&home.Title).Bold(),
 		Text(""),
@@ -101,7 +101,7 @@ func homeView() any {
 	)
 }
 
-func settingsView() any {
+func settingsView() Component {
 	return VBox(
 		Text(&settings.Title).Bold(),
 		Text(""),
@@ -114,7 +114,7 @@ func settingsView() any {
 	)
 }
 
-func helpView() any {
+func helpView() Component {
 	return VBox(
 		Text(&help.Title).Bold(),
 		Text(""),

@@ -15,13 +15,13 @@ type validatable interface {
 // FormField pairs a label with an input control.
 type FormField struct {
 	label   string
-	control any
+	control Component
 	err     string // validation error for this field
 	focused bool
 }
 
 // Field creates a form field pairing a label with any control component.
-func Field(label string, control any) FormField {
+func Field(label string, control Component) FormField {
 	return FormField{label: label, control: control}
 }
 
@@ -271,8 +271,8 @@ func (f *FormC) ValidateAll() bool {
 }
 
 // toTemplate builds the VBox of HBox rows with optional error display.
-func (f *FormC) toTemplate() any {
-	rows := make([]any, 0, len(f.fields)*2)
+func (f *FormC) toTemplate() Component {
+	rows := make([]Component, 0, len(f.fields)*2)
 	for i := range f.fields {
 		ff := &f.fields[i]
 		ls := f.labelStyle

@@ -161,7 +161,7 @@ func TestConditionInForEachWithPointerElements(t *testing.T) {
 	}
 
 	view := VBox(
-		ForEach(&items, func(e **item) any {
+		ForEach(&items, func(e **item) Component {
 			return HBox(
 				Text(&(*e).Name),
 				If(&(*e).Active).Then(Text(" YES")).Else(Text(" NO!")),
@@ -211,7 +211,7 @@ func TestConditionInFilterListRender(t *testing.T) {
 
 	fl := FilterList(&items, func(e *item) string { return e.Name }).
 		MaxVisible(5).
-		Render(func(e *item) any {
+		Render(func(e *item) Component {
 			return HBox(
 				Text(&e.Name),
 				If(&e.Active).Then(Text(" YES")).Else(Text(" NO!")),
@@ -266,79 +266,79 @@ func TestSwitch(t *testing.T) {
 	t.Run("Switch string matches case", func(t *testing.T) {
 		tab := "home"
 		sw := Switch(&tab).
-			Case("home", "HOME_VIEW").
-			Case("settings", "SETTINGS_VIEW").
-			Default("DEFAULT_VIEW")
+			Case("home", Text("HOME_VIEW")).
+			Case("settings", Text("SETTINGS_VIEW")).
+			Default(Text("DEFAULT_VIEW"))
 
 		if sw.getMatchIndex() != 0 {
 			t.Errorf("expected match index 0, got %d", sw.getMatchIndex())
 		}
-		if sw.evaluateSwitch() != "HOME_VIEW" {
-			t.Errorf("expected HOME_VIEW, got %v", sw.evaluateSwitch())
+		if sw.evaluateSwitch() == nil {
+			t.Errorf("expected HOME_VIEW component, got nil")
 		}
 	})
 
 	t.Run("Switch string matches second case", func(t *testing.T) {
 		tab := "settings"
 		sw := Switch(&tab).
-			Case("home", "HOME_VIEW").
-			Case("settings", "SETTINGS_VIEW").
-			Default("DEFAULT_VIEW")
+			Case("home", Text("HOME_VIEW")).
+			Case("settings", Text("SETTINGS_VIEW")).
+			Default(Text("DEFAULT_VIEW"))
 
 		if sw.getMatchIndex() != 1 {
 			t.Errorf("expected match index 1, got %d", sw.getMatchIndex())
 		}
-		if sw.evaluateSwitch() != "SETTINGS_VIEW" {
-			t.Errorf("expected SETTINGS_VIEW, got %v", sw.evaluateSwitch())
+		if sw.evaluateSwitch() == nil {
+			t.Errorf("expected SETTINGS_VIEW component, got nil")
 		}
 	})
 
 	t.Run("Switch falls through to default", func(t *testing.T) {
 		tab := "unknown"
 		sw := Switch(&tab).
-			Case("home", "HOME_VIEW").
-			Case("settings", "SETTINGS_VIEW").
-			Default("DEFAULT_VIEW")
+			Case("home", Text("HOME_VIEW")).
+			Case("settings", Text("SETTINGS_VIEW")).
+			Default(Text("DEFAULT_VIEW"))
 
 		if sw.getMatchIndex() != -1 {
 			t.Errorf("expected match index -1, got %d", sw.getMatchIndex())
 		}
-		if sw.evaluateSwitch() != "DEFAULT_VIEW" {
-			t.Errorf("expected DEFAULT_VIEW, got %v", sw.evaluateSwitch())
+		if sw.evaluateSwitch() == nil {
+			t.Errorf("expected DEFAULT_VIEW component, got nil")
 		}
 	})
 
 	t.Run("Switch int type", func(t *testing.T) {
 		mode := 2
 		sw := Switch(&mode).
-			Case(1, "MODE_ONE").
-			Case(2, "MODE_TWO").
-			Default("MODE_DEFAULT")
+			Case(1, Text("MODE_ONE")).
+			Case(2, Text("MODE_TWO")).
+			Default(Text("MODE_DEFAULT"))
 
-		if sw.evaluateSwitch() != "MODE_TWO" {
-			t.Errorf("expected MODE_TWO, got %v", sw.evaluateSwitch())
+		if sw.getMatchIndex() != 1 {
+			t.Errorf("expected match index 1, got %d", sw.getMatchIndex())
 		}
 	})
 
 	t.Run("Switch evaluates dynamically", func(t *testing.T) {
 		tab := "home"
 		sw := Switch(&tab).
-			Case("home", "HOME").
-			Case("settings", "SETTINGS").
-			Default("DEFAULT")
+			Case("home", Text("HOME")).
+			Case("settings", Text("SETTINGS")).
+			Default(Text("DEFAULT"))
 
-		if sw.evaluateSwitch() != "HOME" {
-			t.Errorf("expected HOME, got %v", sw.evaluateSwitch())
+		if sw.getMatchIndex() != 0 {
+			t.Errorf("expected match index 0, got %d", sw.getMatchIndex())
 		}
 
 		tab = "settings"
-		if sw.evaluateSwitch() != "SETTINGS" {
-			t.Errorf("expected SETTINGS after change, got %v", sw.evaluateSwitch())
+		if sw.getMatchIndex() != 1 {
+			t.Errorf("expected match index 1 after change, got %d", sw.getMatchIndex())
 		}
 
 		tab = "other"
-		if sw.evaluateSwitch() != "DEFAULT" {
-			t.Errorf("expected DEFAULT for unknown, got %v", sw.evaluateSwitch())
+		if sw.getMatchIndex() != -1 {
+			t.Errorf("expected default index for unknown, got %d", sw.getMatchIndex())
 		}
 	})
 }
@@ -383,6 +383,75 @@ func TestSwitchInSerialTemplate(t *testing.T) {
 			t.Errorf("expected 'DEFAULT_CONTENT  ', got %q", line)
 		}
 	})
+
+	t.Run("Switch renders mixed component branches", func(t *testing.T) {
+		tab := "details"
+
+		view := VBox(
+			Text("HEADER"),
+			Switch(&tab).
+				Case("summary", Text("SUMMARY")).
+				Case("details", HBox(Text("DETAIL"), Text("S"))).
+				Default(VBox(Text("FALL"), Text("BACK"))),
+		)
+
+		tmpl := Build(view)
+		buf := NewBuffer(20, 5)
+		tmpl.Execute(buf, 20, 5)
+
+		line := extractLine(buf, 1, 10)
+		if line != "DETAILS   " {
+			t.Errorf("expected HBox branch to render DETAILS, got %q", line)
+		}
+
+		tab = "other"
+		buf.Clear()
+		tmpl.Execute(buf, 20, 5)
+
+		line = extractLine(buf, 1, 10)
+		if line != "FALL      " {
+			t.Errorf("expected default VBox first row, got %q", line)
+		}
+		line = extractLine(buf, 2, 10)
+		if line != "BACK      " {
+			t.Errorf("expected default VBox second row, got %q", line)
+		}
+	})
+
+	t.Run("Switch scalar branches drive height", func(t *testing.T) {
+		mode := "short"
+
+		tmpl := Build(VBox.Height(
+			Switch(&mode).
+				Case("short", int16(1)).
+				Case("tall", int16(3)).
+				Default(int16(2)),
+		)(
+			Text("one"),
+			Text("two"),
+			Text("three"),
+		))
+		buf := NewBuffer(20, 5)
+
+		tmpl.Execute(buf, 20, 5)
+		if got := tmpl.geom[0].H; got != 1 {
+			t.Errorf("mode=short: got H=%d, want 1", got)
+		}
+
+		mode = "tall"
+		buf.Clear()
+		tmpl.Execute(buf, 20, 5)
+		if got := tmpl.geom[0].H; got != 3 {
+			t.Errorf("mode=tall: got H=%d, want 3", got)
+		}
+
+		mode = "other"
+		buf.Clear()
+		tmpl.Execute(buf, 20, 5)
+		if got := tmpl.geom[0].H; got != 2 {
+			t.Errorf("mode=other: got H=%d, want 2", got)
+		}
+	})
 }
 
 func TestSelectionList(t *testing.T) {
@@ -397,7 +466,7 @@ func TestSelectionList(t *testing.T) {
 		list := &SelectionList{
 			Items:    &items,
 			Selected: &selected,
-			Render: func(item *Item) any {
+			Render: func(item *Item) Component {
 				return Text(&item.Name)
 			},
 		}
@@ -432,7 +501,7 @@ func TestSelectionList(t *testing.T) {
 		list := &SelectionList{
 			Items:    &items,
 			Selected: &selected,
-			Render: func(item *Item) any {
+			Render: func(item *Item) Component {
 				return Text(&item.Name)
 			},
 		}
@@ -474,7 +543,7 @@ func TestSelectionList(t *testing.T) {
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "→ ",
-			Render: func(item *Item) any {
+			Render: func(item *Item) Component {
 				return Text(&item.Name)
 			},
 		}
@@ -499,7 +568,7 @@ func TestSelectionList(t *testing.T) {
 		list := &SelectionList{
 			Items:    &items,
 			Selected: &selected,
-			Render: func(item *Item) any {
+			Render: func(item *Item) Component {
 				return Text(&item.Name)
 			},
 		}
@@ -562,7 +631,7 @@ func TestSelectionList(t *testing.T) {
 			Items:      &items,
 			Selected:   &selected,
 			MaxVisible: 3, // Only show 3 items at a time
-			Render: func(item *Item) any {
+			Render: func(item *Item) Component {
 				return Text(&item.Name)
 			},
 		}
@@ -600,7 +669,7 @@ func TestSelectionList(t *testing.T) {
 			Items:      &items,
 			Selected:   &selected,
 			MaxVisible: 3,
-			Render: func(item *Item) any {
+			Render: func(item *Item) Component {
 				return Text(&item.Name)
 			},
 		}
@@ -642,7 +711,7 @@ func TestSelectionList(t *testing.T) {
 			Items:      &items,
 			Selected:   &selected,
 			MaxVisible: 3,
-			Render: func(item *Item) any {
+			Render: func(item *Item) Component {
 				return Text(&item.Name)
 			},
 		}
@@ -685,7 +754,7 @@ func TestConditionInsideForEach(t *testing.T) {
 		}
 
 		view := VBox(
-			ForEach(&items, func(item *Item) any {
+			ForEach(&items, func(item *Item) Component {
 				return If(&item.Selected).Eq(true).
 					Then(Text(&item.Name).Bold()).
 					Else(Text(&item.Name))
@@ -739,7 +808,7 @@ func TestConditionInsideForEach(t *testing.T) {
 		}
 
 		view := VBox(
-			ForEach(&items, func(item *Item) any {
+			ForEach(&items, func(item *Item) Component {
 				return If(&item.IsActive).Eq(true).
 					Then(Text(&item.Text).Bold()).
 					Else(Text(&item.Text).Dim())
@@ -872,7 +941,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 		}
 
 		view := VBox(
-			ForEach(&lines, func(dl *DisplayLine) any {
+			ForEach(&lines, func(dl *DisplayLine) Component {
 				return HBox(
 					Text(&dl.LineNum),
 					RichTextNode{Spans: &dl.Spans},
@@ -910,7 +979,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 		}
 
 		view := VBox(
-			ForEach(&lines, func(l *Line) any {
+			ForEach(&lines, func(l *Line) Component {
 				return RichTextNode{Spans: &l.Spans}
 			}),
 		)
@@ -957,7 +1026,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 		}
 
 		view := VBox(
-			ForEach(&lines, func(dl *DisplayLine) any {
+			ForEach(&lines, func(dl *DisplayLine) Component {
 				return RichTextNode{Spans: &dl.Spans}
 			}),
 		)
@@ -1046,7 +1115,7 @@ func TestTextf(t *testing.T) {
 		}
 
 		view := VBox(
-			ForEach(&items, func(it *Item) any {
+			ForEach(&items, func(it *Item) Component {
 				return Textf(&it.Label, " -> ", &it.Status)
 			}),
 		)
@@ -1081,7 +1150,7 @@ func TestTextf(t *testing.T) {
 		rows := []Row{{Name: "pete"}}
 
 		view := VBox(
-			ForEach(&rows, func(r *Row) any {
+			ForEach(&rows, func(r *Row) Component {
 				return Textf("user: ", Text(&r.Name).Bold())
 			}),
 		)

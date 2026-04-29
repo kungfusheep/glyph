@@ -32,7 +32,7 @@ func TestSnapInFadeOut(t *testing.T) {
 
 	buf := NewBuffer(30, 6)
 	tmpl := Build(VBox(
-		List(&rows).Selection(&sel).SelectedStyle(Style{}).Marker("").Render(func(row *Row) any {
+		List(&rows).Selection(&sel).SelectedStyle(Style{}).Marker("").Render(func(row *Row) Component {
 			// matches the mail app pattern: fade inside inner condition Else
 			bg := If(&row.Selected).Then(selBG).Else(
 				If(&row.Grouped).Then(grpBG).Else(fade(defBG)),

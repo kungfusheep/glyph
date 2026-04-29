@@ -36,8 +36,8 @@ func main() {
 
 			FilterList(&[]string{"FUEL", "THROT"}, func(s *string) string { return *s }),
 
-			Define(func() any {
-				pgres := func(label string, val *int) any {
+			Define(func() Component {
+				pgres := func(label string, val *int) Component {
 					return HBox(Text(label), Progress(val).Width(16), Text(" "), Text("%").Dim())
 				}
 
@@ -61,8 +61,8 @@ func main() {
 			Sparkline(&history),
 			HRule(),
 
-			Define(func() any {
-				dot := func(label string, warn *bool) any {
+			Define(func() Component {
+				dot := func(label string, warn *bool) Component {
 					if warn == nil {
 						return HBox(Text("●"), Text(" "+label))
 					}

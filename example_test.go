@@ -17,7 +17,7 @@ type termData struct {
 	Lines []string `json:"lines"`
 }
 
-func renderAndPrint(name string, tree any, w, h int) {
+func renderAndPrint(name string, tree Component, w, h int) {
 	buf := NewBuffer(w, h)
 	Build(tree).Execute(buf, int16(w), int16(h))
 	fmt.Println(strings.TrimSpace(buf.StringTrimmed()))
@@ -33,7 +33,7 @@ func renderAndPrint(name string, tree any, w, h int) {
 	}
 }
 
-func renderWithEffects(name string, tree any, w, h int) {
+func renderWithEffects(name string, tree Component, w, h int) {
 	buf := NewBuffer(w, h)
 	tmpl := Build(tree)
 	tmpl.Execute(buf, int16(w), int16(h))
@@ -266,7 +266,7 @@ func ExampleList() {
 	// example:
 	items := []string{"Alpha", "Beta", "Gamma"}
 
-	List(&items).Render(func(item *string) any {
+	List(&items).Render(func(item *string) Component {
 		return Text(item)
 	}).BindNav("j", "k")
 	// :example
@@ -293,7 +293,7 @@ func ExampleCheckList() {
 	}
 	tasks := []Task{{Name: "Ship it"}, {Name: "Test it"}}
 
-	CheckList(&tasks).Render(func(t *Task) any {
+	CheckList(&tasks).Render(func(t *Task) Component {
 		return Text(&t.Name)
 	}).BindNav("j", "k").BindToggle(" ")
 	// :example
@@ -347,7 +347,7 @@ func ExampleFilterList() {
 	items := []string{"Alpha", "Beta", "Gamma"}
 
 	FilterList(&items, func(s *string) string { return *s }).
-		Render(func(item *string) any {
+		Render(func(item *string) Component {
 			return Text(item)
 		})
 	// :example
@@ -684,7 +684,7 @@ func ExampleForEach() {
 	}
 	items := []Todo{{Title: "Ship it"}, {Title: "Test it"}}
 
-	tree := VBox(ForEach(&items, func(item *Todo) any {
+	tree := VBox(ForEach(&items, func(item *Todo) Component {
 		return Text(&item.Title)
 	}))
 	// :example
@@ -1284,8 +1284,8 @@ func ExampleArrange() {
 func ExampleDefine() {
 	// example:
 	a, b, c := true, false, true
-	tree := Define(func() any {
-		dot := func(v *bool) any {
+	tree := Define(func() Component {
+		dot := func(v *bool) Component {
 			return If(v).Then(Text("●").FG(Green)).Else(Text("○").FG(Red))
 		}
 		return HBox.Gap(1)(dot(&a), dot(&b), dot(&c))
@@ -1527,12 +1527,12 @@ func ExampleEachCell() {
 		HBox(Text("row 1 ").FG(Green), Text("████").FG(RGB(50, 100, 200))),
 		HBox(Text("row 2 ").FG(Yellow), Text("████").FG(RGB(200, 50, 100))),
 		HBox(Text("row 3 ").FG(Magenta), Text("████").FG(RGB(100, 200, 50))),
-		EachCell(func(x, y int, c Cell, ctx PostContext) Cell {
+		ScreenEffect(EachCell(func(x, y int, c Cell, ctx PostContext) Cell {
 			if y%2 == 0 {
 				c.Style.Attr = c.Style.Attr.With(AttrDim)
 			}
 			return c
-		}),
+		})),
 	)
 	// :example
 
@@ -2359,7 +2359,7 @@ func ExampleSelectionList() {
 		Items:    &items,
 		Selected: &selected,
 		Marker:   "> ",
-		Render: func(s *string) any {
+		Render: func(s *string) Component {
 			return Text(s)
 		},
 	}

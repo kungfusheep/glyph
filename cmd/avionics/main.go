@@ -45,7 +45,7 @@ func statusColor(s Status) Style {
 
 // StatusPanel builds a titled list of label...value items
 func StatusPanel(title string, width int, items []StatusItem) VBoxC {
-	children := make([]any, 0, len(items)+1)
+	children := make([]Component, 0, len(items)+1)
 	children = append(children, Text(title).FG(Green).Bold())
 
 	for _, item := range items {
@@ -68,7 +68,7 @@ func Gauge(label string, value, min, max float64, unit string, width int, histor
 	valueStr := fmt.Sprintf("%.0f%s", value, unit)
 	barWidth := width - len(label) - len(valueStr) - 4
 
-	children := []any{
+	children := []Component{
 		HBox(
 			Text(label).FG(Green),
 			Text(" "),
@@ -92,9 +92,9 @@ type Subsystem struct {
 
 // SubsystemGrid builds a compact multi-column status grid
 func SubsystemGrid(title string, columns int, systems []Subsystem) VBoxC {
-	children := []any{Text(title).FG(Green).Bold()}
+	children := []Component{Text(title).FG(Green).Bold()}
 
-	var currentRow []any
+	var currentRow []Component
 	for i, sys := range systems {
 		item := HBox(
 			Text("● ").Style(statusColor(sys.Status)),
@@ -119,7 +119,7 @@ type LogMessage struct {
 
 // MessageLog builds a scrollable timestamped message list
 func MessageLog(title string, messages *[]LogMessage, maxVisible int) VBoxC {
-	children := []any{Text(title).FG(Green).Bold()}
+	children := []Component{Text(title).FG(Green).Bold()}
 
 	msgs := *messages
 	start := 0

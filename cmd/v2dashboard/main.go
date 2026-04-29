@@ -9,8 +9,8 @@ import (
 	"runtime/pprof"
 	"time"
 
-	"github.com/kungfusheep/riffkey"
 	. "github.com/kungfusheep/glyph"
+	"github.com/kungfusheep/riffkey"
 )
 
 // Grid returns a layout function that arranges children in a grid
@@ -67,6 +67,8 @@ type MiniGraph struct {
 	Height int
 	Style  Style
 }
+
+func (g MiniGraph) Build() Component { return g }
 
 func (g MiniGraph) MinSize() (width, height int) {
 	h := g.Height
@@ -342,7 +344,7 @@ func main() {
 				VBox.Border(BorderSingle).Title("Stats").BorderFG(Cyan)(
 					Box{
 						Layout:   Grid(2, 15, 0),
-						Children: []any{Text(&state.Tasks), Text(&state.Running), Text(&state.Sleeping), Text(&state.Stopped)},
+						Children: []Component{Text(&state.Tasks), Text(&state.Running), Text(&state.Sleeping), Text(&state.Stopped)},
 					},
 				),
 				VBox.Border(BorderRounded).Title("Load").BorderFG(Green)(
@@ -356,7 +358,7 @@ func main() {
 					Case("all", VBox.Border(BorderSingle).Title("All Stats").BorderFG(Magenta)(
 						Box{
 							Layout:   Grid(3, 15, 1),
-							Children: []any{Text(&state.Tasks), Text(&state.Threads), Text(&state.Running), Text(&state.Sleeping), Text(&state.Stopped), Text(&state.Zombie)},
+							Children: []Component{Text(&state.Tasks), Text(&state.Threads), Text(&state.Running), Text(&state.Sleeping), Text(&state.Stopped), Text(&state.Zombie)},
 						},
 					)).
 					Case("compact", HBox.Gap(2)(Text(&state.Tasks), Text(&state.Running), Text("Load:"), Text(&state.Load))).
@@ -385,7 +387,7 @@ func main() {
 						Text("=== PAUSED ===").FG(warnStyle.FG),
 					),
 					HBox.Gap(2)(Text(" "), Text("  PID"), Text("NAME        "), Text("  CPU"), Text("  MEM"), Text("STATUS  ")),
-					ForEach(&state.Processes, func(p *Process) any {
+					ForEach(&state.Processes, func(p *Process) Component {
 						return HBox.Gap(2)(
 							If(&p.Selected).Eq(true).Then(Text(">")).Else(Text(" ")),
 							Text(&p.PID),

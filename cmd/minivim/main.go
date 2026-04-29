@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kungfusheep/riffkey"
 	"github.com/kungfusheep/glyph"
+	"github.com/kungfusheep/riffkey"
 )
 
 // Layout constants
@@ -222,16 +222,16 @@ type Editor struct {
 	lastFindTill bool
 
 	// Command line mode (global)
-	cmdLineActive  bool
-	cmdLinePrompt  string
-	cmdLineInput   string
-	lastColonCmd   string // for @: repeat
+	cmdLineActive bool
+	cmdLinePrompt string
+	cmdLineInput  string
+	lastColonCmd  string // for @: repeat
 
 	// Command completion (wildmenu)
-	cmdCompletions      []string   // all available commands (harvested once)
-	cmdMatches          []string   // filtered matches for current input
-	cmdMatchSelected    int        // selected match index
-	cmdCompletionActive bool       // whether completion popup is showing
+	cmdCompletions      []string     // all available commands (harvested once)
+	cmdMatches          []string     // filtered matches for current input
+	cmdMatchSelected    int          // selected match index
+	cmdCompletionActive bool         // whether completion popup is showing
 	cmdWildmenuSpans    []glyph.Span // rendered wildmenu line
 
 	// Debounce for C-a/C-x
@@ -1683,7 +1683,8 @@ func main() {
 	}
 
 	// Start with block cursor in normal mode
-	app.SetCursorStyle(glyph.CursorBlock); app.ShowCursor()
+	app.SetCursorStyle(glyph.CursorBlock)
+	app.ShowCursor()
 	ed.updateCursor()
 
 	// Normal mode handlers - movement actions
@@ -1894,7 +1895,8 @@ func (ed *Editor) enterInsertMode(app *glyph.App) {
 	ed.updateDisplay()
 
 	// Switch to bar cursor for insert mode
-	app.SetCursorStyle(glyph.CursorBar); app.ShowCursor()
+	app.SetCursorStyle(glyph.CursorBar)
+	app.ShowCursor()
 	ed.updateCursor()
 
 	// Create insert mode router (NoCounts so digits aren't count prefixes)
@@ -1972,7 +1974,8 @@ func (ed *Editor) exitInsertMode(app *glyph.App) {
 	}
 
 	// Switch back to block cursor for normal mode
-	app.SetCursorStyle(glyph.CursorBlock); app.ShowCursor()
+	app.SetCursorStyle(glyph.CursorBlock)
+	app.ShowCursor()
 
 	ed.updateDisplay()
 	ed.updateCursor()
@@ -1992,7 +1995,8 @@ func (ed *Editor) enterBlockInsertMode(app *glyph.App) {
 	insertStartCol := ed.blockInsertCol
 
 	// Switch to bar cursor
-	app.SetCursorStyle(glyph.CursorBar); app.ShowCursor()
+	app.SetCursorStyle(glyph.CursorBar)
+	app.ShowCursor()
 	ed.updateCursor()
 
 	// Create insert mode router
@@ -2078,7 +2082,8 @@ func (ed *Editor) exitBlockInsertMode(app *glyph.App, originalContent string, in
 		ed.win().Col = max(0, len(ed.buf().Lines[ed.win().Cursor])-1)
 	}
 
-	app.SetCursorStyle(glyph.CursorBlock); app.ShowCursor()
+	app.SetCursorStyle(glyph.CursorBlock)
+	app.ShowCursor()
 	ed.updateDisplay()
 	ed.updateCursor()
 	app.Pop()
@@ -2384,14 +2389,14 @@ func (ed *Editor) ensureCursorVisible() {
 // Style constants for vim-like appearance
 var (
 	lineNumStyle       = glyph.Style{Attr: glyph.AttrDim}
-	cursorLineNumStyle = glyph.Style{FG: glyph.Color{Mode: glyph.Color16, Index: 3}}                                 // Yellow for current line number
-	cursorLineStyle    = glyph.Style{BG: glyph.Color{Mode: glyph.Color256, Index: 236}}                              // Subtle dark gray background for cursorline
-	tildeStyle         = glyph.Style{FG: glyph.Color{Mode: glyph.Color16, Index: 4}}                                 // Blue for ~ lines
-	statusBarStyle     = glyph.Style{Attr: glyph.AttrInverse}                                                      // Inverse video like vim
-	searchHighlight    = glyph.Style{BG: glyph.Color{Mode: glyph.Color16, Index: 3}}                                 // Yellow background for search matches
-	gitAddedStyle      = glyph.Style{FG: glyph.Color{Mode: glyph.Color16, Index: 2}}                                 // Green for added lines
-	gitModifiedStyle   = glyph.Style{FG: glyph.Color{Mode: glyph.Color16, Index: 3}}                                 // Yellow for modified lines
-	gitRemovedStyle    = glyph.Style{FG: glyph.Color{Mode: glyph.Color16, Index: 1}}                                 // Red for removed lines
+	cursorLineNumStyle = glyph.Style{FG: glyph.Color{Mode: glyph.Color16, Index: 3}}    // Yellow for current line number
+	cursorLineStyle    = glyph.Style{BG: glyph.Color{Mode: glyph.Color256, Index: 236}} // Subtle dark gray background for cursorline
+	tildeStyle         = glyph.Style{FG: glyph.Color{Mode: glyph.Color16, Index: 4}}    // Blue for ~ lines
+	statusBarStyle     = glyph.Style{Attr: glyph.AttrInverse}                           // Inverse video like vim
+	searchHighlight    = glyph.Style{BG: glyph.Color{Mode: glyph.Color16, Index: 3}}    // Yellow background for search matches
+	gitAddedStyle      = glyph.Style{FG: glyph.Color{Mode: glyph.Color16, Index: 2}}    // Green for added lines
+	gitModifiedStyle   = glyph.Style{FG: glyph.Color{Mode: glyph.Color16, Index: 3}}    // Yellow for modified lines
+	gitRemovedStyle    = glyph.Style{FG: glyph.Color{Mode: glyph.Color16, Index: 1}}    // Red for removed lines
 )
 
 // refreshGitSigns updates the git change signs for a buffer by running git diff
@@ -3476,7 +3481,7 @@ func (ed *Editor) buildBlockSelectionSpans(line string, startCol, endCol int, no
 }
 
 // buildWindowView builds the view for a single window
-func buildWindowView(w *Window, focused bool) any {
+func buildWindowView(w *Window, focused bool) glyph.Component {
 	return glyph.VBox(
 		// Content area - imperative layer, efficiently updated
 		// Width is set for vertical splits to constrain each window's area
@@ -3487,7 +3492,7 @@ func buildWindowView(w *Window, focused bool) any {
 }
 
 // buildNodeView recursively builds the view for a split node
-func buildNodeView(node *SplitNode, focusedWindow *Window) any {
+func buildNodeView(node *SplitNode, focusedWindow *Window) glyph.Component {
 	if node.IsLeaf() {
 		return buildWindowView(node.Window, node.Window == focusedWindow)
 	}
@@ -3504,7 +3509,7 @@ func buildNodeView(node *SplitNode, focusedWindow *Window) any {
 	return glyph.HBox(child0, child1)
 }
 
-func buildView(ed *Editor) any {
+func buildView(ed *Editor) glyph.Component {
 	// Build the window tree
 	windowTree := buildNodeView(ed.root, ed.focusedWindow)
 
@@ -3518,7 +3523,7 @@ func buildView(ed *Editor) any {
 }
 
 // buildFuzzyView creates the declarative fuzzy finder overlay view
-func buildFuzzyView(ed *Editor) any {
+func buildFuzzyView(ed *Editor) glyph.Component {
 	return glyph.VBox(
 		// Prompt line with query
 		glyph.Text(&ed.fuzzy.Query).Bold(),
@@ -3528,7 +3533,7 @@ func buildFuzzyView(ed *Editor) any {
 			Selected:   &ed.fuzzy.Selected,
 			Marker:     "> ",
 			MaxVisible: 20,
-			Render: func(s *string) any {
+			Render: func(s *string) glyph.Component {
 				return glyph.Text(s)
 			},
 		},
@@ -4278,20 +4283,20 @@ func (ed *Editor) findNextPair(open, close byte) Range {
 }
 
 // Paren text objects
-func toInnerParenML(ed *Editor) Range   { return ed.findPairBoundsML('(', ')', true) }
-func toAParenML(ed *Editor) Range       { return ed.findPairBoundsML('(', ')', false) }
+func toInnerParenML(ed *Editor) Range { return ed.findPairBoundsML('(', ')', true) }
+func toAParenML(ed *Editor) Range     { return ed.findPairBoundsML('(', ')', false) }
 
 // Bracket text objects
 func toInnerBracketML(ed *Editor) Range { return ed.findPairBoundsML('[', ']', true) }
 func toABracketML(ed *Editor) Range     { return ed.findPairBoundsML('[', ']', false) }
 
 // Brace text objects
-func toInnerBraceML(ed *Editor) Range   { return ed.findPairBoundsML('{', '}', true) }
-func toABraceML(ed *Editor) Range       { return ed.findPairBoundsML('{', '}', false) }
+func toInnerBraceML(ed *Editor) Range { return ed.findPairBoundsML('{', '}', true) }
+func toABraceML(ed *Editor) Range     { return ed.findPairBoundsML('{', '}', false) }
 
 // Angle bracket text objects
-func toInnerAngleML(ed *Editor) Range   { return ed.findPairBoundsML('<', '>', true) }
-func toAAngleML(ed *Editor) Range       { return ed.findPairBoundsML('<', '>', false) }
+func toInnerAngleML(ed *Editor) Range { return ed.findPairBoundsML('<', '>', true) }
+func toAAngleML(ed *Editor) Range     { return ed.findPairBoundsML('<', '>', false) }
 
 // Word motion helper
 func isWordChar(r byte) bool {
@@ -4624,7 +4629,8 @@ func (ed *Editor) enterCommandMode(app *glyph.App, prompt string) {
 	ed.updateDisplay()
 
 	// Move cursor to command line
-	app.SetCursorStyle(glyph.CursorBar); app.ShowCursor()
+	app.SetCursorStyle(glyph.CursorBar)
+	app.ShowCursor()
 	ed.updateCmdLineCursor()
 
 	// Create command line router (NoCounts so digits work in commands)
@@ -4705,7 +4711,8 @@ func (ed *Editor) exitCommandMode(app *glyph.App) {
 	ed.cmdCompletionActive = false
 	ed.cmdMatches = nil
 	ed.StatusLine = ""
-	app.SetCursorStyle(glyph.CursorBlock); app.ShowCursor()
+	app.SetCursorStyle(glyph.CursorBlock)
+	app.ShowCursor()
 	ed.updateDisplay()
 	ed.updateCursor()
 	app.Pop()

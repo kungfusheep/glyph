@@ -5,8 +5,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/kungfusheep/riffkey"
 	. "github.com/kungfusheep/glyph"
+	"github.com/kungfusheep/riffkey"
 )
 
 func main() {

@@ -4,8 +4,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/kungfusheep/riffkey"
 	. "github.com/kungfusheep/glyph"
+	"github.com/kungfusheep/riffkey"
 )
 
 type State struct {
@@ -45,7 +45,7 @@ func main() {
 			SpaceH(1),
 			HBox.Gap(2)(
 				Text("Tasks:"),
-				ForEach(&state.Items, func(item *Item) any {
+				ForEach(&state.Items, func(item *Item) Component {
 					return Text(&item.Name)
 				}),
 			),
