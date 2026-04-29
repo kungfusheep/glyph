@@ -288,6 +288,22 @@ func TestFilterListCompilesAsTemplateTree(t *testing.T) {
 	}
 }
 
+func TestFilterListDefaultRenderShowsStringItems(t *testing.T) {
+	items := []string{"FUEL", "THROT"}
+	fl := FilterList(&items, func(s *string) string { return *s })
+
+	tmpl := Build(VBox(fl))
+	buf := NewBuffer(40, 6)
+	tmpl.Execute(buf, 40, 6)
+
+	if line := buf.GetLine(2); !contains(line, "> FUEL") {
+		t.Errorf("expected selected item text, got %q", line)
+	}
+	if line := buf.GetLine(3); !contains(line, "  THROT") {
+		t.Errorf("expected second item text, got %q", line)
+	}
+}
+
 func TestFilterListSelectedMapsToOriginal(t *testing.T) {
 	items := []string{"Go", "Rust", "Python", "JavaScript"}
 	fl := FilterList(&items, func(s *string) string { return *s })

@@ -3580,6 +3580,17 @@ func (t *Template) compileTextC(v TextC, parent int16, depth int, elemBase unsaf
 			ext.mode = textPtr
 			ext.ptr = val
 		}
+	case **string:
+		if val == nil || *val == nil {
+			ext.mode = textStatic
+			ext.static = ""
+		} else if elemBase != nil && isWithinRange(unsafe.Pointer(*val), elemBase, elemSize) {
+			ext.mode = textOff
+			ext.off = uintptr(unsafe.Pointer(*val)) - uintptr(elemBase)
+		} else {
+			ext.mode = textPtr
+			ext.ptr = *val
+		}
 	case func() string:
 		ext.mode = textFn
 		ext.fn = val
