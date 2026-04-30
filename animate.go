@@ -38,9 +38,14 @@ type AnimateFn func(target any) *tween
 var Animate AnimateFn = func(target any) *tween {
 	return &tween{
 		target:   target,
-		duration: 200 * time.Millisecond,
+		duration: 280 * time.Millisecond,
+		ease:     EaseOutQuart,
 	}
 }
+
+// Linear is an identity easing function. Pass it to Ease to opt out of the
+// default ease and run an animation at constant speed.
+func Linear(t float64) float64 { return t }
 
 // Duration sets the animation duration. Returns a new AnimateFn.
 func (f AnimateFn) Duration(d any) AnimateFn {

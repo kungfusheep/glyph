@@ -1043,10 +1043,24 @@ func (a *App) run(startView string) error {
 	// This eliminates the blank-screen flash between alternate buffer switch and first frame.
 	a.render()
 
-	// Detect terminal's default colours for post-processing.
+	// Detect terminal's default colours for post-processing and opacity fallback.
 	// Runs after first render so the blank gap is gone; runs before input.Run so
 	// there's no race on stdin.
 	a.defaultFG, a.defaultBG = a.screen.QueryDefaultColors()
+	// Plumb queried colours into the buffer default style so opacity blends and
+	// any other path that reads buf.defaultStyle can lerp toward a concrete BG.
+	// Caller-supplied SetDefaultStyle values still win.
+	if a.defaultStyle.FG.Mode == ColorDefault && a.defaultFG.Mode != ColorDefault {
+		a.defaultStyle.FG = a.defaultFG
+	}
+	if a.defaultStyle.BG.Mode == ColorDefault && a.defaultBG.Mode != ColorDefault {
+		a.defaultStyle.BG = a.defaultBG
+	}
+	if a.pool != nil {
+		for _, buf := range a.pool.buffers {
+			buf.defaultStyle = a.defaultStyle
+		}
+	}
 	a.RequestRender()
 
 	// Run riffkey input loop
