@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/kungfusheep/riffkey"
 	. "github.com/kungfusheep/glyph"
+	"github.com/kungfusheep/riffkey"
 )
 
 type Command struct {
@@ -42,7 +42,7 @@ func main() {
 		Marker("> ").
 		MaxVisible(8).
 		SelectedStyle(Style{BG: PaletteColor(236)}).
-		Render(func(cmd *Command) any {
+		Render(func(cmd *Command) Component {
 			return HBox.Gap(2)(
 				Text(&cmd.Icon),
 				Text(&cmd.Name),

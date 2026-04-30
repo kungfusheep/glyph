@@ -22,7 +22,7 @@ func main() {
 	teal := RGB(80, 220, 200)
 	fillBG := RGB(0x13, 0x13, 0x11)
 
-	box := func(ref *NodeRef, text string) any {
+	box := func(ref *NodeRef, text string) Component {
 		return VBox.PaddingVH(0, 1).FitContent().Border(BorderSoft).
 			BorderFG(DefaultColor()).Fill(fillBG).NodeRef(ref)(
 			Text(text).FG(amber),
@@ -64,7 +64,7 @@ func main() {
 	tabLabels := []string{"Dashboard", "Logs", "Settings", "About"}
 	smoothFocus := Animate.Duration(220 * time.Millisecond).Ease(EaseOutCubic)
 
-	tab := func(ref *NodeRef, label string) any {
+	tab := func(ref *NodeRef, label string) Component {
 		return VBox.PaddingVH(0, 3).FitContent().Fill(fillBG).NodeRef(ref)(
 			Text(label).FG(amber),
 		)
@@ -78,7 +78,7 @@ func main() {
 	okStrength := 0.0
 	smoothFlash := Animate.Duration(700 * time.Millisecond).Ease(EaseOutQuad)
 
-	section := func(title string, child any) any {
+	section := func(title string, child Component) Component {
 		return VBox.Gap(1).FitContent()(
 			Text(title).FG(BrightBlack),
 			child,

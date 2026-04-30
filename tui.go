@@ -481,7 +481,7 @@ type SelectionList struct {
 	Selected         *int     // pointer to selected index
 	Marker           string   // selection marker (default "> ", use " " for no visible marker)
 	MarkerStyle      Style    // style for marker text (merged with SelectedStyle.BG for selected rows)
-	Render           any      // func(*T) any - optional, renders each item
+	Render           any      // func(*T) Component - optional, renders each item
 	MaxVisible       int      // max items to show (0 = all)
 	Style            Style    // default style for non-selected rows
 	SelectedStyle    Style    // style for selected row
@@ -737,14 +737,14 @@ type TextInput struct {
 //
 //	glyph.If(&showModal).Eq(true).Then(glyph.Overlay{Child: ...})
 type OverlayNode struct {
-	Centered   bool  // true = center on screen (default behavior if X/Y not set)
-	X, Y       int   // explicit position (used if Centered is false)
-	Width      int   // explicit width (0 = auto from content)
-	Height     int   // explicit height (0 = auto from content)
-	Backdrop   bool  // draw dimmed backdrop behind overlay
-	BackdropFG Color // backdrop dim color (default: BrightBlack)
-	BG         Color // background color for overlay content area (fills before rendering child)
-	Child      any   // overlay content
+	Centered   bool      // true = center on screen (default behavior if X/Y not set)
+	X, Y       int       // explicit position (used if Centered is false)
+	Width      int       // explicit width (0 = auto from content)
+	Height     int       // explicit height (0 = auto from content)
+	Backdrop   bool      // draw dimmed backdrop behind overlay
+	BackdropFG Color     // backdrop dim color (default: BrightBlack)
+	BG         Color     // background color for overlay content area (fills before rendering child)
+	Child      Component // overlay content
 }
 
 // sliceHeader is the runtime representation of a slice.

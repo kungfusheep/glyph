@@ -38,14 +38,14 @@ type textInputBinding struct {
 // Pointers inside still provide dynamic values at render time.
 //
 //	app.SetView(
-//	    Define(func() any {
-//	        dot := func(ok *bool) any {
+//	    Define(func() Component {
+//	        dot := func(ok *bool) Component {
 //	            return If(ok).Then(Text("●")).Else(Text("○"))
 //	        }
 //	        return VBox(dot(&a), dot(&b), dot(&c))
 //	    }),
 //	)
-func Define(fn func() any) any {
+func Define(fn func() Component) Component {
 	return fn()
 }
 
@@ -87,14 +87,14 @@ type VBoxC struct {
 	localStyleCond   any
 	opacity          dynFloat64
 	opacityMode      OpacityMode
-	children         []any
+	children         []Component
 }
 
-type VBoxFn func(children ...any) VBoxC
+type VBoxFn func(children ...Component) VBoxC
 
 // Fill sets the background fill color. Accepts Color, *Color, conditionNode, or tweenNode.
 func (f VBoxFn) Fill(c any) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		switch val := c.(type) {
 		case Color:
@@ -113,7 +113,7 @@ func (f VBoxFn) Fill(c any) VBoxFn {
 // Style sets a local style for this container (does not cascade to children).
 // Accepts Style, *Style, conditionNode, or tweenNode.
 func (f VBoxFn) Style(s any) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		switch val := s.(type) {
 		case Style:
@@ -132,7 +132,7 @@ func (f VBoxFn) Style(s any) VBoxFn {
 // Opacity sets the container's opacity (0.0 = invisible, 1.0 = fully visible).
 // Accepts float64, *float64, conditionNode, or tweenNode.
 func (f VBoxFn) Opacity(o any) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.opacity.set(o)
 		return v
@@ -141,7 +141,7 @@ func (f VBoxFn) Opacity(o any) VBoxFn {
 
 // OpacityMode sets how rune ownership hands off during opacity fades.
 func (f VBoxFn) OpacityMode(mode OpacityMode) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.opacityMode = mode
 		return v
@@ -150,7 +150,7 @@ func (f VBoxFn) OpacityMode(mode OpacityMode) VBoxFn {
 
 // CascadeStyle sets a style pointer that children inherit.
 func (f VBoxFn) CascadeStyle(s *Style) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.inheritStyle = s
 		return v
@@ -159,7 +159,7 @@ func (f VBoxFn) CascadeStyle(s *Style) VBoxFn {
 
 // Gap sets the spacing between children. Accepts int8, int, or *int8 for dynamic values.
 func (f VBoxFn) Gap(g any) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		switch val := g.(type) {
 		case int8:
@@ -170,6 +170,8 @@ func (f VBoxFn) Gap(g any) VBoxFn {
 			v.gapPtr = val
 		case conditionNode:
 			v.gapCond = val
+		case valueBranchNode:
+			v.gapCond = val
 		case tweenNode:
 			v.gapCond = val
 		}
@@ -179,7 +181,7 @@ func (f VBoxFn) Gap(g any) VBoxFn {
 
 // Border sets the border style.
 func (f VBoxFn) Border(b BorderStyle) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.border = b
 		return v
@@ -188,7 +190,7 @@ func (f VBoxFn) Border(b BorderStyle) VBoxFn {
 
 // BorderFG sets the border foreground color.
 func (f VBoxFn) BorderFG(c any) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		switch val := c.(type) {
 		case Color:
@@ -204,7 +206,7 @@ func (f VBoxFn) BorderFG(c any) VBoxFn {
 
 // BorderBG sets the border background color.
 func (f VBoxFn) BorderBG(c Color) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.borderBG = &c
 		return v
@@ -213,7 +215,7 @@ func (f VBoxFn) BorderBG(c Color) VBoxFn {
 
 // Title sets the border title text.
 func (f VBoxFn) Title(t string) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.title = t
 		return v
@@ -222,7 +224,7 @@ func (f VBoxFn) Title(t string) VBoxFn {
 
 // Width sets a fixed width. Accepts int, int16, or *int16 for dynamic values.
 func (f VBoxFn) Width(w any) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		switch val := w.(type) {
 		case int16:
@@ -233,6 +235,8 @@ func (f VBoxFn) Width(w any) VBoxFn {
 			v.widthPtr = val
 		case conditionNode:
 			v.widthCond = val
+		case valueBranchNode:
+			v.widthCond = val
 		case tweenNode:
 			v.widthCond = val
 		}
@@ -242,7 +246,7 @@ func (f VBoxFn) Width(w any) VBoxFn {
 
 // Height sets a fixed height. Accepts int, int16, or *int16 for dynamic values.
 func (f VBoxFn) Height(h any) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		switch val := h.(type) {
 		case int16:
@@ -253,6 +257,8 @@ func (f VBoxFn) Height(h any) VBoxFn {
 			v.heightPtr = val
 		case conditionNode:
 			v.heightCond = val
+		case valueBranchNode:
+			v.heightCond = val
 		case tweenNode:
 			v.heightCond = val
 		}
@@ -262,7 +268,7 @@ func (f VBoxFn) Height(h any) VBoxFn {
 
 // Size sets a fixed width and height.
 func (f VBoxFn) Size(w, h int16) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.width = w
 		v.height = h
@@ -272,7 +278,7 @@ func (f VBoxFn) Size(w, h int16) VBoxFn {
 
 // WidthPct sets width as a percentage of the parent (0.0-1.0). Accepts float32, float64, or *float32 for dynamic values.
 func (f VBoxFn) WidthPct(pct any) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		switch val := pct.(type) {
 		case float32:
@@ -292,7 +298,7 @@ func (f VBoxFn) WidthPct(pct any) VBoxFn {
 
 // Grow sets the flex grow factor. Accepts float32, float64, int, or *float32 for dynamic values.
 func (f VBoxFn) Grow(g any) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		switch val := g.(type) {
 		case float32:
@@ -305,6 +311,8 @@ func (f VBoxFn) Grow(g any) VBoxFn {
 			v.flexGrowPtr = val
 		case conditionNode:
 			v.flexGrowCond = val
+		case valueBranchNode:
+			v.flexGrowCond = val
 		case tweenNode:
 			v.flexGrowCond = val
 		}
@@ -314,7 +322,7 @@ func (f VBoxFn) Grow(g any) VBoxFn {
 
 // FitContent sizes the container to fit its content.
 func (f VBoxFn) FitContent() VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.fitContent = true
 		return v
@@ -323,7 +331,7 @@ func (f VBoxFn) FitContent() VBoxFn {
 
 // Margin sets uniform margin on all sides.
 func (f VBoxFn) Margin(all int16) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.margin = [4]int16{all, all, all, all}
 		return v
@@ -332,7 +340,7 @@ func (f VBoxFn) Margin(all int16) VBoxFn {
 
 // MarginVH sets vertical and horizontal margin.
 func (f VBoxFn) MarginVH(vertical, horizontal int16) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.margin = [4]int16{vertical, horizontal, vertical, horizontal}
 		return v
@@ -341,7 +349,7 @@ func (f VBoxFn) MarginVH(vertical, horizontal int16) VBoxFn {
 
 // MarginTRBL sets individual margins for top, right, bottom, left.
 func (f VBoxFn) MarginTRBL(top, right, bottom, left int16) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.margin = [4]int16{top, right, bottom, left}
 		return v
@@ -350,7 +358,7 @@ func (f VBoxFn) MarginTRBL(top, right, bottom, left int16) VBoxFn {
 
 // Padding sets uniform padding on all sides.
 func (f VBoxFn) Padding(all int16) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.padding = [4]int16{all, all, all, all}
 		return v
@@ -359,7 +367,7 @@ func (f VBoxFn) Padding(all int16) VBoxFn {
 
 // PaddingVH sets vertical and horizontal padding.
 func (f VBoxFn) PaddingVH(vertical, horizontal int16) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.padding = [4]int16{vertical, horizontal, vertical, horizontal}
 		return v
@@ -368,7 +376,7 @@ func (f VBoxFn) PaddingVH(vertical, horizontal int16) VBoxFn {
 
 // PaddingTRBL sets individual padding for top, right, bottom, left.
 func (f VBoxFn) PaddingTRBL(top, right, bottom, left int16) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.padding = [4]int16{top, right, bottom, left}
 		return v
@@ -379,7 +387,7 @@ func (f VBoxFn) PaddingTRBL(top, right, bottom, left int16) VBoxFn {
 // screen bounds each frame. Use it in effects or anywhere that needs to know
 // where a node actually rendered.
 func (f VBoxFn) NodeRef(ref *NodeRef) VBoxFn {
-	return func(children ...any) VBoxC {
+	return func(children ...Component) VBoxC {
 		v := f(children...)
 		v.nodeRef = ref
 		return v
@@ -390,7 +398,7 @@ func (f VBoxFn) NodeRef(ref *NodeRef) VBoxFn {
 // Use method chaining to configure before calling with children:
 //
 //	VBox.Gap(1).Border(BorderRounded)("Title")(child1, child2)
-var VBox VBoxFn = func(children ...any) VBoxC {
+var VBox VBoxFn = func(children ...Component) VBoxC {
 	return VBoxC{children: children}
 }
 
@@ -431,14 +439,14 @@ type HBoxC struct {
 	localStyleCond   any
 	opacity          dynFloat64
 	opacityMode      OpacityMode
-	children         []any
+	children         []Component
 }
 
-type HBoxFn func(children ...any) HBoxC
+type HBoxFn func(children ...Component) HBoxC
 
 // Fill sets the background fill color. Accepts Color, *Color, conditionNode, or tweenNode.
 func (f HBoxFn) Fill(c any) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		switch val := c.(type) {
 		case Color:
@@ -457,7 +465,7 @@ func (f HBoxFn) Fill(c any) HBoxFn {
 // Style sets a local style for this container (does not cascade to children).
 // Accepts Style, *Style, conditionNode, or tweenNode.
 func (f HBoxFn) Style(s any) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		switch val := s.(type) {
 		case Style:
@@ -476,7 +484,7 @@ func (f HBoxFn) Style(s any) HBoxFn {
 // Opacity sets the container's opacity (0.0 = invisible, 1.0 = fully visible).
 // Accepts float64, *float64, conditionNode, or tweenNode.
 func (f HBoxFn) Opacity(o any) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.opacity.set(o)
 		return h
@@ -485,7 +493,7 @@ func (f HBoxFn) Opacity(o any) HBoxFn {
 
 // OpacityMode sets how rune ownership hands off during opacity fades.
 func (f HBoxFn) OpacityMode(mode OpacityMode) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.opacityMode = mode
 		return h
@@ -494,7 +502,7 @@ func (f HBoxFn) OpacityMode(mode OpacityMode) HBoxFn {
 
 // CascadeStyle sets a style pointer that children inherit.
 func (f HBoxFn) CascadeStyle(s *Style) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.inheritStyle = s
 		return h
@@ -503,7 +511,7 @@ func (f HBoxFn) CascadeStyle(s *Style) HBoxFn {
 
 // Gap sets the spacing between children. Accepts int8, int, or *int8 for dynamic values.
 func (f HBoxFn) Gap(g any) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		switch val := g.(type) {
 		case int8:
@@ -514,6 +522,8 @@ func (f HBoxFn) Gap(g any) HBoxFn {
 			h.gapPtr = val
 		case conditionNode:
 			h.gapCond = val
+		case valueBranchNode:
+			h.gapCond = val
 		case tweenNode:
 			h.gapCond = val
 		}
@@ -523,7 +533,7 @@ func (f HBoxFn) Gap(g any) HBoxFn {
 
 // Border sets the border style.
 func (f HBoxFn) Border(b BorderStyle) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.border = b
 		return h
@@ -532,7 +542,7 @@ func (f HBoxFn) Border(b BorderStyle) HBoxFn {
 
 // BorderFG sets the border foreground color.
 func (f HBoxFn) BorderFG(c any) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		switch val := c.(type) {
 		case Color:
@@ -546,7 +556,7 @@ func (f HBoxFn) BorderFG(c any) HBoxFn {
 
 // BorderBG sets the border background color.
 func (f HBoxFn) BorderBG(c Color) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.borderBG = &c
 		return h
@@ -555,7 +565,7 @@ func (f HBoxFn) BorderBG(c Color) HBoxFn {
 
 // Title sets the border title text.
 func (f HBoxFn) Title(t string) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.title = t
 		return h
@@ -564,7 +574,7 @@ func (f HBoxFn) Title(t string) HBoxFn {
 
 // Width sets a fixed width. Accepts int, int16, or *int16 for dynamic values.
 func (f HBoxFn) Width(w any) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		switch val := w.(type) {
 		case int16:
@@ -575,6 +585,8 @@ func (f HBoxFn) Width(w any) HBoxFn {
 			h.widthPtr = val
 		case conditionNode:
 			h.widthCond = val
+		case valueBranchNode:
+			h.widthCond = val
 		case tweenNode:
 			h.widthCond = val
 		}
@@ -584,7 +596,7 @@ func (f HBoxFn) Width(w any) HBoxFn {
 
 // Height sets a fixed height. Accepts int, int16, or *int16 for dynamic values.
 func (f HBoxFn) Height(h any) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		c := f(children...)
 		switch val := h.(type) {
 		case int16:
@@ -595,6 +607,8 @@ func (f HBoxFn) Height(h any) HBoxFn {
 			c.heightPtr = val
 		case conditionNode:
 			c.heightCond = val
+		case valueBranchNode:
+			c.heightCond = val
 		case tweenNode:
 			c.heightCond = val
 		}
@@ -604,7 +618,7 @@ func (f HBoxFn) Height(h any) HBoxFn {
 
 // Size sets a fixed width and height.
 func (f HBoxFn) Size(w, h int16) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		c := f(children...)
 		c.width = w
 		c.height = h
@@ -614,7 +628,7 @@ func (f HBoxFn) Size(w, h int16) HBoxFn {
 
 // WidthPct sets width as a percentage of the parent (0.0-1.0). Accepts float32, float64, or *float32 for dynamic values.
 func (f HBoxFn) WidthPct(pct any) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		switch val := pct.(type) {
 		case float32:
@@ -634,7 +648,7 @@ func (f HBoxFn) WidthPct(pct any) HBoxFn {
 
 // Grow sets the flex grow factor. Accepts float32, float64, int, or *float32 for dynamic values.
 func (f HBoxFn) Grow(g any) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		switch val := g.(type) {
 		case float32:
@@ -647,6 +661,8 @@ func (f HBoxFn) Grow(g any) HBoxFn {
 			h.flexGrowPtr = val
 		case conditionNode:
 			h.flexGrowCond = val
+		case valueBranchNode:
+			h.flexGrowCond = val
 		case tweenNode:
 			h.flexGrowCond = val
 		}
@@ -656,7 +672,7 @@ func (f HBoxFn) Grow(g any) HBoxFn {
 
 // FitContent sizes the container to fit its content.
 func (f HBoxFn) FitContent() HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.fitContent = true
 		return h
@@ -665,7 +681,7 @@ func (f HBoxFn) FitContent() HBoxFn {
 
 // Margin sets uniform margin on all sides.
 func (f HBoxFn) Margin(all int16) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.margin = [4]int16{all, all, all, all}
 		return h
@@ -674,7 +690,7 @@ func (f HBoxFn) Margin(all int16) HBoxFn {
 
 // MarginVH sets vertical and horizontal margin.
 func (f HBoxFn) MarginVH(vertical, horizontal int16) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.margin = [4]int16{vertical, horizontal, vertical, horizontal}
 		return h
@@ -683,7 +699,7 @@ func (f HBoxFn) MarginVH(vertical, horizontal int16) HBoxFn {
 
 // MarginTRBL sets individual margins for top, right, bottom, left.
 func (f HBoxFn) MarginTRBL(top, right, bottom, left int16) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.margin = [4]int16{top, right, bottom, left}
 		return h
@@ -692,7 +708,7 @@ func (f HBoxFn) MarginTRBL(top, right, bottom, left int16) HBoxFn {
 
 // Padding sets uniform padding on all sides.
 func (f HBoxFn) Padding(all int16) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.padding = [4]int16{all, all, all, all}
 		return h
@@ -701,7 +717,7 @@ func (f HBoxFn) Padding(all int16) HBoxFn {
 
 // PaddingVH sets vertical and horizontal padding.
 func (f HBoxFn) PaddingVH(vertical, horizontal int16) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.padding = [4]int16{vertical, horizontal, vertical, horizontal}
 		return h
@@ -710,7 +726,7 @@ func (f HBoxFn) PaddingVH(vertical, horizontal int16) HBoxFn {
 
 // PaddingTRBL sets individual padding for top, right, bottom, left.
 func (f HBoxFn) PaddingTRBL(top, right, bottom, left int16) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.padding = [4]int16{top, right, bottom, left}
 		return h
@@ -721,7 +737,7 @@ func (f HBoxFn) PaddingTRBL(top, right, bottom, left int16) HBoxFn {
 // screen bounds each frame. Use it in effects or anywhere that needs to know
 // where a node actually rendered.
 func (f HBoxFn) NodeRef(ref *NodeRef) HBoxFn {
-	return func(children ...any) HBoxC {
+	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.nodeRef = ref
 		return h
@@ -732,7 +748,7 @@ func (f HBoxFn) NodeRef(ref *NodeRef) HBoxFn {
 // Use method chaining to configure before calling with children:
 //
 //	HBox.Gap(2)(Text("left"), Space(), Text("right"))
-var HBox HBoxFn = func(children ...any) HBoxC {
+var HBox HBoxFn = func(children ...Component) HBoxC {
 	return HBoxC{children: children}
 }
 
@@ -747,8 +763,8 @@ var HBox HBoxFn = func(children ...any) HBoxC {
 //	    Text("A"), Text("B"), Text("C"),
 //	    Text("D"), Text("E"), Text("F"),
 //	)
-func Arrange(layout LayoutFunc) func(children ...any) Box {
-	return func(children ...any) Box {
+func Arrange(layout LayoutFunc) func(children ...Component) Box {
+	return func(children ...Component) Box {
 		return Box{Layout: layout, Children: children}
 	}
 }
@@ -804,6 +820,8 @@ func (t TextC) Style(s any) TextC {
 		t.styleDyn = val
 	case conditionNode:
 		t.styleDyn = val
+	case valueBranchNode:
+		t.styleDyn = val
 	case tweenNode:
 		t.styleDyn = val
 	}
@@ -819,7 +837,7 @@ func (t TextC) FG(c any) TextC {
 		t.fgDyn = val
 	case conditionNode:
 		t.fgDyn = val
-	case switchNodeInterface:
+	case valueBranchNode:
 		t.fgDyn = val
 	case tweenNode:
 		t.fgDyn = val
@@ -835,6 +853,8 @@ func (t TextC) BG(c any) TextC {
 	case *Color:
 		t.bgDyn = val
 	case conditionNode:
+		t.bgDyn = val
+	case valueBranchNode:
 		t.bgDyn = val
 	case tweenNode:
 		t.bgDyn = val
@@ -904,6 +924,8 @@ func (t TextC) Width(w any) TextC {
 	case *int16:
 		t.widthPtr = val
 	case conditionNode:
+		t.widthCond = val
+	case valueBranchNode:
 		t.widthCond = val
 	case tweenNode:
 		t.widthCond = val
@@ -1249,6 +1271,8 @@ func (v VRuleC) Height(h any) VRuleC {
 	case *int16:
 		v.heightPtr = val
 	case conditionNode:
+		v.heightCond = val
+	case valueBranchNode:
 		v.heightCond = val
 	case tweenNode:
 		v.heightCond = val
@@ -1729,7 +1753,7 @@ type JumpC struct {
 
 // Jump wraps a child component as a jump target.
 // When jump mode is active, a label appears at this position; typing it calls onSelect.
-func Jump(child any, onSelect func()) JumpC {
+func Jump(child Component, onSelect func()) JumpC {
 	return JumpC{child: child, onSelect: onSelect}
 }
 
@@ -1866,14 +1890,14 @@ type OverlayC struct {
 	opacityMode OpacityMode
 	anchor      *NodeRef
 	anchorPos   AnchorPosition
-	children    []any
+	children    []Component
 }
 
-type OverlayFn func(children ...any) OverlayC
+type OverlayFn func(children ...Component) OverlayC
 
 // Centered centers the overlay content within the parent bounds.
 func (f OverlayFn) Centered() OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.centered = true
 		return o
@@ -1882,7 +1906,7 @@ func (f OverlayFn) Centered() OverlayFn {
 
 // Backdrop renders a backdrop behind the top-most layer that fills the parent.
 func (f OverlayFn) Backdrop() OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.backdrop = true
 		return o
@@ -1891,7 +1915,7 @@ func (f OverlayFn) Backdrop() OverlayFn {
 
 // At positions the overlay at fixed coordinates.
 func (f OverlayFn) At(x, y int) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.x = x
 		o.y = y
@@ -1902,7 +1926,7 @@ func (f OverlayFn) At(x, y int) OverlayFn {
 // Offset translates the overlay from its resolved position. Accepts int, int16,
 // *int16, conditionNode, or tweenNode for each axis.
 func (f OverlayFn) Offset(x, y any) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.offsetX = x
 		o.offsetY = y
@@ -1912,7 +1936,7 @@ func (f OverlayFn) Offset(x, y any) OverlayFn {
 
 // Size sets a fixed width and height.
 func (f OverlayFn) Size(w, h int) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.width = w
 		o.height = h
@@ -1922,7 +1946,7 @@ func (f OverlayFn) Size(w, h int) OverlayFn {
 
 // BG sets the background color.
 func (f OverlayFn) BG(c Color) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.bg = c
 		return o
@@ -1932,7 +1956,7 @@ func (f OverlayFn) BG(c Color) OverlayFn {
 // Opacity sets the overlay opacity (0.0 = backing cells, 1.0 = fully visible).
 // Accepts float64, *float64, conditionNode, or tweenNode.
 func (f OverlayFn) Opacity(o any) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		ov := f(children...)
 		ov.opacity.set(o)
 		return ov
@@ -1941,7 +1965,7 @@ func (f OverlayFn) Opacity(o any) OverlayFn {
 
 // OpacityMode sets how rune ownership hands off during opacity fades.
 func (f OverlayFn) OpacityMode(mode OpacityMode) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		ov := f(children...)
 		ov.opacityMode = mode
 		return ov
@@ -1950,7 +1974,7 @@ func (f OverlayFn) OpacityMode(mode OpacityMode) OverlayFn {
 
 // Below positions the overlay directly below the referenced node.
 func (f OverlayFn) Below(ref *NodeRef) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.anchor = ref
 		o.anchorPos = AnchorBelow
@@ -1960,7 +1984,7 @@ func (f OverlayFn) Below(ref *NodeRef) OverlayFn {
 
 // Above positions the overlay directly above the referenced node.
 func (f OverlayFn) Above(ref *NodeRef) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.anchor = ref
 		o.anchorPos = AnchorAbove
@@ -1970,7 +1994,7 @@ func (f OverlayFn) Above(ref *NodeRef) OverlayFn {
 
 // OnTop positions the overlay covering the referenced node exactly.
 func (f OverlayFn) OnTop(ref *NodeRef) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.anchor = ref
 		o.anchorPos = AnchorOnTop
@@ -1980,7 +2004,7 @@ func (f OverlayFn) OnTop(ref *NodeRef) OverlayFn {
 
 // RightOf positions the overlay to the right of the referenced node.
 func (f OverlayFn) RightOf(ref *NodeRef) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.anchor = ref
 		o.anchorPos = AnchorRightOf
@@ -1990,7 +2014,7 @@ func (f OverlayFn) RightOf(ref *NodeRef) OverlayFn {
 
 // LeftOf positions the overlay to the left of the referenced node.
 func (f OverlayFn) LeftOf(ref *NodeRef) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.anchor = ref
 		o.anchorPos = AnchorLeftOf
@@ -2000,7 +2024,7 @@ func (f OverlayFn) LeftOf(ref *NodeRef) OverlayFn {
 
 // BackdropFG sets the backdrop foreground color.
 func (f OverlayFn) BackdropFG(c Color) OverlayFn {
-	return func(children ...any) OverlayC {
+	return func(children ...Component) OverlayC {
 		o := f(children...)
 		o.backdropFG = c
 		return o
@@ -2010,7 +2034,7 @@ func (f OverlayFn) BackdropFG(c Color) OverlayFn {
 // Overlay displays content floating above the main view.
 // Use for modals, dialogs, and floating windows.
 // Control visibility with If: If(&showModal).Then(Overlay.Backdrop()(content))
-var Overlay OverlayFn = func(children ...any) OverlayC {
+var Overlay OverlayFn = func(children ...Component) OverlayC {
 	return OverlayC{children: children}
 }
 
@@ -2020,17 +2044,17 @@ var Overlay OverlayFn = func(children ...any) OverlayC {
 
 type ForEachC[T any] struct {
 	items    *[]T
-	template func(item *T) any
+	template func(item *T) Component
 }
 
 // ForEach renders a template for each item in a slice.
-// template: func(item *T) any. return a component tree for each item.
+// template: func(item *T) Component. return a component tree for each item.
 // Pointer fields inside *T are reactive; mutate and re-render to update.
 //
-//	ForEach(&todos, func(t *Todo) any {
+//	ForEach(&todos, func(t *Todo) Component {
 //	    return HBox(Text(&t.Name), Text(&t.Status))
 //	})
-func ForEach[T any](items *[]T, template func(item *T) any) ForEachC[T] {
+func ForEach[T any](items *[]T, template func(item *T) Component) ForEachC[T] {
 	return ForEachC[T]{items: items, template: template}
 }
 
@@ -2047,7 +2071,7 @@ type ListC[T any] struct {
 	items            *[]T
 	selected         *int
 	internalSel      int // used when no external selection provided
-	render           func(*T) any
+	render           func(*T) Component
 	onSelect         func(*T)
 	marker           string
 	markerStyle      Style
@@ -2062,7 +2086,7 @@ type ListC[T any] struct {
 }
 
 // List creates a navigable list from a bound slice.
-// Use .Render(func(*T) any) to customize how items appear,
+// Use .Render(func(*T) Component) to customize how items appear,
 // .Handle(key, func(*T)) for per-item key actions,
 // and .BindNav("j","k") or .BindVimNav() for keyboard navigation.
 func List[T any](items *[]T) *ListC[T] {
@@ -2142,8 +2166,8 @@ func (l *ListC[T]) Delete() {
 }
 
 // Render customises how each item appears in the list.
-// fn: func(item *T) any. return a component tree for the item.
-func (l *ListC[T]) Render(fn func(*T) any) *ListC[T] {
+// fn: func(item *T) Component. return a component tree for the item.
+func (l *ListC[T]) Render(fn func(*T) Component) *ListC[T] {
 	l.render = fn
 	return l
 }
@@ -2234,7 +2258,7 @@ func (l *ListC[T]) toSelectionList() *SelectionList {
 		if l.render != nil {
 			sl.Render = l.render
 		} else {
-			sl.Render = func(item *T) any { return Text(item) }
+			sl.Render = func(item *T) Component { return Text(item) }
 		}
 		if l.onSelect != nil {
 			fn := l.onSelect
@@ -2779,7 +2803,7 @@ func (r *RadioC) getOptions() []string {
 type CheckListC[T any] struct {
 	items            *[]T
 	checked          func(*T) *bool
-	render           func(*T) any
+	render           func(*T) Component
 	selected         *int
 	internalSel      int
 	checkedMark      string
@@ -2797,7 +2821,7 @@ type CheckListC[T any] struct {
 
 // CheckList creates a navigable checklist from a bound slice.
 // Items should have struct tags `glyph:"checked"` and `glyph:"render"`,
-// or use .Checked(func(*T) *bool) and .Render(func(*T) any) to configure manually.
+// or use .Checked(func(*T) *bool) and .Render(func(*T) Component) to configure manually.
 func CheckList[T any](items *[]T) *CheckListC[T] {
 	c := &CheckListC[T]{
 		items:         items,
@@ -2817,8 +2841,8 @@ func (c *CheckListC[T]) Checked(fn func(*T) *bool) *CheckListC[T] {
 }
 
 // Render customises how each item appears after its checkbox.
-// fn: func(item *T) any. return a component tree for the item content.
-func (c *CheckListC[T]) Render(fn func(*T) any) *CheckListC[T] {
+// fn: func(item *T) Component. return a component tree for the item content.
+func (c *CheckListC[T]) Render(fn func(*T) Component) *CheckListC[T] {
 	c.render = fn
 	return c
 }
@@ -3038,7 +3062,7 @@ func (c *CheckListC[T]) toSelectionList() *SelectionList {
 
 					if tag == "render" && field.Type.Kind() == reflect.String && renderFn == nil {
 						idx := i
-						renderFn = func(item *T) any {
+						renderFn = func(item *T) Component {
 							v := reflect.ValueOf(item).Elem().Field(idx)
 							return Text(v.Addr().Interface().(*string))
 						}
@@ -3064,14 +3088,14 @@ func (c *CheckListC[T]) toSelectionList() *SelectionList {
 		if checkedFn != nil && renderFn != nil {
 			checkedMark := c.checkedMark
 			uncheckedMark := c.uncheckedMark
-			c.cached.Render = func(item *T) any {
+			c.cached.Render = func(item *T) Component {
 				mark := If(checkedFn(item)).Then(Text(checkedMark)).Else(Text(uncheckedMark))
 				return HBox.Gap(1)(mark, renderFn(item))
 			}
 		} else if checkedFn != nil {
 			checkedMark := c.checkedMark
 			uncheckedMark := c.uncheckedMark
-			c.cached.Render = func(item *T) any {
+			c.cached.Render = func(item *T) Component {
 				return If(checkedFn(item)).Then(Text(checkedMark)).Else(Text(uncheckedMark))
 			}
 		}

@@ -104,7 +104,7 @@ func TestHomepage_conditionalRendering(t *testing.T) {
 func TestHomepage_renderAnySlice(t *testing.T) {
 	var commits []homepageCommit
 
-	_ = List(&commits).Render(func(c *homepageCommit) any {
+	_ = List(&commits).Render(func(c *homepageCommit) Component {
 		return HBox.Gap(2)(
 			Text(&c.Short).FG(Yellow),
 			Text(&c.Subject),
@@ -153,7 +153,7 @@ func TestHomepage_fuzzyFinder(t *testing.T) {
 	var packages []homepagePkg
 
 	_ = FilterList(&packages, func(p *homepagePkg) string { return p.Name }).
-		Render(func(p *homepagePkg) any {
+		Render(func(p *homepagePkg) Component {
 			return HBox.Gap(2)(
 				Text(&p.Name).Bold(),
 				Text(&p.Desc).FG(BrightBlack),

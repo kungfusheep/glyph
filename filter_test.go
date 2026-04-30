@@ -277,7 +277,7 @@ func TestFilterListCompilesAsTemplateTree(t *testing.T) {
 	fl := FilterList(&items, func(s *string) string { return *s }).
 		Placeholder("search...").
 		MaxVisible(10).
-		Render(func(s *string) any { return Text(s) })
+		Render(func(s *string) Component { return Text(s) })
 
 	tmpl := Build(VBox(fl))
 	if len(tmpl.pendingBindings) < 2 {
@@ -336,7 +336,7 @@ func TestFilterListSelectedMapsToOriginal(t *testing.T) {
 func TestStreamWriterWrite(t *testing.T) {
 	var items []string
 	fl := FilterList(&items, func(s *string) string { return *s }).
-		Render(func(s *string) any { return Text(s) })
+		Render(func(s *string) Component { return Text(s) })
 
 	renders := 0
 	w := fl.Stream(func() { renders++ })
@@ -357,7 +357,7 @@ func TestStreamWriterWrite(t *testing.T) {
 func TestStreamWriterWithFilter(t *testing.T) {
 	var items []string
 	fl := FilterList(&items, func(s *string) string { return *s }).
-		Render(func(s *string) any { return Text(s) })
+		Render(func(s *string) Component { return Text(s) })
 
 	// apply filter before streaming
 	fl.input.SetValue("o")
@@ -381,7 +381,7 @@ func TestStreamWriterWithFilter(t *testing.T) {
 func TestStreamLifecycle(t *testing.T) {
 	var items []string
 	fl := FilterList(&items, func(s *string) string { return *s }).
-		Render(func(s *string) any { return Text(s) })
+		Render(func(s *string) Component { return Text(s) })
 
 	if fl.streaming() {
 		t.Fatal("should not be streaming before Stream called")
@@ -410,7 +410,7 @@ func TestStreamLifecycle(t *testing.T) {
 func TestStreamCounterUpdates(t *testing.T) {
 	var items []string
 	fl := FilterList(&items, func(s *string) string { return *s }).
-		Render(func(s *string) any { return Text(s) })
+		Render(func(s *string) Component { return Text(s) })
 
 	fl.input.SetValue("a")
 	fl.sync()
@@ -455,7 +455,7 @@ func BenchmarkStreamWriter(b *testing.B) {
 		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
 			var items []string
 			fl := FilterList(&items, func(s *string) string { return *s }).
-				Render(func(s *string) any { return Text(s) })
+				Render(func(s *string) Component { return Text(s) })
 
 			fl.input.SetValue("a")
 			fl.sync()

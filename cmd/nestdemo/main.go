@@ -63,7 +63,7 @@ func main() {
 		Style(Style{BG: PaletteColor(235)}).
 		SelectedStyle(Style{BG: PaletteColor(240)}).
 		MarkerStyle(Style{FG: Cyan}).
-		Render(func(item *MenuItem) any {
+		Render(func(item *MenuItem) Component {
 			return HBox.Gap(1)(
 				Text(&item.Icon).FG(Yellow),
 				Text(&item.Label),
@@ -77,7 +77,7 @@ func main() {
 		MaxVisible(4).
 		Style(Style{BG: PaletteColor(234)}).
 		SelectedStyle(Style{BG: PaletteColor(238)}).
-		Render(func(kv *KeyValue) any {
+		Render(func(kv *KeyValue) Component {
 			return HBox(
 				Text(&kv.Key).FG(Cyan),
 				Space().Char('-').Style(Style{FG: BrightBlack}),
@@ -110,7 +110,7 @@ func main() {
 		MaxVisible(10).
 		Style(Style{BG: PaletteColor(235)}).
 		SelectedStyle(Style{BG: PaletteColor(238)}).
-		Render(func(item *FileItem) any {
+		Render(func(item *FileItem) Component {
 			style := Style{FG: White}
 			if item.IsDir {
 				style.FG = Cyan
@@ -221,7 +221,7 @@ func main() {
 					Text("ForEach with nested HBox and dotted leaders:"),
 					SpaceH(1),
 					VBox.Border(BorderRounded)(
-						ForEach(&kvPairs, func(kv *KeyValue) any {
+						ForEach(&kvPairs, func(kv *KeyValue) Component {
 							return HBox.Gap(1)(
 								Text(&kv.Key).FG(Cyan),
 								Space().Char('.').Style(Style{FG: BrightBlack}),
@@ -339,7 +339,7 @@ func main() {
 							Text("Right Panel").FG(Cyan).Bold(),
 							HRule(),
 							VBox.Border(BorderRounded)(
-								ForEach(&menuItems, func(item *MenuItem) any {
+								ForEach(&menuItems, func(item *MenuItem) Component {
 									return HBox.Gap(1)(
 										Text(&item.Icon),
 										Text(&item.Label),

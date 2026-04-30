@@ -18,7 +18,7 @@ func main() {
 		SetView(VBox.FitContent()(
 			Text("Deploy target:").FG(Cyan).Bold(),
 			List(&options).
-				Render(func(s *string) any { return Text(s) }).
+				Render(func(s *string) Component { return Text(s) }).
 				BindNav("j", "k").
 				MarkerStyle(Style{FG: Green}).
 				Ref(func(l *ListC[string]) { list = l }),

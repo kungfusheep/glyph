@@ -5,7 +5,7 @@ import "testing"
 func TestListBindNavCollected(t *testing.T) {
 	items := []string{"a", "b", "c"}
 	tmpl := Build(VBox(
-		List(&items).Render(func(s *string) any { return Text(s) }).BindNav("j", "k"),
+		List(&items).Render(func(s *string) Component { return Text(s) }).BindNav("j", "k"),
 	))
 	if len(tmpl.pendingBindings) != 2 {
 		t.Fatalf("expected 2 bindings, got %d", len(tmpl.pendingBindings))
@@ -21,7 +21,7 @@ func TestListBindNavCollected(t *testing.T) {
 func TestListBindDeleteCollected(t *testing.T) {
 	items := []string{"a", "b"}
 	tmpl := Build(VBox(
-		List(&items).Render(func(s *string) any { return Text(s) }).BindNav("j", "k").BindDelete("d"),
+		List(&items).Render(func(s *string) Component { return Text(s) }).BindNav("j", "k").BindDelete("d"),
 	))
 	if len(tmpl.pendingBindings) != 3 {
 		t.Fatalf("expected 3 bindings, got %d", len(tmpl.pendingBindings))
@@ -69,7 +69,7 @@ func TestCheckListBindingsCollected(t *testing.T) {
 	tmpl := Build(VBox(
 		CheckList(&items).
 			Checked(func(i *Item) *bool { return &i.Done }).
-			Render(func(i *Item) any { return Text(&i.Name) }).
+			Render(func(i *Item) Component { return Text(&i.Name) }).
 			BindNav("j", "k").
 			BindToggle("x").
 			BindDelete("d"),
@@ -108,7 +108,7 @@ func TestMultipleComponentBindingsCollected(t *testing.T) {
 	tmpl := Build(VBox(
 		Checkbox(&checked, "agree").BindToggle("a"),
 		Radio(&sel, "x", "y").BindNav("n", "p"),
-		List(&items).Render(func(s *string) any { return Text(s) }).BindNav("j", "k"),
+		List(&items).Render(func(s *string) Component { return Text(s) }).BindNav("j", "k"),
 	))
 	// 1 (checkbox) + 2 (radio) + 2 (list) = 5
 	if len(tmpl.pendingBindings) != 5 {
@@ -119,7 +119,7 @@ func TestMultipleComponentBindingsCollected(t *testing.T) {
 func TestListBindPageNavCollected(t *testing.T) {
 	items := []string{"a", "b", "c"}
 	tmpl := Build(VBox(
-		List(&items).Render(func(s *string) any { return Text(s) }).BindPageNav("<C-d>", "<C-u>"),
+		List(&items).Render(func(s *string) Component { return Text(s) }).BindPageNav("<C-d>", "<C-u>"),
 	))
 	if len(tmpl.pendingBindings) != 2 {
 		t.Fatalf("expected 2 bindings, got %d", len(tmpl.pendingBindings))
@@ -135,7 +135,7 @@ func TestListBindPageNavCollected(t *testing.T) {
 func TestListBindFirstLastCollected(t *testing.T) {
 	items := []string{"a", "b", "c"}
 	tmpl := Build(VBox(
-		List(&items).Render(func(s *string) any { return Text(s) }).BindFirstLast("g", "G"),
+		List(&items).Render(func(s *string) Component { return Text(s) }).BindFirstLast("g", "G"),
 	))
 	if len(tmpl.pendingBindings) != 2 {
 		t.Fatalf("expected 2 bindings, got %d", len(tmpl.pendingBindings))
@@ -151,7 +151,7 @@ func TestListBindFirstLastCollected(t *testing.T) {
 func TestListBindVimNavCollected(t *testing.T) {
 	items := []string{"a", "b", "c"}
 	tmpl := Build(VBox(
-		List(&items).Render(func(s *string) any { return Text(s) }).BindVimNav(),
+		List(&items).Render(func(s *string) Component { return Text(s) }).BindVimNav(),
 	))
 	// j, k, <C-d>, <C-u>, g, G = 6
 	if len(tmpl.pendingBindings) != 6 {
@@ -174,7 +174,7 @@ func TestCheckListBindPageNavCollected(t *testing.T) {
 	tmpl := Build(VBox(
 		CheckList(&items).
 			Checked(func(i *Item) *bool { return &i.Done }).
-			Render(func(i *Item) any { return Text(&i.Name) }).
+			Render(func(i *Item) Component { return Text(&i.Name) }).
 			BindPageNav("<C-d>", "<C-u>").
 			BindFirstLast("g", "G"),
 	))
@@ -199,7 +199,7 @@ func TestCheckListBindVimNavCollected(t *testing.T) {
 	tmpl := Build(VBox(
 		CheckList(&items).
 			Checked(func(i *Item) *bool { return &i.Done }).
-			Render(func(i *Item) any { return Text(&i.Name) }).
+			Render(func(i *Item) Component { return Text(&i.Name) }).
 			BindVimNav(),
 	))
 	// j, k, <C-d>, <C-u>, g, G = 6
@@ -217,7 +217,7 @@ func TestCheckListBindVimNavCollected(t *testing.T) {
 func TestListHandleCollected(t *testing.T) {
 	items := []string{"a", "b", "c"}
 	tmpl := Build(VBox(
-		List(&items).Render(func(s *string) any { return Text(s) }).
+		List(&items).Render(func(s *string) Component { return Text(s) }).
 			Handle("<Enter>", func(s *string) {}).
 			Handle("w", func(s *string) {}),
 	))
@@ -237,7 +237,7 @@ func TestListHandleCallsWithSelected(t *testing.T) {
 	var got string
 	var list *ListC[string]
 	tmpl := Build(VBox(
-		List(&items).Render(func(s *string) any { return Text(s) }).
+		List(&items).Render(func(s *string) Component { return Text(s) }).
 			Ref(func(l *ListC[string]) { list = l }).
 			Handle("<Enter>", func(s *string) { got = *s }),
 	))
@@ -261,7 +261,7 @@ func TestListHandleSkipsNilSelection(t *testing.T) {
 	called := false
 	var list *ListC[string]
 	tmpl := Build(VBox(
-		List(&items).Render(func(s *string) any { return Text(s) }).
+		List(&items).Render(func(s *string) Component { return Text(s) }).
 			Ref(func(l *ListC[string]) { list = l }).
 			Handle("<Enter>", func(s *string) { called = true }),
 	))
@@ -287,7 +287,7 @@ func TestCheckListHandleCollected(t *testing.T) {
 	tmpl := Build(VBox(
 		CheckList(&items).
 			Checked(func(i *Item) *bool { return &i.Done }).
-			Render(func(i *Item) any { return Text(&i.Name) }).
+			Render(func(i *Item) Component { return Text(&i.Name) }).
 			Handle("<Enter>", func(i *Item) {}),
 	))
 	if len(tmpl.pendingBindings) != 1 {
@@ -303,7 +303,7 @@ func TestBindingsBubbleUpFromIfElse(t *testing.T) {
 	show := true
 	tmpl := Build(VBox(
 		If(&show).Then(
-			List(&items).Render(func(s *string) any { return Text(s) }).BindNav("j", "k"),
+			List(&items).Render(func(s *string) Component { return Text(s) }).BindNav("j", "k"),
 		).Else(
 			Text("empty"),
 		),
@@ -320,7 +320,7 @@ func TestBindingsBubbleUpFromElseBranch(t *testing.T) {
 		If(&show).Then(
 			Text("loading"),
 		).Else(
-			List(&items).Render(func(s *string) any { return Text(s) }).BindVimNav(),
+			List(&items).Render(func(s *string) Component { return Text(s) }).BindVimNav(),
 		),
 	))
 	// j, k, <C-d>, <C-u>, g, G = 6
@@ -332,7 +332,7 @@ func TestBindingsBubbleUpFromElseBranch(t *testing.T) {
 func TestNoBindingsWhenNotUsed(t *testing.T) {
 	items := []string{"a", "b"}
 	tmpl := Build(VBox(
-		List(&items).Render(func(s *string) any { return Text(s) }),
+		List(&items).Render(func(s *string) Component { return Text(s) }),
 	))
 	if len(tmpl.pendingBindings) != 0 {
 		t.Errorf("expected 0 bindings, got %d", len(tmpl.pendingBindings))

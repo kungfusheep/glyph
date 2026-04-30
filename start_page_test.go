@@ -47,7 +47,7 @@ func TestStart_listRender(t *testing.T) {
 	app.SetView(
 		VBox(
 			Text("Tasks").Bold(),
-			List(&tasks).Render(func(t *startTask) any {
+			List(&tasks).Render(func(t *startTask) Component {
 				return HBox.Gap(1)(
 					If(&t.Done).Then(Text("[x]")).Else(Text("[ ]")),
 					Text(&t.Title),
@@ -67,7 +67,7 @@ func TestStart_filterList(t *testing.T) {
 	}
 
 	_ = FilterList(&tasks, func(t *startTask) string { return t.Title }).
-		Render(func(t *startTask) any {
+		Render(func(t *startTask) Component {
 			return Text(&t.Title)
 		}).MaxVisible(10).Border(BorderRounded)
 }
@@ -110,7 +110,7 @@ func TestStart_fullSplitApp(t *testing.T) {
 			Text("Task Manager").Bold(),
 			HBox(
 				VBox.Grow(1).Border(BorderRounded).Title("tasks")(
-					List(&tasks).Render(func(t *startTask) any {
+					List(&tasks).Render(func(t *startTask) Component {
 						return HBox.Gap(1)(
 							If(&t.Done).Then(Text("[x]")).Else(Text("[ ]")),
 							Text(&t.Title),
@@ -140,7 +140,7 @@ func TestStart_keyboardListHandle(t *testing.T) {
 		{"Write tutorial", false, 0},
 	}
 
-	_ = List(&tasks).Render(func(t *startTask) any {
+	_ = List(&tasks).Render(func(t *startTask) Component {
 		return HBox.Gap(1)(
 			If(&t.Done).Then(Text("[x]")).Else(Text("[ ]")),
 			Text(&t.Title),

@@ -50,7 +50,7 @@ func main() {
 				Text("q quit").FG(muted),
 			),
 			VBox.Width(54).Fill(panel).PaddingVH(1, 2)(
-				ForEach(&items, func(item *row) any {
+				ForEach(&items, func(item *row) Component {
 					rowBG := smooth(If(&item.Selected).Then(selectedBG).Else(
 						If(&item.Active).Then(hot).Else(idle),
 					))

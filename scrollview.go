@@ -13,7 +13,7 @@ package glyph
 //	)
 type ScrollViewC struct {
 	layer    *Layer
-	children []any
+	children []Component
 	flexGrow float32
 	margin   [4]int16
 
@@ -21,10 +21,10 @@ type ScrollViewC struct {
 	childTmpl *Template
 }
 
-type ScrollViewFn func(children ...any) *ScrollViewC
+type ScrollViewFn func(children ...Component) *ScrollViewC
 
 // ScrollView creates a scrollable container for its children.
-var ScrollView ScrollViewFn = func(children ...any) *ScrollViewC {
+var ScrollView ScrollViewFn = func(children ...Component) *ScrollViewC {
 	sv := &ScrollViewC{
 		layer:    NewLayer(),
 		children: children,
@@ -34,7 +34,7 @@ var ScrollView ScrollViewFn = func(children ...any) *ScrollViewC {
 }
 
 func (f ScrollViewFn) Grow(g any) ScrollViewFn {
-	return func(children ...any) *ScrollViewC {
+	return func(children ...Component) *ScrollViewC {
 		sv := f(children...)
 		switch val := g.(type) {
 		case float32:
@@ -49,7 +49,7 @@ func (f ScrollViewFn) Grow(g any) ScrollViewFn {
 }
 
 func (f ScrollViewFn) Margin(all int16) ScrollViewFn {
-	return func(children ...any) *ScrollViewC {
+	return func(children ...Component) *ScrollViewC {
 		sv := f(children...)
 		sv.margin = [4]int16{all, all, all, all}
 		return sv
@@ -57,7 +57,7 @@ func (f ScrollViewFn) Margin(all int16) ScrollViewFn {
 }
 
 func (f ScrollViewFn) MarginVH(v, h int16) ScrollViewFn {
-	return func(children ...any) *ScrollViewC {
+	return func(children ...Component) *ScrollViewC {
 		sv := f(children...)
 		sv.margin = [4]int16{v, h, v, h}
 		return sv
@@ -66,7 +66,7 @@ func (f ScrollViewFn) MarginVH(v, h int16) ScrollViewFn {
 
 // Ref captures a reference to the ScrollView via a callback during construction.
 func (f ScrollViewFn) Ref(fn func(*ScrollViewC)) ScrollViewFn {
-	return func(children ...any) *ScrollViewC {
+	return func(children ...Component) *ScrollViewC {
 		sv := f(children...)
 		fn(sv)
 		return sv
@@ -79,7 +79,7 @@ func (sv *ScrollViewC) Layer() *Layer {
 }
 
 // SetChildren replaces the children and marks for re-render.
-func (sv *ScrollViewC) SetChildren(children ...any) {
+func (sv *ScrollViewC) SetChildren(children ...Component) {
 	sv.children = children
 	sv.childTmpl = nil // force rebuild
 	sv.layer.lastRenderWidth = 0

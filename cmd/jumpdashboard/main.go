@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/kungfusheep/riffkey"
 	. "github.com/kungfusheep/glyph"
+	"github.com/kungfusheep/riffkey"
 )
 
 type menuItem struct {
@@ -58,7 +58,7 @@ func main() {
 	tabs := []string{"Overview", "Metrics", "Logs", "Alerts"}
 
 	// pre-build sidebar menu with reactive If for active highlight
-	menuChildren := []any{Text("MENU").FG(Cyan).Bold(), SpaceH(1)}
+	menuChildren := []Component{Text("MENU").FG(Cyan).Bold(), SpaceH(1)}
 	for i, item := range menuItems {
 		idx := i
 		menuChildren = append(menuChildren, Jump(
@@ -75,7 +75,7 @@ func main() {
 	}
 
 	// pre-build quick actions
-	actionChildren := []any{}
+	actionChildren := []Component{}
 	for i, action := range quickActions {
 		idx := i
 		if i > 0 {
@@ -90,7 +90,7 @@ func main() {
 	}
 
 	// pre-build subsystem grid
-	subsystemChildren := []any{Text("SUBSYSTEMS").FG(Cyan).Bold(), SpaceH(1)}
+	subsystemChildren := []Component{Text("SUBSYSTEMS").FG(Cyan).Bold(), SpaceH(1)}
 	for i, sys := range subsystems {
 		idx := i
 		subsystemChildren = append(subsystemChildren, Jump(
@@ -106,7 +106,7 @@ func main() {
 	}
 
 	// pre-build tab row with reactive If for selected highlight
-	tabChildren := []any{}
+	tabChildren := []Component{}
 	for i, label := range tabs {
 		idx := i
 		tabChildren = append(tabChildren, Jump(
@@ -134,7 +134,7 @@ func main() {
 	}
 
 	// helper: jumpable log/activity/alert entries
-	jumpRow := func(label string, content any) JumpC {
+	jumpRow := func(label string, content Component) JumpC {
 		return Jump(content, func() { status = label })
 	}
 

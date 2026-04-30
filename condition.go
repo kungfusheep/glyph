@@ -113,10 +113,10 @@ type ConditionEval[T comparable] struct {
 	ptr       *T
 	offset    uintptr // offset from element base (for ForEach)
 	hasOffset bool
-	op     condOp
-	val    T
-	then   any
-	els    any
+	op        condOp
+	val       T
+	then      any
+	els       any
 }
 
 // Then specifies what to render when true
@@ -163,10 +163,10 @@ type OrdConditionEval[T cmp.Ordered] struct {
 	ptr       *T
 	offset    uintptr // offset from element base (for ForEach)
 	hasOffset bool
-	op     condOp
-	val    T
-	then   any
-	els    any
+	op        condOp
+	val       T
+	then      any
+	els       any
 }
 
 // Then specifies what to render when true

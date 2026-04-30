@@ -231,18 +231,18 @@ func main() {
 		Hex(0xFFFF44), Hex(0xAA88FF), Hex(0xFF6688), Hex(0x88AAFF), Hex(0xFFAA88),
 	}
 
-	effectLabels := make([]any, 0, len(effects))
+	effectLabels := make([]Component, 0, len(effects))
 	for i := range effects {
 		effectLabels = append(effectLabels, Text(&labels[i]).Style(Style{FG: labelColors[i]}))
 	}
 
 	// declarative screen effects, reactive via If
-	screenEffects := make([]any, len(effects))
+	screenEffects := make([]Component, len(effects))
 	for i := range effects {
 		screenEffects[i] = If(&effects[i].active).Then(ScreenEffect(effects[i].effect))
 	}
 
-	rightPanel := append([]any{
+	rightPanel := append([]Component{
 		Text("Effects").Style(Style{FG: Hex(0xCCCCCC), Attr: AttrBold}),
 		SpaceH(1),
 	}, effectLabels...)
@@ -250,8 +250,8 @@ func main() {
 	bgStyle := Style{FG: Hex(0xCCCCCC), Fill: Hex(0x1A1A2E)}
 
 	// wide gradient row builder
-	gradientRow := func(startR, startG, startB, endR, endG, endB uint8, cols int) []any {
-		children := make([]any, cols)
+	gradientRow := func(startR, startG, startB, endR, endG, endB uint8, cols int) []Component {
+		children := make([]Component, cols)
 		for i := range cols {
 			t := float64(i) / float64(cols-1)
 			r := uint8(float64(startR) + t*(float64(endR)-float64(startR)))
@@ -263,7 +263,7 @@ func main() {
 	}
 
 	// build the view tree with screen effects declared inline
-	viewChildren := []any{
+	viewChildren := []Component{
 		VBox.CascadeStyle(&bgStyle).Grow(1)(
 			// header
 			HBox.Fill(Hex(0x16213E))(

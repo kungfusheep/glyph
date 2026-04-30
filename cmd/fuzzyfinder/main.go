@@ -41,7 +41,7 @@ func main() {
 	app.SetView(
 		VBox(
 			FilterList(&packages, func(p *Pkg) string { return p.Name }).
-				Render(func(p *Pkg) any {
+				Render(func(p *Pkg) Component {
 					return HBox.Gap(2)(
 						Text(&p.Name).Bold(),
 						Text(&p.Desc).FG(BrightBlack),

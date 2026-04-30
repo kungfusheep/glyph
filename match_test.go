@@ -8,9 +8,9 @@ import (
 func TestMatchGtFirstMatchWins(t *testing.T) {
 	cpu := 95.0
 	m := Match(&cpu,
-		Gt(90.0, "CRITICAL"),
-		Gt(70.0, "WARNING"),
-	).Default("OK")
+		Gt(90.0, Text("CRITICAL")),
+		Gt(70.0, Text("WARNING")),
+	).Default(Text("OK"))
 	idx := m.getMatchIndex()
 	if idx != 0 {
 		t.Errorf("expected match index 0 for 95 > 90, got %d", idx)
@@ -20,9 +20,9 @@ func TestMatchGtFirstMatchWins(t *testing.T) {
 func TestMatchGtSecondCase(t *testing.T) {
 	cpu := 75.0
 	m := Match(&cpu,
-		Gt(90.0, "CRITICAL"),
-		Gt(70.0, "WARNING"),
-	).Default("OK")
+		Gt(90.0, Text("CRITICAL")),
+		Gt(70.0, Text("WARNING")),
+	).Default(Text("OK"))
 	idx := m.getMatchIndex()
 	if idx != 1 {
 		t.Errorf("expected match index 1 for 75 > 70, got %d", idx)
@@ -32,22 +32,22 @@ func TestMatchGtSecondCase(t *testing.T) {
 func TestMatchFallsToElse(t *testing.T) {
 	cpu := 50.0
 	m := Match(&cpu,
-		Gt(90.0, "CRITICAL"),
-		Gt(70.0, "WARNING"),
-	).Default("OK")
+		Gt(90.0, Text("CRITICAL")),
+		Gt(70.0, Text("WARNING")),
+	).Default(Text("OK"))
 	idx := m.getMatchIndex()
 	if idx != -1 {
 		t.Errorf("expected match index -1 (else), got %d", idx)
 	}
-	if m.getDefaultNode() != "OK" {
-		t.Errorf("expected default node 'OK', got %v", m.getDefaultNode())
+	if m.getDefaultNode() == nil {
+		t.Errorf("expected default node, got nil")
 	}
 }
 
 func TestMatchNoElseNoMatch(t *testing.T) {
 	cpu := 50.0
 	m := Match(&cpu,
-		Gt(90.0, "CRITICAL"),
+		Gt(90.0, Text("CRITICAL")),
 	)
 	idx := m.getMatchIndex()
 	if idx != -1 {
@@ -65,20 +65,20 @@ func TestMatchAllOperators(t *testing.T) {
 		m    *MatchNode[int]
 		want int
 	}{
-		{"Gt match", 10, Match(&[]int{10}[0], Gt(5, "yes")), 0},
-		{"Gt no match", 3, Match(&[]int{3}[0], Gt(5, "yes")), -1},
-		{"Lt match", 3, Match(&[]int{3}[0], Lt(5, "yes")), 0},
-		{"Lt no match", 10, Match(&[]int{10}[0], Lt(5, "yes")), -1},
-		{"Gte match equal", 5, Match(&[]int{5}[0], Gte(5, "yes")), 0},
-		{"Gte match above", 6, Match(&[]int{6}[0], Gte(5, "yes")), 0},
-		{"Gte no match", 4, Match(&[]int{4}[0], Gte(5, "yes")), -1},
-		{"Lte match equal", 5, Match(&[]int{5}[0], Lte(5, "yes")), 0},
-		{"Lte match below", 4, Match(&[]int{4}[0], Lte(5, "yes")), 0},
-		{"Lte no match", 6, Match(&[]int{6}[0], Lte(5, "yes")), -1},
-		{"Eq match", 5, Match(&[]int{5}[0], Eq(5, "yes")), 0},
-		{"Eq no match", 6, Match(&[]int{6}[0], Eq(5, "yes")), -1},
-		{"Ne match", 6, Match(&[]int{6}[0], Ne(5, "yes")), 0},
-		{"Ne no match", 5, Match(&[]int{5}[0], Ne(5, "yes")), -1},
+		{"Gt match", 10, Match(&[]int{10}[0], Gt(5, Text("yes"))), 0},
+		{"Gt no match", 3, Match(&[]int{3}[0], Gt(5, Text("yes"))), -1},
+		{"Lt match", 3, Match(&[]int{3}[0], Lt(5, Text("yes"))), 0},
+		{"Lt no match", 10, Match(&[]int{10}[0], Lt(5, Text("yes"))), -1},
+		{"Gte match equal", 5, Match(&[]int{5}[0], Gte(5, Text("yes"))), 0},
+		{"Gte match above", 6, Match(&[]int{6}[0], Gte(5, Text("yes"))), 0},
+		{"Gte no match", 4, Match(&[]int{4}[0], Gte(5, Text("yes"))), -1},
+		{"Lte match equal", 5, Match(&[]int{5}[0], Lte(5, Text("yes"))), 0},
+		{"Lte match below", 4, Match(&[]int{4}[0], Lte(5, Text("yes"))), 0},
+		{"Lte no match", 6, Match(&[]int{6}[0], Lte(5, Text("yes"))), -1},
+		{"Eq match", 5, Match(&[]int{5}[0], Eq(5, Text("yes"))), 0},
+		{"Eq no match", 6, Match(&[]int{6}[0], Eq(5, Text("yes"))), -1},
+		{"Ne match", 6, Match(&[]int{6}[0], Ne(5, Text("yes"))), 0},
+		{"Ne no match", 5, Match(&[]int{5}[0], Ne(5, Text("yes"))), -1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,8 +94,8 @@ func TestMatchWhere(t *testing.T) {
 	t.Run("Where predicate matches", func(t *testing.T) {
 		val := 42
 		m := Match(&val,
-			Where(func(v int) bool { return v%2 == 0 }, "EVEN"),
-		).Default("ODD")
+			Where(func(v int) bool { return v%2 == 0 }, Text("EVEN")),
+		).Default(Text("ODD"))
 		if m.getMatchIndex() != 0 {
 			t.Error("expected Where to match for even number")
 		}
@@ -104,8 +104,8 @@ func TestMatchWhere(t *testing.T) {
 	t.Run("Where predicate no match falls through", func(t *testing.T) {
 		val := 41
 		m := Match(&val,
-			Where(func(v int) bool { return v%2 == 0 }, "EVEN"),
-		).Default("ODD")
+			Where(func(v int) bool { return v%2 == 0 }, Text("EVEN")),
+		).Default(Text("ODD"))
 		if m.getMatchIndex() != -1 {
 			t.Error("expected Where to not match for odd number")
 		}
@@ -115,8 +115,8 @@ func TestMatchWhere(t *testing.T) {
 func TestMatchWhereWithString(t *testing.T) {
 	name := "admin:root"
 	m := Match(&name,
-		Where(func(s string) bool { return strings.HasPrefix(s, "admin:") }, "ADMIN"),
-	).Default("USER")
+		Where(func(s string) bool { return strings.HasPrefix(s, "admin:") }, Text("ADMIN")),
+	).Default(Text("USER"))
 	if m.getMatchIndex() != 0 {
 		t.Error("expected Where to match admin prefix")
 	}
@@ -129,9 +129,9 @@ func TestMatchWhereWithStruct(t *testing.T) {
 	}
 	u := user{Role: "admin", Active: true}
 	m := Match(&u,
-		Where(func(u user) bool { return u.Role == "admin" && u.Active }, "ADMIN_PANEL"),
-		Where(func(u user) bool { return !u.Active }, "DISABLED"),
-	).Default("PROFILE")
+		Where(func(u user) bool { return u.Role == "admin" && u.Active }, Text("ADMIN_PANEL")),
+		Where(func(u user) bool { return !u.Active }, Text("DISABLED")),
+	).Default(Text("PROFILE"))
 	if m.getMatchIndex() != 0 {
 		t.Error("expected first Where to match active admin")
 	}
@@ -151,9 +151,9 @@ func TestMatchWhereWithStruct(t *testing.T) {
 func TestMatchDynamic(t *testing.T) {
 	cpu := 95.0
 	m := Match(&cpu,
-		Gt(90.0, "CRITICAL"),
-		Gt(70.0, "WARNING"),
-	).Default("OK")
+		Gt(90.0, Text("CRITICAL")),
+		Gt(70.0, Text("WARNING")),
+	).Default(Text("OK"))
 	if m.getMatchIndex() != 0 {
 		t.Error("expected CRITICAL for 95")
 	}
@@ -168,7 +168,6 @@ func TestMatchDynamic(t *testing.T) {
 		t.Error("expected else for 50")
 	}
 }
-
 
 func TestMatchRendersInVBox(t *testing.T) {
 	cpu := 95.0
@@ -290,6 +289,73 @@ func TestMatchInHBox(t *testing.T) {
 	}
 }
 
+func TestMatchMixedComponentBranchesRender(t *testing.T) {
+	cpu := 95.0
+	view := VBox(
+		Text("CPU"),
+		Match(&cpu,
+			Gt(90.0, HBox(Text("CRIT"), Text("ICAL"))),
+			Gt(70.0, Text("WARNING")),
+		).Default(VBox(Text("O"), Text("K"))),
+	)
+
+	tmpl := Build(view)
+	buf := NewBuffer(20, 5)
+	tmpl.Execute(buf, 20, 5)
+
+	line := extractLine(buf, 1, 10)
+	if line != "CRITICAL  " {
+		t.Errorf("expected HBox branch to render CRITICAL, got %q", line)
+	}
+
+	cpu = 50.0
+	buf.Clear()
+	tmpl.Execute(buf, 20, 5)
+
+	line = extractLine(buf, 1, 5)
+	if line != "O    " {
+		t.Errorf("expected default VBox first row, got %q", line)
+	}
+	line = extractLine(buf, 2, 5)
+	if line != "K    " {
+		t.Errorf("expected default VBox second row, got %q", line)
+	}
+}
+
+func TestMatchScalarBranchesDriveHeight(t *testing.T) {
+	score := 95
+	tmpl := Build(VBox.Height(
+		Match(&score,
+			Gt(90, int16(3)),
+			Gt(70, int16(2)),
+		).Default(int16(1)),
+	)(
+		Text("one"),
+		Text("two"),
+		Text("three"),
+	))
+	buf := NewBuffer(20, 5)
+
+	tmpl.Execute(buf, 20, 5)
+	if got := tmpl.geom[0].H; got != 3 {
+		t.Errorf("score=95: got H=%d, want 3", got)
+	}
+
+	score = 75
+	buf.Clear()
+	tmpl.Execute(buf, 20, 5)
+	if got := tmpl.geom[0].H; got != 2 {
+		t.Errorf("score=75: got H=%d, want 2", got)
+	}
+
+	score = 50
+	buf.Clear()
+	tmpl.Execute(buf, 20, 5)
+	if got := tmpl.geom[0].H; got != 1 {
+		t.Errorf("score=50: got H=%d, want 1", got)
+	}
+}
+
 func TestMatchWhereRendersInTemplate(t *testing.T) {
 	name := "admin:root"
 	view := VBox(
@@ -328,7 +394,7 @@ func TestMatchInsideForEach(t *testing.T) {
 	}
 
 	view := VBox(
-		ForEach(&items, func(it *item) any {
+		ForEach(&items, func(it *item) Component {
 			return Match(&it.Score,
 				Gt(90.0, Text("CRITICAL")),
 				Gt(70.0, Text("WARNING")),
@@ -358,9 +424,9 @@ func TestMatchInsideForEach(t *testing.T) {
 func TestMatchStringEq(t *testing.T) {
 	status := "error"
 	m := Match(&status,
-		Eq("loading", "SPINNER"),
-		Eq("error", "ERROR_VIEW"),
-	).Default("CONTENT")
+		Eq("loading", Text("SPINNER")),
+		Eq("error", Text("ERROR_VIEW")),
+	).Default(Text("CONTENT"))
 	if m.getMatchIndex() != 1 {
 		t.Errorf("expected index 1 for Eq('error'), got %d", m.getMatchIndex())
 	}
@@ -379,10 +445,10 @@ func TestMatchStringEq(t *testing.T) {
 func TestMatchMixedOperators(t *testing.T) {
 	val := 5
 	m := Match(&val,
-		Eq(0, "ZERO"),
-		Lt(0, "NEGATIVE"),
-		Gt(10, "HIGH"),
-	).Default("NORMAL")
+		Eq(0, Text("ZERO")),
+		Lt(0, Text("NEGATIVE")),
+		Gt(10, Text("HIGH")),
+	).Default(Text("NORMAL"))
 	if m.getMatchIndex() != -1 {
 		t.Errorf("expected else for 5, got %d", m.getMatchIndex())
 	}

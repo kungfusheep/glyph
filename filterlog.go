@@ -61,7 +61,7 @@ func FilterLog(r io.Reader) *FilterLogC {
 }
 
 // toTemplate returns the template tree for compilation.
-func (fl *FilterLogC) toTemplate() any {
+func (fl *FilterLogC) toTemplate() Component {
 	fl.input.placeholder = fl.placeholder
 	// propagate focus state for cursor visibility
 	if fl.manager != nil {
@@ -69,7 +69,7 @@ func (fl *FilterLogC) toTemplate() any {
 		fl.input.manager = fl.manager
 	}
 
-	children := []any{
+	children := []Component{
 		HBox(
 			Text("> ").Bold(),
 			fl.input,
