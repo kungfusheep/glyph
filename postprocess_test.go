@@ -938,9 +938,9 @@ func TestSESpinGlow(t *testing.T) {
 		t.Error("SESpinGlow: default palette should still tint surrounding cells")
 	}
 
-	// rim side cells must not be attenuated relative to top/bottom cells.
-	// A prior compensation branch mixed full-block side cells 50/50 with
-	// the halo background, making vertical rims visibly dimmer in terminals.
+	// rim side cells are full-cell geometry, so they paint through BG while
+	// top/bottom keep half-block FG strokes. The side tint should still be full
+	// strength; the old foreground-block path made opacity handoff visibly uneven.
 	buf = NewBuffer(40, 20)
 	rimBG := RGB(26, 26, 26)
 	grey := RGB(200, 200, 200)
@@ -954,11 +954,11 @@ func TestSESpinGlow(t *testing.T) {
 		Apply(buf, PostContext{Width: 40, Height: 20, DefaultFG: grey, DefaultBG: rimBG})
 	side := buf.Get(ref.X+ref.W, ref.Y+ref.H/2)
 	top := buf.Get(ref.X+ref.W/2, ref.Y-1)
-	if side.Rune != '█' {
-		t.Fatalf("SESpinGlow rim side rune = %q, want █", side.Rune)
+	if side.Rune != ' ' {
+		t.Fatalf("SESpinGlow rim side rune = %q, want space-backed BG cell", side.Rune)
 	}
-	if side.Style.FG != tint {
-		t.Errorf("SESpinGlow rim side FG = %+v, want full tint %+v", side.Style.FG, tint)
+	if side.Style.BG != tint {
+		t.Errorf("SESpinGlow rim side BG = %+v, want full tint %+v", side.Style.BG, tint)
 	}
 	if top.Style.FG != tint {
 		t.Errorf("SESpinGlow rim top FG = %+v, want full tint %+v", top.Style.FG, tint)
@@ -968,6 +968,51 @@ func TestSESpinGlow(t *testing.T) {
 	}
 	if top.Style.BG == rimBG {
 		t.Errorf("SESpinGlow top rim BG should receive halo colour behind half-block; got original BG %+v", rimBG)
+	}
+
+	buf = NewBuffer(40, 20)
+	for y := range 20 {
+		for x := range 40 {
+			buf.Set(x, y, Cell{Rune: 'X', Style: Style{FG: grey, BG: rimBG}})
+		}
+	}
+	fadedRef := ref
+	fadedRef.Opacity = 0
+	fadedRef.opacitySet = true
+	SESpinGlow(&fadedRef, tint).Strength(1).Opacity(1).Radius(8).Speed(0).Rim(true).
+		Apply(buf, PostContext{Width: 40, Height: 20, DefaultFG: grey, DefaultBG: rimBG})
+	side = buf.Get(ref.X+ref.W, ref.Y+ref.H/2)
+	if side.Rune != 'X' || side.Style.FG != grey || side.Style.BG != rimBG {
+		t.Fatalf("SESpinGlow should not paint when target ref opacity is zero, got %+v", side)
+	}
+
+	// OpacityMode should be configurable for rim handoff. Default paint mode
+	// hands back to backing runes below its higher threshold; smooth mode keeps
+	// the rim rune at the same opacity.
+	buf = NewBuffer(40, 20)
+	for y := range 20 {
+		for x := range 40 {
+			buf.Set(x, y, Cell{Rune: 'X', Style: Style{FG: grey, BG: rimBG}})
+		}
+	}
+	SESpinGlow(&ref, tint).Strength(0).Opacity(0.5).Radius(8).Speed(0).Rim(true).
+		Apply(buf, PostContext{Width: 40, Height: 20, DefaultFG: grey, DefaultBG: rimBG})
+	side = buf.Get(ref.X+ref.W, ref.Y+ref.H/2)
+	if side.Rune != 'X' {
+		t.Fatalf("SESpinGlow default rim opacity mode rune = %q, want backing X", side.Rune)
+	}
+
+	buf = NewBuffer(40, 20)
+	for y := range 20 {
+		for x := range 40 {
+			buf.Set(x, y, Cell{Rune: 'X', Style: Style{FG: grey, BG: rimBG}})
+		}
+	}
+	SESpinGlow(&ref, tint).Strength(0).Opacity(0.5).Radius(8).Speed(0).Rim(true).OpacityMode(OpacitySmooth).
+		Apply(buf, PostContext{Width: 40, Height: 20, DefaultFG: grey, DefaultBG: rimBG})
+	top = buf.Get(ref.X+ref.W/2, ref.Y-1)
+	if top.Rune != '▄' {
+		t.Fatalf("SESpinGlow smooth rim opacity mode top rune = %q, want rim ▄", top.Rune)
 	}
 
 	// rotation: colour positions around the ring shift with time. with a
@@ -997,5 +1042,25 @@ func TestSESpinGlow(t *testing.T) {
 	SESpinGlow(nil).Apply(buf, PostContext{Width: 40, Height: 20})
 	if buf.Get(0, 0).Style.FG.R != 200 {
 		t.Error("SESpinGlow(nil): should not mutate the buffer")
+	}
+}
+
+func TestSESpinGlowPhaseUsesFrameDelta(t *testing.T) {
+	phase := &spinGlowPhase{}
+
+	// A compiled SpinGlow may first become active long after app startup.
+	// Animated Speed must advance from the local frame delta, not multiply
+	// the new speed by total app lifetime.
+	if got := phase.advance(PostContext{Time: 60 * time.Second}, 2.2); got != 0 {
+		t.Fatalf("initial phase = %v, want 0", got)
+	}
+
+	got := phase.advance(PostContext{
+		Time:  60*time.Second + 16*time.Millisecond,
+		Delta: 16 * time.Millisecond,
+	}, 4.2)
+	want := 0.016 * 4.2
+	if math.Abs(got-want) > 0.0001 {
+		t.Fatalf("phase after speed change = %v, want %v", got, want)
 	}
 }

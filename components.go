@@ -86,6 +86,7 @@ type VBoxC struct {
 	localStylePtr    *Style
 	localStyleCond   any
 	opacity          dynFloat64
+	opacityMode      OpacityMode
 	children         []any
 }
 
@@ -134,6 +135,15 @@ func (f VBoxFn) Opacity(o any) VBoxFn {
 	return func(children ...any) VBoxC {
 		v := f(children...)
 		v.opacity.set(o)
+		return v
+	}
+}
+
+// OpacityMode sets how rune ownership hands off during opacity fades.
+func (f VBoxFn) OpacityMode(mode OpacityMode) VBoxFn {
+	return func(children ...any) VBoxC {
+		v := f(children...)
+		v.opacityMode = mode
 		return v
 	}
 }
@@ -420,6 +430,7 @@ type HBoxC struct {
 	localStylePtr    *Style
 	localStyleCond   any
 	opacity          dynFloat64
+	opacityMode      OpacityMode
 	children         []any
 }
 
@@ -468,6 +479,15 @@ func (f HBoxFn) Opacity(o any) HBoxFn {
 	return func(children ...any) HBoxC {
 		h := f(children...)
 		h.opacity.set(o)
+		return h
+	}
+}
+
+// OpacityMode sets how rune ownership hands off during opacity fades.
+func (f HBoxFn) OpacityMode(mode OpacityMode) HBoxFn {
+	return func(children ...any) HBoxC {
+		h := f(children...)
+		h.opacityMode = mode
 		return h
 	}
 }
@@ -758,14 +778,16 @@ func Widget(
 // ============================================================================
 
 type TextC struct {
-	content   any // string or *string
-	style     Style
-	width     int16 // explicit width (0 = content-sized)
-	widthPtr  *int16
-	widthCond any
-	styleDyn  any // *Style, conditionNode, or tweenNode for whole style
-	fgDyn     any // *Color, conditionNode, or tweenNode for FG
-	bgDyn     any // *Color, conditionNode, or tweenNode for BG
+	content     any // string or *string
+	style       Style
+	width       int16 // explicit width (0 = content-sized)
+	widthPtr    *int16
+	widthCond   any
+	styleDyn    any // *Style, conditionNode, or tweenNode for whole style
+	fgDyn       any // *Color, conditionNode, or tweenNode for FG
+	bgDyn       any // *Color, conditionNode, or tweenNode for BG
+	opacity     dynFloat64
+	opacityMode OpacityMode
 }
 
 // Text creates a text display component.
@@ -817,6 +839,19 @@ func (t TextC) BG(c any) TextC {
 	case tweenNode:
 		t.bgDyn = val
 	}
+	return t
+}
+
+// Opacity sets the text opacity (0.0 = backing cell, 1.0 = fully visible).
+// Accepts float64, *float64, conditionNode, or tweenNode.
+func (t TextC) Opacity(o any) TextC {
+	t.opacity.set(o)
+	return t
+}
+
+// OpacityMode sets how rune ownership hands off during opacity fades.
+func (t TextC) OpacityMode(mode OpacityMode) TextC {
+	t.opacityMode = mode
 	return t
 }
 
@@ -1818,16 +1853,20 @@ const (
 )
 
 type OverlayC struct {
-	centered   bool
-	backdrop   bool
-	x, y       int
-	width      int
-	height     int
-	backdropFG Color
-	bg         Color
-	anchor     *NodeRef
-	anchorPos  AnchorPosition
-	children   []any
+	centered    bool
+	backdrop    bool
+	x, y        int
+	offsetX     any
+	offsetY     any
+	width       int
+	height      int
+	backdropFG  Color
+	bg          Color
+	opacity     dynFloat64
+	opacityMode OpacityMode
+	anchor      *NodeRef
+	anchorPos   AnchorPosition
+	children    []any
 }
 
 type OverlayFn func(children ...any) OverlayC
@@ -1860,6 +1899,17 @@ func (f OverlayFn) At(x, y int) OverlayFn {
 	}
 }
 
+// Offset translates the overlay from its resolved position. Accepts int, int16,
+// *int16, conditionNode, or tweenNode for each axis.
+func (f OverlayFn) Offset(x, y any) OverlayFn {
+	return func(children ...any) OverlayC {
+		o := f(children...)
+		o.offsetX = x
+		o.offsetY = y
+		return o
+	}
+}
+
 // Size sets a fixed width and height.
 func (f OverlayFn) Size(w, h int) OverlayFn {
 	return func(children ...any) OverlayC {
@@ -1876,6 +1926,25 @@ func (f OverlayFn) BG(c Color) OverlayFn {
 		o := f(children...)
 		o.bg = c
 		return o
+	}
+}
+
+// Opacity sets the overlay opacity (0.0 = backing cells, 1.0 = fully visible).
+// Accepts float64, *float64, conditionNode, or tweenNode.
+func (f OverlayFn) Opacity(o any) OverlayFn {
+	return func(children ...any) OverlayC {
+		ov := f(children...)
+		ov.opacity.set(o)
+		return ov
+	}
+}
+
+// OpacityMode sets how rune ownership hands off during opacity fades.
+func (f OverlayFn) OpacityMode(mode OpacityMode) OverlayFn {
+	return func(children ...any) OverlayC {
+		ov := f(children...)
+		ov.opacityMode = mode
+		return ov
 	}
 }
 

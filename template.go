@@ -69,6 +69,11 @@ type ChildSize struct {
 // Rect represents a positioned rectangle.
 type Rect struct {
 	X, Y, W, H int
+	// Opacity is the effective rendered opacity for this node after inherited
+	// container/overlay opacity has been applied. Effects that target a NodeRef
+	// can use it to fade with the node they are attached to.
+	Opacity    float64
+	opacitySet bool
 }
 
 // NodeRef holds a node's rendered screen bounds, populated each frame after layout.
@@ -110,6 +115,8 @@ type Template struct {
 	// Style inheritance - current inherited style during render
 	inheritedStyle *Style
 	inheritedFill  Color // cascades through nested containers
+	refOpacity     float64
+	refOpacitySet  bool
 
 	// vertical clip: maximum Y coordinate for rendering (exclusive, 0 = no clip)
 	clipMaxY int16
@@ -479,6 +486,7 @@ type Op struct {
 	Margin       [4]int16    // outer margin: top, right, bottom, left
 	Padding      [4]int16    // inner padding: top, right, bottom, left
 	NodeRef      *NodeRef    // if set, populated with rendered screen bounds each frame
+	OpacityMode  OpacityMode // rune handoff strategy when OpDyn.Opacity is set
 
 	// kind-specific data — type-assert based on Kind.
 	// we use a Kind switch + type assertion instead of interface dispatch because
@@ -687,6 +695,8 @@ func anyToInt8(v any) int8 {
 
 func (t *Template) compileDynInt16(v any, elemBase unsafe.Pointer, elemSize uintptr) *int16 {
 	switch c := v.(type) {
+	case *int16:
+		return c
 	case conditionNode:
 		return t.compileCondInt16(c)
 	case tweenNode:
@@ -2375,14 +2385,19 @@ type opTextInput struct {
 }
 
 type opOverlay struct {
-	centered   bool
-	x, y       int16
-	backdrop   bool
-	backdropFG Color
-	bg         Color
-	childTmpl  *Template
-	anchor     *NodeRef
-	anchorPos  AnchorPosition
+	centered     bool
+	x, y         int16
+	offsetX      *int16
+	offsetY      *int16
+	backdrop     bool
+	backdropFG   Color
+	bg           Color
+	opacity      *float64
+	opacityArmed *bool
+	opacityMode  OpacityMode
+	childTmpl    *Template
+	anchor       *NodeRef
+	anchorPos    AnchorPosition
 }
 
 type opTable struct {
@@ -3097,6 +3112,7 @@ func (t *Template) compileContainer(children []any, gap int8, isRow bool, f flex
 		CascadeStyle: inheritStyle,
 		Margin:       margin,
 		Padding:      padding,
+		OpacityMode:  OpacitySmooth,
 	}
 
 	if f.widthPtr != nil || f.heightPtr != nil || f.flexGrowPtr != nil || f.percentWidthPtr != nil {
@@ -3121,20 +3137,58 @@ func (t *Template) compileContainer(children []any, gap int8, isRow bool, f flex
 	t.ops[idx].ChildStart = childStart
 	t.ops[idx].ChildEnd = childEnd
 
-	// Check if any direct child has explicit fixed width (bubble up for layout decisions)
-	// Only explicit Width counts - not content-based width like text
-	for i := childStart; i < childEnd; i++ {
-		childOp := &t.ops[i]
-		if childOp.Parent != idx {
-			continue
+	// Bubble finite intrinsic width up for row layout decisions. A nested HBox
+	// made only from finite children (for example Text + Text) should not
+	// become implicit flex just because it is a container. VBox still defaults
+	// to filling the finite width it is given unless FitContent is explicit.
+	if isRow {
+		hasFiniteChild := false
+		hasFlexibleChild := false
+		for i := childStart; i < childEnd; i++ {
+			childOp := &t.ops[i]
+			if childOp.Parent != idx {
+				continue
+			}
+			if t.opHasFiniteIntrinsicWidth(childOp) {
+				hasFiniteChild = true
+			} else {
+				hasFlexibleChild = true
+			}
 		}
-		if childOp.Width > 0 || (childOp.Dyn != nil && childOp.Dyn.Width != nil) || childOp.ContentSized {
+		if hasFiniteChild && !hasFlexibleChild {
 			t.ops[idx].ContentSized = true
-			break
+		}
+	} else {
+		for i := childStart; i < childEnd; i++ {
+			childOp := &t.ops[i]
+			if childOp.Parent != idx {
+				continue
+			}
+			if t.opBubblesFiniteWidth(childOp) {
+				t.ops[idx].ContentSized = true
+				break
+			}
 		}
 	}
 
 	return idx
+}
+
+func (t *Template) opBubblesFiniteWidth(op *Op) bool {
+	return op.width() > 0 || (op.Dyn != nil && op.Dyn.Width != nil) || op.FitContent || op.ContentSized
+}
+
+func (t *Template) opHasFiniteIntrinsicWidth(op *Op) bool {
+	if t.opBubblesFiniteWidth(op) {
+		return true
+	}
+	switch op.Kind {
+	case OpText, OpCounter, OpVRule, OpSpinner, OpTabs, OpTreeView:
+		return true
+	case OpSpacer:
+		return op.width() > 0
+	}
+	return false
 }
 
 func (t *Template) compileCondition(cond conditionNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
@@ -3436,6 +3490,7 @@ func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsaf
 	if v.nodeRef != nil {
 		t.ops[idx].NodeRef = v.nodeRef
 	}
+	t.ops[idx].OpacityMode = v.opacityMode
 	if v.gapPtr != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3473,7 +3528,7 @@ func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsaf
 		}
 		t.ops[idx].Dyn.Opacity = v.opacity.ptr
 		t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
-	} else if v.opacity.val != 0 {
+	} else if v.opacity.isSet {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
@@ -3518,6 +3573,7 @@ func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsaf
 	if v.nodeRef != nil {
 		t.ops[idx].NodeRef = v.nodeRef
 	}
+	t.ops[idx].OpacityMode = v.opacityMode
 	if v.gapPtr != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3555,7 +3611,7 @@ func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsaf
 		}
 		t.ops[idx].Dyn.Opacity = v.opacity.ptr
 		t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
-	} else if v.opacity.val != 0 {
+	} else if v.opacity.isSet {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
@@ -3606,11 +3662,12 @@ func (t *Template) compileTextC(v TextC, parent int16, depth int, elemBase unsaf
 	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, elemBase, elemSize)
 
 	idx := t.addOp(Op{
-		Kind:   OpText,
-		Parent: parent,
-		Width:  v.width,
-		Margin: v.style.margin,
-		Ext:    ext,
+		Kind:        OpText,
+		Parent:      parent,
+		Width:       v.width,
+		Margin:      v.style.margin,
+		OpacityMode: v.opacityMode,
+		Ext:         ext,
 	}, depth)
 	if v.widthCond != nil {
 		if t.ops[idx].Dyn == nil {
@@ -3622,6 +3679,20 @@ func (t *Template) compileTextC(v TextC, parent int16, depth int, elemBase unsaf
 			t.ops[idx].Dyn = &OpDyn{}
 		}
 		t.ops[idx].Dyn.Width = v.widthPtr
+	}
+	if v.opacity.dyn != nil {
+		v.opacity.compileArmed(t, elemBase, elemSize)
+		if t.ops[idx].Dyn == nil {
+			t.ops[idx].Dyn = &OpDyn{}
+		}
+		t.ops[idx].Dyn.Opacity = v.opacity.ptr
+		t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
+	} else if v.opacity.isSet {
+		if t.ops[idx].Dyn == nil {
+			t.ops[idx].Dyn = &OpDyn{}
+		}
+		val := v.opacity.val
+		t.ops[idx].Dyn.Opacity = &val
 	}
 	return idx
 }
@@ -3974,15 +4045,26 @@ func (t *Template) compileOverlayC(v OverlayC, parent int16, depth int) int16 {
 	}
 
 	ext := &opOverlay{
-		centered:   centered,
-		x:          int16(v.x),
-		y:          int16(v.y),
-		backdrop:   v.backdrop,
-		backdropFG: backdropFG,
-		bg:         v.bg,
-		childTmpl:  childTmpl,
-		anchor:     v.anchor,
-		anchorPos:  v.anchorPos,
+		centered:    centered,
+		x:           int16(v.x),
+		y:           int16(v.y),
+		offsetX:     t.compileOverlayOffset(v.offsetX),
+		offsetY:     t.compileOverlayOffset(v.offsetY),
+		backdrop:    v.backdrop,
+		backdropFG:  backdropFG,
+		bg:          v.bg,
+		opacityMode: v.opacityMode,
+		childTmpl:   childTmpl,
+		anchor:      v.anchor,
+		anchorPos:   v.anchorPos,
+	}
+	if v.opacity.dyn != nil {
+		v.opacity.compileArmed(t, nil, 0)
+		ext.opacity = v.opacity.ptr
+		ext.opacityArmed = v.opacity.armed
+	} else if v.opacity.isSet {
+		val := v.opacity.val
+		ext.opacity = &val
 	}
 
 	return t.addOp(Op{
@@ -3992,6 +4074,25 @@ func (t *Template) compileOverlayC(v OverlayC, parent int16, depth int) int16 {
 		Height: int16(v.height),
 		Ext:    ext,
 	}, depth)
+}
+
+func (t *Template) compileOverlayOffset(v any) *int16 {
+	switch val := v.(type) {
+	case nil:
+		return nil
+	case int16:
+		return &val
+	case int:
+		n := int16(val)
+		return &n
+	case *int16:
+		return val
+	case conditionNode:
+		return t.compileDynInt16(val, nil, 0)
+	case tweenNode:
+		return t.compileDynInt16(val, nil, 0)
+	}
+	return nil
 }
 
 func (t *Template) compileTabsC(v TabsC, parent int16, depth int) int16 {
@@ -4495,7 +4596,7 @@ func (t *Template) distributeWidths(screenW int16, elemBase unsafe.Pointer) {
 			intrinsicW := t.computeIntrinsicWidth(idx)
 			geom.W = intrinsicW
 		} else {
-			t.setOpWidth(op, geom, screenW, elemBase)
+			t.setOpWidth(idx, op, geom, screenW, elemBase)
 		}
 	}
 
@@ -4573,11 +4674,55 @@ func (t *Template) computeIntrinsicWidth(idx int16) int16 {
 		return op.Ext.(*opText).textWidth(nil) + op.marginH()
 	}
 
+	switch op.Kind {
+	case OpLeader:
+		w := op.width()
+		if w == 0 {
+			w = 20
+		}
+		return w + op.marginH()
+	case OpSparkline:
+		w := op.width()
+		if w == 0 {
+			w = int16(op.Ext.(*opSparkline).dataLen())
+		}
+		return w + op.marginH()
+	case OpCounter:
+		ext := op.Ext.(*opCounter)
+		var scratch [48]byte
+		b := append(scratch[:0], ext.prefix...)
+		b = strconv.AppendInt(b, int64(*ext.currentPtr), 10)
+		b = append(b, '/')
+		b = strconv.AppendInt(b, int64(*ext.totalPtr), 10)
+		return int16(len(b)) + op.marginH()
+	case OpSpinner:
+		return 1 + op.marginH()
+	case OpVRule:
+		return 1 + op.marginH()
+	case OpTabs:
+		ext := op.Ext.(*opTabs)
+		totalW := 0
+		for i, label := range ext.labels {
+			labelW := StringWidth(label)
+			switch ext.styleType {
+			case TabsStyleBox:
+				labelW += 4
+			case TabsStyleBracket:
+				labelW += 2
+			}
+			totalW += labelW
+			if i < len(ext.labels)-1 {
+				totalW += ext.gap
+			}
+		}
+		return int16(totalW) + op.marginH()
+	}
+
 	return op.marginH()
 }
 
 // setOpWidth sets a single op's width based on available space.
-func (t *Template) setOpWidth(op *Op, geom *Geom, availW int16, elemBase unsafe.Pointer) {
+func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemBase unsafe.Pointer) {
 	switch op.Kind {
 	case OpText:
 		if w := op.width(); w > 0 {
@@ -4780,6 +4925,11 @@ func (t *Template) setOpWidth(op *Op, geom *Geom, availW int16, elemBase unsafe.
 			geom.W = w
 		} else if pw := op.percentWidth(); pw > 0 {
 			geom.W = int16(float32(availW) * pw)
+		} else if op.FitContent || (op.Parent >= 0 && op.ContentSized && t.ops[op.Parent].Kind == OpContainer && t.ops[op.Parent].IsRow) {
+			geom.W = t.computeIntrinsicWidth(idx)
+			if availW > 0 && geom.W > availW {
+				geom.W = availW
+			}
 		} else {
 			geom.W = availW
 		}
@@ -4819,7 +4969,7 @@ func (t *Template) distributeVBoxChildWidths(idx int16, op *Op, availW int16, el
 			continue
 		}
 		childGeom := &t.geom[i]
-		t.setOpWidth(childOp, childGeom, availW, elemBase)
+		t.setOpWidth(i, childOp, childGeom, availW, elemBase)
 	}
 }
 
@@ -4872,12 +5022,12 @@ func (t *Template) distributeHBoxChildWidths(idx int16, op *Op, availW int16, el
 			totalFlex += fg
 			flexChildren = append(flexChildren, i)
 			flexGrowValues = append(flexGrowValues, fg)
-		} else if !effectiveOp.ContentSized && (effectiveOp.Kind == OpContainer || effectiveOp.Kind == OpJump) && effectiveOp.width() == 0 && effectiveOp.percentWidth() == 0 {
+		} else if !effectiveOp.FitContent && !effectiveOp.ContentSized && (effectiveOp.Kind == OpContainer || effectiveOp.Kind == OpJump) && effectiveOp.width() == 0 && effectiveOp.percentWidth() == 0 {
 			// Container/Jump without explicit width or fixed-content children - implicit flex
 			implicitFlexChildren = append(implicitFlexChildren, i)
 		} else {
 			// Non-flex child with explicit or content-based width
-			t.setOpWidth(childOp, childGeom, availW, elemBase)
+			t.setOpWidth(i, childOp, childGeom, availW, elemBase)
 			usedW += childGeom.W
 			if childGeom.W > 0 {
 				fixedWidthCount++
@@ -6246,6 +6396,193 @@ func (t *Template) effectiveStyle(s Style) Style {
 	return s
 }
 
+func clampOpacity(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func (t *Template) currentRefOpacity() float64 {
+	if !t.refOpacitySet {
+		return 1
+	}
+	return clampOpacity(t.refOpacity)
+}
+
+func refOpacity(ref *NodeRef) float64 {
+	if ref == nil || !ref.opacitySet {
+		return 1
+	}
+	return clampOpacity(ref.Opacity)
+}
+
+func (t *Template) opacityForOp(op *Op) (float64, bool) {
+	if op.Dyn == nil || op.Dyn.Opacity == nil {
+		return 1, false
+	}
+	if op.Dyn.OpacityArmed != nil {
+		*op.Dyn.OpacityArmed = true
+	}
+	return clampOpacity(*op.Dyn.Opacity), true
+}
+
+func (t *Template) snapshotRect(buf *Buffer, x, y, w, h int) []Cell {
+	if w <= 0 || h <= 0 {
+		return nil
+	}
+	cells := make([]Cell, w*h)
+	for cy := 0; cy < h; cy++ {
+		for cx := 0; cx < w; cx++ {
+			cells[cy*w+cx] = buf.Get(x+cx, y+cy)
+		}
+	}
+	return cells
+}
+
+func (t *Template) composeOpacityRect(buf *Buffer, x, y, w, h int, backing []Cell, opacity float64, mode OpacityMode) {
+	if len(backing) == 0 || w <= 0 || h <= 0 || opacity >= 1 {
+		return
+	}
+	opacity = clampOpacity(opacity)
+	for cy := 0; cy < h; cy++ {
+		for cx := 0; cx < w; cx++ {
+			if !buf.InBounds(x+cx, y+cy) {
+				continue
+			}
+			back := backing[cy*w+cx]
+			if opacity <= 0 {
+				buf.SetFast(x+cx, y+cy, back)
+				continue
+			}
+			src := buf.Get(x+cx, y+cy)
+			buf.SetFast(x+cx, y+cy, composeOpacityCell(src, back, opacity, mode, cx, cy, buf.defaultStyle))
+		}
+	}
+}
+
+func composeOpacityCell(src, back Cell, opacity float64, mode OpacityMode, x, y int, defaultStyle Style) Cell {
+	opacity = clampOpacity(opacity)
+	if opacity <= 0 {
+		return back
+	}
+	if opacity >= 1 {
+		return src
+	}
+
+	hasSourceRune := cellHasRune(src)
+	hasBackingRune := cellHasRune(back)
+	sourceOwnsRune := opacitySourceOwnsRune(opacity, mode, x, y, hasSourceRune, hasBackingRune)
+	bg := blendOpacityColor(back.Style.BG, src.Style.BG, opacity, defaultStyle.BG)
+	result := back
+	if sourceOwnsRune {
+		result.Rune = src.Rune
+		result.Style.Attr = src.Style.Attr
+		target := bg
+		strength := opacity
+		if hasBackingRune {
+			threshold := opacityHandoffThreshold(mode, x, y, hasBackingRune)
+			if mode == OpacityPaint {
+				target = blendSourceRuneFG(src.Style.FG, back.Style.FG, threshold)
+			} else {
+				target = blendBackingRuneFG(back.Style.FG, bg, opacity, defaultStyle)
+			}
+			strength = opacityAboveHandoff(opacity, threshold)
+		}
+		result.Style.FG = blendSourceRuneFG(src.Style.FG, target, strength)
+	} else if mode == OpacityPaint && hasBackingRune {
+		result.Style.FG = blendSourceRuneFG(src.Style.FG, result.Style.FG, opacity)
+	} else {
+		result.Style.FG = blendBackingRuneFG(back.Style.FG, bg, opacity, defaultStyle)
+	}
+	result.Style.BG = bg
+	return result
+}
+
+func opacitySourceOwnsRune(opacity float64, mode OpacityMode, x, y int, hasSourceRune, hasBackingRune bool) bool {
+	if !hasSourceRune {
+		return false
+	}
+	if !hasBackingRune {
+		return opacity > 0
+	}
+	return opacity >= opacityHandoffThreshold(mode, x, y, hasBackingRune)
+}
+
+func opacityHandoffThreshold(mode OpacityMode, x, y int, hasBackingRune bool) float64 {
+	if !hasBackingRune {
+		return 0
+	}
+	if mode == OpacityPaint {
+		return 0.7
+	}
+	if mode == OpacityDither {
+		return 0.55 - 0.35*bayer4Threshold(x, y)
+	}
+	return 0.35
+}
+
+func opacityAboveHandoff(opacity, threshold float64) float64 {
+	if threshold <= 0 {
+		return opacity
+	}
+	return clampOpacity((opacity - threshold) / (1 - threshold))
+}
+
+func cellHasRune(c Cell) bool {
+	return c.Rune != 0 && c.Rune != ' '
+}
+
+func bayer4Threshold(x, y int) float64 {
+	matrix := [16]uint8{
+		0, 8, 2, 10,
+		12, 4, 14, 6,
+		3, 11, 1, 9,
+		15, 7, 13, 5,
+	}
+	idx := (y&3)*4 + (x & 3)
+	return (float64(matrix[idx]) + 0.5) / 16
+}
+
+func blendOpacityColor(back, src Color, opacity float64, fallback Color) Color {
+	if src.Mode == ColorDefault {
+		return back
+	}
+	if back.Mode == ColorDefault {
+		if fallback.Mode == ColorDefault {
+			return src
+		}
+		back = fallback
+	}
+	return LerpColor(back, src, opacity)
+}
+
+func blendSourceRuneFG(src, bg Color, opacity float64) Color {
+	if src.Mode == ColorDefault {
+		return bg
+	}
+	if bg.Mode == ColorDefault {
+		return src
+	}
+	return LerpColor(bg, src, opacity)
+}
+
+func blendBackingRuneFG(backFG, bg Color, opacity float64, defaultStyle Style) Color {
+	if backFG.Mode == ColorDefault {
+		backFG = defaultStyle.FG
+	}
+	if bg.Mode == ColorDefault {
+		return backFG
+	}
+	if backFG.Mode == ColorDefault {
+		return bg
+	}
+	return LerpColor(backFG, bg, opacity)
+}
+
 func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16) {
 	if idx < 0 || int(idx) >= len(t.ops) {
 		return
@@ -6280,14 +6617,26 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		raw := ext.resolve(t.elemBase)
 		text := applyTransform(raw, style.Transform)
 		x := int(absX)
+		drawW := int(maxW - (absX - globalX))
+		if drawW <= 0 {
+			return
+		}
 		if style.Align != AlignLeft {
 			alignW := op.width()
 			if alignW == 0 {
-				alignW = maxW
+				alignW = int16(drawW)
 			}
 			x += alignOffset(text, int(alignW), style.Align)
 		}
-		buf.WriteStringFast(x, int(absY), text, style, int(maxW))
+		opacity, hasOpacity := t.opacityForOp(op)
+		var backing []Cell
+		if hasOpacity && opacity < 1 {
+			backing = t.snapshotRect(buf, x, int(absY), drawW, 1)
+		}
+		buf.WriteStringFast(x, int(absY), text, style, drawW)
+		if hasOpacity && opacity < 1 {
+			t.composeOpacityRect(buf, x, int(absY), drawW, 1, backing, opacity, op.OpacityMode)
+		}
 
 	case OpTextBlock:
 		ext := op.Ext.(*opText)
@@ -6568,11 +6917,23 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		boxW := geom.W - op.marginH()
 		boxH := geom.H - op.marginV()
 
+		opacity, hasOpacity := t.opacityForOp(op)
+		effectiveRefOpacity := t.currentRefOpacity()
+		if hasOpacity {
+			effectiveRefOpacity *= opacity
+		}
 		if op.NodeRef != nil {
 			op.NodeRef.X = int(boxX)
 			op.NodeRef.Y = int(boxY)
 			op.NodeRef.W = int(boxW)
 			op.NodeRef.H = int(boxH)
+			op.NodeRef.Opacity = effectiveRefOpacity
+			op.NodeRef.opacitySet = true
+		}
+
+		var backing []Cell
+		if hasOpacity && opacity < 1 {
+			backing = t.snapshotRect(buf, int(boxX), int(boxY), int(boxW), int(boxH))
 		}
 
 		// Update inherited Fill - cascades through nested containers
@@ -6664,6 +7025,11 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 			t.clipMaxY = contentBottom
 		}
 
+		oldRefOpacity := t.refOpacity
+		oldRefOpacitySet := t.refOpacitySet
+		t.refOpacity = effectiveRefOpacity
+		t.refOpacitySet = true
+
 		// Render children with this container's position as their origin
 		// children's LocalX/Y already include margin+border offsets from layoutContainer
 		for i := op.ChildStart; i < op.ChildEnd; i++ {
@@ -6674,37 +7040,16 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 			t.renderOp(buf, i, absX, absY, contentW)
 		}
 
-		// apply opacity: lerp all cells toward fill/BG
-		if op.Dyn != nil && op.Dyn.Opacity != nil {
-			if op.Dyn.OpacityArmed != nil {
-				*op.Dyn.OpacityArmed = true
-			}
-			opacity := *op.Dyn.Opacity
-			if opacity < 1.0 {
-				fade := 1.0 - opacity
-				bg := fillColor
-				if bg.Mode == ColorDefault {
-					bg = Color{Mode: ColorRGB} // fade toward black if no fill
-				}
-				for y := int(boxY); y < int(boxY+boxH); y++ {
-					for x := int(boxX); x < int(boxX+boxW); x++ {
-						c := buf.Get(x, y)
-						if c.Style.FG.Mode != ColorDefault {
-							c.Style.FG = LerpColor(c.Style.FG, bg, fade)
-						}
-						if c.Style.BG.Mode != ColorDefault {
-							c.Style.BG = LerpColor(c.Style.BG, bg, fade)
-						}
-						buf.Set(x, y, c)
-					}
-				}
-			}
+		if hasOpacity && opacity < 1 {
+			t.composeOpacityRect(buf, int(boxX), int(boxY), int(boxW), int(boxH), backing, opacity, op.OpacityMode)
 		}
 
 		// Restore inherited style, fill, and clip
 		t.inheritedStyle = oldInheritedStyle
 		t.inheritedFill = oldInheritedFill
 		t.clipMaxY = oldClipMaxY
+		t.refOpacity = oldRefOpacity
+		t.refOpacitySet = oldRefOpacitySet
 
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
@@ -6815,7 +7160,13 @@ func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, glo
 	sub.pendingOverlays = sub.pendingOverlays[:0]
 	sub.pendingScreenEffects = sub.pendingScreenEffects[:0]
 	sub.runItemEvals(elemBase)
+	oldRefOpacity := sub.refOpacity
+	oldRefOpacitySet := sub.refOpacitySet
+	sub.refOpacity = t.currentRefOpacity()
+	sub.refOpacitySet = true
 	sub.render(buf, globalX, globalY, maxW)
+	sub.refOpacity = oldRefOpacity
+	sub.refOpacitySet = oldRefOpacitySet
 	t.pendingOverlays = append(t.pendingOverlays, sub.pendingOverlays...)
 	t.pendingScreenEffects = append(t.pendingScreenEffects, sub.pendingScreenEffects...)
 }
@@ -6863,14 +7214,26 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		raw := ext.resolve(elemBase)
 		text := applyTransform(raw, style.Transform)
 		x := int(absX)
+		drawW := int(maxW - (absX - globalX))
+		if drawW <= 0 {
+			return
+		}
 		if style.Align != AlignLeft {
 			alignW := op.width()
 			if alignW == 0 {
-				alignW = maxW
+				alignW = int16(drawW)
 			}
 			x += alignOffset(text, int(alignW), style.Align)
 		}
-		buf.WriteStringFast(x, int(absY), text, style, int(maxW))
+		opacity, hasOpacity := sub.opacityForOp(op)
+		var backing []Cell
+		if hasOpacity && opacity < 1 {
+			backing = sub.snapshotRect(buf, x, int(absY), drawW, 1)
+		}
+		buf.WriteStringFast(x, int(absY), text, style, drawW)
+		if hasOpacity && opacity < 1 {
+			sub.composeOpacityRect(buf, x, int(absY), drawW, 1, backing, opacity, op.OpacityMode)
+		}
 
 	case OpTextBlock:
 		ext := op.Ext.(*opText)
@@ -7080,6 +7443,24 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		boxW := geom.W - op.marginH()
 		boxH := geom.H - op.marginV()
 
+		opacity, hasOpacity := sub.opacityForOp(op)
+		effectiveRefOpacity := sub.currentRefOpacity()
+		if hasOpacity {
+			effectiveRefOpacity *= opacity
+		}
+		if op.NodeRef != nil {
+			op.NodeRef.X = int(boxX)
+			op.NodeRef.Y = int(boxY)
+			op.NodeRef.W = int(boxW)
+			op.NodeRef.H = int(boxH)
+			op.NodeRef.Opacity = effectiveRefOpacity
+			op.NodeRef.opacitySet = true
+		}
+		var backing []Cell
+		if hasOpacity && opacity < 1 {
+			backing = sub.snapshotRect(buf, int(boxX), int(boxY), int(boxW), int(boxH))
+		}
+
 		// Update inherited Fill - cascades through nested containers
 		oldInheritedFill := sub.inheritedFill
 		opFill := op.fill()
@@ -7161,6 +7542,11 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			contentW -= op.Border.PadH()
 		}
 
+		oldRefOpacity := sub.refOpacity
+		oldRefOpacitySet := sub.refOpacitySet
+		sub.refOpacity = effectiveRefOpacity
+		sub.refOpacitySet = true
+
 		// Recurse into children with this container's position as their origin
 		// children's LocalX/Y already include margin+border offsets
 		for i := op.ChildStart; i < op.ChildEnd; i++ {
@@ -7174,6 +7560,12 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		// Restore inherited style and fill
 		sub.inheritedStyle = oldInheritedStyle
 		sub.inheritedFill = oldInheritedFill
+		sub.refOpacity = oldRefOpacity
+		sub.refOpacitySet = oldRefOpacitySet
+
+		if hasOpacity && opacity < 1 {
+			sub.composeOpacityRect(buf, int(boxX), int(boxY), int(boxW), int(boxH), backing, opacity, op.OpacityMode)
+		}
 
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
@@ -7812,6 +8204,12 @@ func (t *Template) renderOverlay(buf *Buffer, op *Op, screenW, screenH int16) {
 		posX = ext.x
 		posY = ext.y
 	}
+	if ext.offsetX != nil {
+		posX += *ext.offsetX
+	}
+	if ext.offsetY != nil {
+		posY += *ext.offsetY
+	}
 
 	// Clamp to screen bounds
 	if posX < 0 {
@@ -7834,6 +8232,19 @@ func (t *Template) renderOverlay(buf *Buffer, op *Op, screenW, screenH int16) {
 		}
 	}
 
+	opacity := 1.0
+	hasOpacity := ext.opacity != nil
+	if hasOpacity {
+		if ext.opacityArmed != nil {
+			*ext.opacityArmed = true
+		}
+		opacity = clampOpacity(*ext.opacity)
+	}
+	var backing []Cell
+	if hasOpacity && opacity < 1 {
+		backing = t.snapshotRect(buf, int(posX), int(posY), int(overlayW), int(overlayH))
+	}
+
 	// Fill overlay content area with background color if set
 	if ext.bg.Mode != ColorDefault {
 		bgStyle := Style{BG: ext.bg}
@@ -7850,7 +8261,17 @@ func (t *Template) renderOverlay(buf *Buffer, op *Op, screenW, screenH int16) {
 	childTmpl.distributeWidths(overlayW, nil)
 	childTmpl.layout(overlayH)
 	childTmpl.distributeFlexGrow(overlayH)
+	oldChildRefOpacity := childTmpl.refOpacity
+	oldChildRefOpacitySet := childTmpl.refOpacitySet
+	childTmpl.refOpacity = t.currentRefOpacity() * opacity
+	childTmpl.refOpacitySet = true
 	childTmpl.render(buf, posX, posY, overlayW)
+	childTmpl.refOpacity = oldChildRefOpacity
+	childTmpl.refOpacitySet = oldChildRefOpacitySet
+
+	if hasOpacity && opacity < 1 {
+		t.composeOpacityRect(buf, int(posX), int(posY), int(overlayW), int(overlayH), backing, opacity, ext.opacityMode)
+	}
 
 	// bubble screen effects declared inside overlay up to the parent so they
 	// run as full-screen passes after all content (including this overlay) is rendered

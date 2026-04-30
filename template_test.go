@@ -5283,7 +5283,7 @@ func TestAnimate(t *testing.T) {
 				ScreenEffect(
 					SEVignette().Smooth().
 						Strength(
-							In(Animate.Duration(1*time.Millisecond).From(0.0)(0.88)).
+							In(0.88).
 								Out(Animate.Duration(200*time.Millisecond)(0.0)),
 						),
 				),
@@ -5439,6 +5439,11 @@ func TestAnimate(t *testing.T) {
 			}),
 		))
 		buf := NewBuffer(20, 4)
+		buf.defaultStyle = Style{FG: RGB(0, 0, 0), BG: RGB(0, 0, 0)}
+		render := func() {
+			buf.Clear()
+			tmpl.Execute(buf, 20, 4)
+		}
 		rowText := func(y int) string {
 			runes := make([]rune, 0, 4)
 			for x := 0; x < 4; x++ {
@@ -5447,20 +5452,20 @@ func TestAnimate(t *testing.T) {
 			return string(runes)
 		}
 
-		tmpl.Execute(buf, 20, 4)
-		tmpl.Execute(buf, 20, 4)
+		render()
+		render()
 
 		rows[0].Active = false
-		tmpl.Execute(buf, 20, 4)
+		render()
 		if got := rowText(0); got != "then" {
 			t.Fatalf("expected first row retained while exiting, got %q", got)
 		}
 		if got := rowText(1); got != "then" {
 			t.Fatalf("expected second row to stay on active branch, got %q", got)
 		}
-		tmpl.Execute(buf, 20, 4)
+		render()
 		time.Sleep(40 * time.Millisecond)
-		tmpl.Execute(buf, 20, 4)
+		render()
 		exitingFG := buf.Get(0, 0).Style.FG
 		siblingFG := buf.Get(0, 1).Style.FG
 		if exitingFG.R >= siblingFG.R {
@@ -5471,7 +5476,7 @@ func TestAnimate(t *testing.T) {
 		}
 
 		time.Sleep(100 * time.Millisecond)
-		tmpl.Execute(buf, 20, 4)
+		render()
 		if got := rowText(0); got != "else" {
 			t.Fatalf("expected first row to switch after exit lease, got %q", got)
 		}
@@ -5706,6 +5711,39 @@ func TestAnimate(t *testing.T) {
 		}
 	})
 
+	t.Run("Overlay offset can animate out", func(t *testing.T) {
+		active := true
+		tmpl := Build(VBox(
+			If(&active).Then(
+				Overlay.Centered().Offset(
+					int16(0),
+					In(int16(0)).Out(Animate.Duration(80*time.Millisecond)(int16(2))),
+				)(
+					Text("card"),
+				),
+			).Else(Text("done")),
+		))
+		buf := NewBuffer(20, 7)
+
+		tmpl.Execute(buf, 20, 7)
+		if got := buf.Get(8, 3).Rune; got != 'c' {
+			t.Fatalf("expected centered overlay, got %q", got)
+		}
+
+		active = false
+		tmpl.Execute(buf, 20, 7)
+		if got := buf.Get(8, 3).Rune; got != 'c' {
+			t.Fatalf("expected retained overlay during exit, got %q", got)
+		}
+
+		tmpl.Execute(buf, 20, 7)
+		time.Sleep(100 * time.Millisecond)
+		tmpl.Execute(buf, 20, 7)
+		if got := buf.Get(0, 0).Rune; got != 'd' {
+			t.Fatalf("expected else branch after overlay offset exit, got %q", got)
+		}
+	})
+
 	t.Run("Out in overlay child retains If branch", func(t *testing.T) {
 		active := true
 		tmpl := Build(VBox(
@@ -5904,20 +5942,245 @@ func TestAnimate(t *testing.T) {
 }
 
 func TestOpacity(t *testing.T) {
-	t.Run("static opacity", func(t *testing.T) {
+	t.Run("text clips to remaining parent width", func(t *testing.T) {
 		tmpl := Build(
-			VBox.Fill(RGB(0, 0, 0)).Opacity(0.5)(
-				Text("Hi").FG(RGB(200, 200, 200)),
+			VBox.Width(8).Fill(RGB(0, 0, 0))(
+				HBox(
+					SpaceW(4),
+					Text("abcdef").FG(RGB(200, 200, 200)),
+				),
+			),
+		)
+		buf := NewBuffer(12, 1)
+		tmpl.Execute(buf, 12, 1)
+		if got := string([]rune{buf.Get(4, 0).Rune, buf.Get(5, 0).Rune, buf.Get(6, 0).Rune, buf.Get(7, 0).Rune}); got != "abcd" {
+			t.Fatalf("expected clipped text inside parent, got %q", got)
+		}
+		if got := buf.Get(8, 0).Rune; got != ' ' {
+			t.Fatalf("expected text to stop at parent bounds, got %q", got)
+		}
+	})
+
+	t.Run("node ref tracks inherited overlay opacity", func(t *testing.T) {
+		var ref NodeRef
+		tmpl := Build(
+			Overlay.At(0, 0).Opacity(0.5)(
+				VBox.Width(4).Height(1).NodeRef(&ref)(
+					Text("card"),
+				),
+			),
+		)
+		buf := NewBuffer(10, 2)
+		tmpl.Execute(buf, 10, 2)
+		if ref.Opacity < 0.49 || ref.Opacity > 0.51 {
+			t.Fatalf("expected ref opacity ~0.5, got %f", ref.Opacity)
+		}
+	})
+
+	t.Run("node ref tracks inherited zero overlay opacity", func(t *testing.T) {
+		var ref NodeRef
+		tmpl := Build(
+			Overlay.At(0, 0).Opacity(0.0)(
+				VBox.Width(4).Height(1).NodeRef(&ref)(
+					Text("card"),
+				),
+			),
+		)
+		buf := NewBuffer(10, 2)
+		tmpl.Execute(buf, 10, 2)
+		if !ref.opacitySet {
+			t.Fatalf("expected ref opacity to be set")
+		}
+		if ref.Opacity != 0 {
+			t.Fatalf("expected ref opacity 0, got %f", ref.Opacity)
+		}
+	})
+
+	t.Run("buffer opacity write preserves backing bg for transparent source bg", func(t *testing.T) {
+		buf := NewBuffer(1, 1)
+		backBG := RGB(10, 20, 30)
+		srcFG := RGB(200, 100, 50)
+		buf.SetFast(0, 0, Cell{Rune: 'B', Style: Style{FG: RGB(40, 50, 60), BG: backBG}})
+		buf.SetOpacity(0, 0, Cell{Rune: 'X', Style: Style{FG: srcFG}}, 1, OpacitySmooth)
+		c := buf.Get(0, 0)
+		if c.Rune != 'X' {
+			t.Fatalf("expected source rune, got %q", c.Rune)
+		}
+		if c.Style.BG != backBG {
+			t.Fatalf("expected backing BG preserved, got %+v want %+v", c.Style.BG, backBG)
+		}
+		if c.Style.FG != srcFG {
+			t.Fatalf("expected source FG, got %+v want %+v", c.Style.FG, srcFG)
+		}
+	})
+
+	t.Run("paint opacity keeps source rune while mostly opaque", func(t *testing.T) {
+		back := Cell{Rune: 'B', Style: Style{FG: RGB(10, 20, 30), BG: RGB(0, 0, 0)}}
+		src := Cell{Rune: 'X', Style: Style{FG: RGB(210, 120, 30)}}
+		c := composeOpacityCell(src, back, 0.95, OpacityPaint, 0, 0, Style{})
+		if got := c.Rune; got != 'X' {
+			t.Fatalf("expected paint opacity to keep source rune while mostly opaque, got %q", got)
+		}
+		if c.Style.FG.R < 200 {
+			t.Fatalf("expected source FG to remain strong while mostly opaque, got R=%d", c.Style.FG.R)
+		}
+	})
+
+	t.Run("paint opacity hands off to backing rune after fade starts", func(t *testing.T) {
+		back := Cell{Rune: 'B', Style: Style{FG: RGB(10, 20, 30), BG: RGB(0, 0, 0)}}
+		src := Cell{Rune: 'X', Style: Style{FG: RGB(210, 120, 30)}}
+		c := composeOpacityCell(src, back, 0.5, OpacityPaint, 0, 0, Style{})
+		if got := c.Rune; got != 'B' {
+			t.Fatalf("expected paint opacity to preserve backing rune, got %q", got)
+		}
+		if c.Style.FG.R < 100 || c.Style.FG.R > 120 {
+			t.Fatalf("expected backing FG tinted toward source FG, got R=%d", c.Style.FG.R)
+		}
+	})
+
+	t.Run("static opacity blends against backing", func(t *testing.T) {
+		tmpl := Build(
+			VBox.Fill(RGB(0, 0, 120))(
+				VBox.Fill(RGB(200, 0, 0)).Opacity(0.5)(
+					Text("Hi").FG(RGB(200, 200, 200)),
+				),
 			),
 		)
 		buf := NewBuffer(10, 1)
+		buf.defaultStyle = Style{FG: RGB(0, 0, 0), BG: RGB(0, 0, 0)}
 		tmpl.Execute(buf, 10, 1)
 		c := buf.Get(0, 0)
-		// FG (200,200,200) lerped 50% toward BG (0,0,0) → ~(100,100,100)
+		if c.Style.BG.R < 80 || c.Style.BG.R > 120 {
+			t.Fatalf("expected BG.R ~100 at opacity 0.5, got %d", c.Style.BG.R)
+		}
+		if c.Style.BG.B < 50 || c.Style.BG.B > 70 {
+			t.Fatalf("expected BG.B ~60 at opacity 0.5, got %d", c.Style.BG.B)
+		}
+	})
+
+	t.Run("text opacity blends its own cells", func(t *testing.T) {
+		tmpl := Build(
+			VBox.Fill(RGB(0, 0, 0))(
+				Text("Hi").FG(RGB(200, 200, 200)).Opacity(0.5),
+			),
+		)
+		buf := NewBuffer(10, 1)
+		buf.defaultStyle = Style{FG: RGB(0, 0, 0), BG: RGB(0, 0, 0)}
+		tmpl.Execute(buf, 10, 1)
+		c := buf.Get(0, 0)
 		if c.Style.FG.R > 120 || c.Style.FG.R < 80 {
 			t.Fatalf("expected FG.R ~100 at opacity 0.5, got %d", c.Style.FG.R)
 		}
-		t.Logf("opacity 0.5: FG.R=%d", c.Style.FG.R)
+	})
+
+	t.Run("smooth opacity hands rune back below threshold", func(t *testing.T) {
+		back := Cell{Rune: 'B', Style: Style{FG: RGB(20, 20, 20)}}
+		src := Cell{Rune: 'X', Style: Style{FG: RGB(200, 200, 200)}}
+		c := composeOpacityCell(src, back, 0.2, OpacitySmooth, 0, 0, Style{FG: RGB(0, 0, 0), BG: RGB(0, 0, 0)})
+		if got := c.Rune; got != 'B' {
+			t.Fatalf("expected backing rune at opacity 0.2, got %q", got)
+		}
+	})
+
+	t.Run("smooth opacity keeps source rune when there is no backing rune", func(t *testing.T) {
+		back := Cell{Rune: ' ', Style: Style{BG: RGB(0, 0, 100)}}
+		src := Cell{Rune: 'X', Style: Style{FG: RGB(200, 0, 0)}}
+		c := composeOpacityCell(src, back, 0.2, OpacitySmooth, 0, 0, Style{})
+		if got := c.Rune; got != 'X' {
+			t.Fatalf("expected source rune to keep fading over empty backing, got %q", got)
+		}
+	})
+
+	t.Run("foreground fades toward backing bg when there is no backing rune", func(t *testing.T) {
+		back := Cell{Rune: ' ', Style: Style{FG: RGB(0, 200, 0), BG: RGB(0, 0, 100)}}
+		src := Cell{Rune: 'X', Style: Style{FG: RGB(200, 0, 0)}}
+		c := composeOpacityCell(src, back, 0.5, OpacitySmooth, 0, 0, Style{})
+		if c.Style.FG.R < 90 || c.Style.FG.R > 110 {
+			t.Fatalf("expected FG.R ~100, got %d", c.Style.FG.R)
+		}
+		if c.Style.FG.B < 40 || c.Style.FG.B > 60 {
+			t.Fatalf("expected FG.B ~50 from backing BG, got %d", c.Style.FG.B)
+		}
+		if c.Style.FG.G != 0 {
+			t.Fatalf("expected no green from backing FG, got %d", c.Style.FG.G)
+		}
+	})
+
+	t.Run("source foreground fades toward backing-through-panel color at handoff", func(t *testing.T) {
+		back := Cell{Rune: 'B', Style: Style{FG: RGB(0, 0, 100), BG: RGB(0, 200, 0)}}
+		src := Cell{Rune: 'X', Style: Style{FG: RGB(200, 0, 0), BG: RGB(0, 0, 100)}}
+		c := composeOpacityCell(src, back, 0.35, OpacitySmooth, 0, 0, Style{})
+		if got := c.Rune; got != 'X' {
+			t.Fatalf("expected source rune to own threshold frame, got %q", got)
+		}
+		if c.Style.FG.R != 0 {
+			t.Fatalf("expected no red source FG at handoff, got %d", c.Style.FG.R)
+		}
+		if c.Style.FG.G < 45 || c.Style.FG.G > 55 {
+			t.Fatalf("expected FG.G ~50 at handoff, got %d", c.Style.FG.G)
+		}
+		if c.Style.FG.B < 72 || c.Style.FG.B > 82 {
+			t.Fatalf("expected FG.B ~77 at handoff, got %d", c.Style.FG.B)
+		}
+	})
+
+	t.Run("backing foreground fades toward composed bg after rune handoff", func(t *testing.T) {
+		back := Cell{Rune: 'B', Style: Style{FG: RGB(0, 0, 100), BG: RGB(0, 0, 0)}}
+		src := Cell{Rune: 'X', Style: Style{FG: RGB(200, 0, 0), BG: RGB(0, 200, 0)}}
+		c := composeOpacityCell(src, back, 0.2, OpacitySmooth, 0, 0, Style{})
+		if got := c.Rune; got != 'B' {
+			t.Fatalf("expected backing rune after handoff, got %q", got)
+		}
+		if c.Style.FG.G < 5 || c.Style.FG.G > 10 {
+			t.Fatalf("expected backing FG to fade toward composed BG, got G=%d", c.Style.FG.G)
+		}
+		if c.Style.FG.B < 75 || c.Style.FG.B > 85 {
+			t.Fatalf("expected backing FG blue to reduce through composed BG, got B=%d", c.Style.FG.B)
+		}
+		if c.Style.FG.R != 0 {
+			t.Fatalf("expected no red from source FG after handoff, got R=%d", c.Style.FG.R)
+		}
+	})
+
+	t.Run("source space does not hide backing rune", func(t *testing.T) {
+		back := Cell{Rune: 'B', Style: Style{FG: RGB(0, 0, 100), BG: RGB(0, 0, 0)}}
+		src := Cell{Rune: ' ', Style: Style{BG: RGB(0, 200, 0)}}
+		c := composeOpacityCell(src, back, 0.99, OpacitySmooth, 0, 0, Style{})
+		if got := c.Rune; got != 'B' {
+			t.Fatalf("expected backing rune through source space, got %q", got)
+		}
+		if c.Style.FG.G < 190 {
+			t.Fatalf("expected backing FG to be almost source BG at high opacity, got G=%d", c.Style.FG.G)
+		}
+	})
+
+	t.Run("dither opacity staggers rune handoff", func(t *testing.T) {
+		back := Cell{Rune: 'B', Style: Style{FG: RGB(20, 20, 20)}}
+		src := Cell{Rune: 'X', Style: Style{FG: RGB(200, 200, 200)}}
+		sourceOwned := 0
+		backOwned := 0
+		for y := 0; y < 4; y++ {
+			for x := 0; x < 4; x++ {
+				c := composeOpacityCell(src, back, 0.375, OpacityDither, x, y, Style{FG: RGB(0, 0, 0), BG: RGB(0, 0, 0)})
+				if c.Rune == 'X' {
+					sourceOwned++
+				} else if c.Rune == 'B' {
+					backOwned++
+				}
+			}
+		}
+		if sourceOwned == 0 || backOwned == 0 {
+			t.Fatalf("expected mixed rune ownership, source=%d backing=%d", sourceOwned, backOwned)
+		}
+	})
+
+	t.Run("dither opacity keeps source rune when there is no backing rune", func(t *testing.T) {
+		back := Cell{Rune: ' ', Style: Style{BG: RGB(0, 0, 100)}}
+		src := Cell{Rune: 'X', Style: Style{FG: RGB(200, 0, 0)}}
+		c := composeOpacityCell(src, back, 0.1, OpacityDither, 0, 0, Style{})
+		if got := c.Rune; got != 'X' {
+			t.Fatalf("expected source rune to keep fading over empty backing, got %q", got)
+		}
 	})
 
 	t.Run("opacity with pointer", func(t *testing.T) {
@@ -5928,6 +6191,7 @@ func TestOpacity(t *testing.T) {
 			),
 		)
 		buf := NewBuffer(10, 1)
+		buf.defaultStyle = Style{FG: RGB(0, 0, 0), BG: RGB(0, 0, 0)}
 		tmpl.Execute(buf, 10, 1)
 		fg1 := buf.Get(0, 0).Style.FG
 		if fg1.R < 180 {
@@ -5935,6 +6199,7 @@ func TestOpacity(t *testing.T) {
 		}
 
 		opacity = 0.0
+		buf.Clear()
 		tmpl.Execute(buf, 10, 1)
 		fg2 := buf.Get(0, 0).Style.FG
 		// fully faded toward black
@@ -5953,16 +6218,20 @@ func TestOpacity(t *testing.T) {
 			),
 		)
 		buf := NewBuffer(10, 1)
+		buf.defaultStyle = Style{FG: RGB(0, 0, 0), BG: RGB(0, 0, 0)}
 
 		// frame 1: opacity ~0 → nearly invisible
+		buf.Clear()
 		tmpl.Execute(buf, 10, 1)
 		fg1 := buf.Get(0, 0).Style.FG
 
 		time.Sleep(100 * time.Millisecond)
+		buf.Clear()
 		tmpl.Execute(buf, 10, 1)
 		fg2 := buf.Get(0, 0).Style.FG
 
 		time.Sleep(200 * time.Millisecond)
+		buf.Clear()
 		tmpl.Execute(buf, 10, 1)
 		fg3 := buf.Get(0, 0).Style.FG
 
@@ -5977,4 +6246,64 @@ func TestOpacity(t *testing.T) {
 		}
 		t.Logf("animated opacity: start=%d, mid=%d, end=%d", fg1.R, fg2.R, fg3.R)
 	})
+}
+
+func TestNestedHBoxWithFiniteChildrenUsesIntrinsicWidth(t *testing.T) {
+	option := func(label, key string) any {
+		return HBox.Gap(1)(
+			Text(label),
+			Text(key).Inverse(),
+		)
+	}
+
+	tmpl := Build(
+		VBox.Width(52)(
+			HBox.Gap(2)(
+				Space(),
+				option("do it", "s"),
+				option("cancel", "<Esc>"),
+				Space(),
+			),
+		),
+	)
+	buf := NewBuffer(52, 1)
+	tmpl.Execute(buf, 52, 1)
+
+	got := make([]rune, 52)
+	for x := range got {
+		r := buf.Get(x, 0).Rune
+		if r == 0 {
+			r = ' '
+		}
+		got[x] = r
+	}
+
+	want := "               do it s  cancel <Esc>                "
+	if string(got) != want {
+		t.Fatalf("unexpected nested fit-content HBox layout:\ngot  %q\nwant %q", string(got), want)
+	}
+}
+
+func TestFitContentDashboardWidgetsContributeIntrinsicWidth(t *testing.T) {
+	cpu := 72
+	history := []float64{3, 5, 2, 7, 4, 6, 3, 5, 8, 4}
+	tmpl := Build(
+		VBox.Border(BorderDouble).Title("SYS").FitContent()(
+			Text("ONLINE"),
+			HRule(),
+			Leader("CPU", &cpu),
+			Sparkline(&history),
+		),
+	)
+	buf := NewBuffer(40, 6)
+	tmpl.Execute(buf, 40, 6)
+
+	top := buf.GetLine(0)
+	if StringWidth(top) < 22 {
+		t.Fatalf("expected fit-content dashboard to include leader width, got top line %q", top)
+	}
+	line := buf.GetLine(3)
+	if !strings.Contains(line, "CPU") || !strings.Contains(line, "72") {
+		t.Fatalf("expected leader content to render inside fit-content dashboard, got %q", line)
+	}
 }

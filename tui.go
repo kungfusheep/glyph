@@ -224,6 +224,23 @@ type Style struct {
 	margin    [4]int16      // top, right, bottom, left (non-cascading)
 }
 
+// OpacityMode controls how terminal cells hand off rune ownership as opacity
+// fades. Colours always blend; runes are necessarily discrete.
+type OpacityMode uint8
+
+const (
+	// OpacitySmooth blends colours across the full range, then swaps runes at
+	// a single threshold. This is the calm default.
+	OpacitySmooth OpacityMode = iota
+	// OpacityDither blends colours and swaps runes through a stable ordered
+	// dither pattern during the middle of the fade.
+	OpacityDither
+	// OpacityPaint treats the source rune as foreground paint rather than
+	// semantic text. It keeps paint solid while mostly opaque, then hands back
+	// to backing runes earlier in the fade.
+	OpacityPaint
+)
+
 // DefaultStyle returns a style with default colours and no attributes.
 func DefaultStyle() Style {
 	return Style{
@@ -460,20 +477,20 @@ type flex struct {
 // Render is optional - if nil, items are rendered using fmt.Sprintf("%v", item).
 // Marker defaults to "> " if not specified.
 type SelectionList struct {
-	Items         any       // *[]T - pointer to slice of items
-	Selected      *int      // pointer to selected index
-	Marker        string    // selection marker (default "> ", use " " for no visible marker)
-	MarkerStyle   Style     // style for marker text (merged with SelectedStyle.BG for selected rows)
-	Render        any       // func(*T) any - optional, renders each item
-	MaxVisible    int       // max items to show (0 = all)
+	Items            any      // *[]T - pointer to slice of items
+	Selected         *int     // pointer to selected index
+	Marker           string   // selection marker (default "> ", use " " for no visible marker)
+	MarkerStyle      Style    // style for marker text (merged with SelectedStyle.BG for selected rows)
+	Render           any      // func(*T) any - optional, renders each item
+	MaxVisible       int      // max items to show (0 = all)
 	Style            Style    // default style for non-selected rows
 	SelectedStyle    Style    // style for selected row
 	StyleDyn         any      // dynamic value (compiled eval writes into Style)
 	SelectedStyleDyn any      // dynamic value (compiled eval writes into SelectedStyle)
 	SelectedRef      *NodeRef // tracks position of the selected row each frame
-	len           int       // cached length for bounds checking
-	offset        int       // scroll offset for windowing
-	onMove        func()    // called after selection index changes
+	len              int      // cached length for bounds checking
+	offset           int      // scroll offset for windowing
+	onMove           func()   // called after selection index changes
 }
 
 // ensureVisible adjusts scroll offset so selected item is visible.

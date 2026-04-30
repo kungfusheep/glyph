@@ -2,6 +2,7 @@ package glyph
 
 import (
 	"math"
+	"time"
 	"unsafe"
 )
 
@@ -12,9 +13,11 @@ type dynFloat64 struct {
 	dyn   any
 	ptr   *float64
 	armed *bool // non-nil for From tweens — resolve() sets true, tween waits for it
+	isSet bool
 }
 
 func (d *dynFloat64) set(v any) {
+	d.isSet = true
 	switch val := v.(type) {
 	case float64:
 		d.val = val
@@ -579,17 +582,42 @@ func (g glowEffect) Apply(buf *Buffer, ctx PostContext) {
 // neighbours. Angular intensity is also modulated so a bright arc traces the
 // perimeter — even a single-colour palette visibly spins.
 type spinGlowEffect struct {
-	strength dynFloat64
-	radius   dynInt
-	speed    dynFloat64
-	falloff  dynFloat64
-	palette  []Color
+	strength    dynFloat64
+	opacity     dynFloat64
+	radius      dynInt
+	speed       dynFloat64
+	falloff     dynFloat64
+	opacityMode OpacityMode
+	palette     []Color
+	phase       *spinGlowPhase
 	// paletteRef, when non-nil, is dereferenced per-frame in Apply so the
 	// effect's palette can change at runtime by reassigning the slice the
 	// caller holds. Wins over `palette` when both are set.
 	paletteRef *[]Color
 	focus      *NodeRef
 	rim        bool
+}
+
+type spinGlowPhase struct {
+	value       float64
+	lastTime    time.Duration
+	initialized bool
+}
+
+func (p *spinGlowPhase) advance(ctx PostContext, speed float64) float64 {
+	if !p.initialized {
+		p.initialized = true
+		p.lastTime = ctx.Time
+		return p.value
+	}
+
+	delta := ctx.Delta
+	if delta <= 0 && ctx.Time > p.lastTime {
+		delta = ctx.Time - p.lastTime
+	}
+	p.lastTime = ctx.Time
+	p.value += delta.Seconds() * speed
+	return p.value
 }
 
 // defaultSpinGlowPalette — pink → rose → purple, matching the glyph website vibe.
@@ -611,17 +639,31 @@ func SESpinGlow(focus *NodeRef, palette ...Color) spinGlowEffect {
 		palette = defaultSpinGlowPalette
 	}
 	return spinGlowEffect{
-		strength: dynFloat64{val: 0.7},
-		radius:   dynInt{val: 10},
-		speed:    dynFloat64{val: 2.1}, // ~360° / 3s, matches glyph-website install pill
-		falloff:  dynFloat64{val: 1.0}, // deviation from linear; 1 = quadratic
-		palette:  palette,
-		focus:    focus,
+		strength:    dynFloat64{val: 0.7},
+		opacity:     dynFloat64{val: 1.0},
+		radius:      dynInt{val: 10},
+		speed:       dynFloat64{val: 2.1}, // ~360° / 3s, matches glyph-website install pill
+		falloff:     dynFloat64{val: 1.0}, // deviation from linear; 1 = quadratic
+		opacityMode: OpacityPaint,
+		palette:     palette,
+		focus:       focus,
 	}
 }
 
 // Strength sets how strongly the glow blends into surrounding cells (0..1).
 func (s spinGlowEffect) Strength(v any) spinGlowEffect { s.strength.set(v); return s }
+
+// Opacity sets the compositor opacity for the whole spin glow effect. Unlike
+// Strength, this is intended for fades: it scales the halo and the foreground
+// rim without changing the fully-on rim solidity.
+func (s spinGlowEffect) Opacity(v any) spinGlowEffect { s.opacity.set(v); return s }
+
+// OpacityMode sets how rim cells hand back to backing runes as effect opacity
+// fades. The default is OpacityPaint so a mostly-opaque rim remains solid.
+func (s spinGlowEffect) OpacityMode(mode OpacityMode) spinGlowEffect {
+	s.opacityMode = mode
+	return s
+}
 
 // Radius sets how far the glow spreads in cells.
 func (s spinGlowEffect) Radius(v any) spinGlowEffect { s.radius.set(v); return s }
@@ -656,9 +698,11 @@ func (s spinGlowEffect) PaletteRef(p *[]Color) spinGlowEffect {
 
 func (s spinGlowEffect) compileEffect(tmpl *Template) Effect {
 	s.strength.compileArmed(tmpl, nil, 0)
+	s.opacity.compileArmed(tmpl, nil, 0)
 	s.radius.compile(tmpl)
 	s.speed.compileArmed(tmpl, nil, 0)
 	s.falloff.compileArmed(tmpl, nil, 0)
+	s.phase = &spinGlowPhase{}
 	return s
 }
 
@@ -676,8 +720,16 @@ func (s spinGlowEffect) Apply(buf *Buffer, ctx PostContext) {
 	if radius <= 0 {
 		return
 	}
-	strength := s.strength.resolve()
-	phase := ctx.Time.Seconds() * s.speed.resolve()
+	effectOpacity := clampOpacity(refOpacity(ref) * s.opacity.resolve())
+	if effectOpacity <= 0 {
+		return
+	}
+	strength := s.strength.resolve() * effectOpacity
+	speed := s.speed.resolve()
+	phase := ctx.Time.Seconds() * speed
+	if s.phase != nil {
+		phase = s.phase.advance(ctx, speed)
+	}
 	fall := s.falloff.resolve()
 
 	// adaptive blend between a linear baseline and the power curve. the
@@ -701,74 +753,76 @@ func (s spinGlowEffect) Apply(buf *Buffer, ctx PostContext) {
 	minY := max(0, ref.Y-radiusI)
 	maxY := min(ctx.Height, ref.Y+ref.H+radiusI)
 
-	for y := minY; y < maxY; y++ {
-		base := y * buf.width
-		rowPainted := false
-		for x := minX; x < maxX; x++ {
-			if inRect(x, y, ref) {
-				continue
+	if strength > 0 {
+		for y := minY; y < maxY; y++ {
+			base := y * buf.width
+			rowPainted := false
+			for x := minX; x < maxX; x++ {
+				if inRect(x, y, ref) {
+					continue
+				}
+
+				// radial distance from the nearest rect edge (same as drop shadow).
+				ex := max(ref.X, min(x, ref.X+ref.W-1))
+				ey := max(ref.Y, min(y, ref.Y+ref.H-1))
+				dxEdge := float64(x - ex)
+				dyEdge := float64(y - ey)
+				dist := math.Sqrt(dxEdge*dxEdge + dyEdge*dyEdge)
+				if dist >= radius {
+					continue
+				}
+
+				c := &buf.cells[base+x]
+
+				// Project halo cells onto the same rectangular perimeter path
+				// as the rim. A polar angle around a wide, short rect makes
+				// nearby x/y cells sample visibly different bands.
+				tint := sampleSpinGlowRectColor(x, y, ref, phase, n, palette)
+
+				// radial falloff: linW*t + powW*t^(1+fall). higher fall pulls
+				// the drop-off closer to the rect, while the linear term keeps
+				// the halo visible all the way to the radius — so the declared
+				// Radius is always the visual disappearing point, regardless
+				// of curve shape. integer values 0..3 are fast-pathed to avoid
+				// math.Pow. rotation signal comes purely from palette position
+				// shift, not intensity modulation.
+				t := 1.0 - dist/radius
+				var radial float64
+				switch fall {
+				case 0.0:
+					radial = t
+				case 1.0:
+					radial = linW*t + powW*t*t
+				case 2.0:
+					radial = linW*t + powW*t*t*t
+				case 3.0:
+					t2 := t * t
+					radial = linW*t + powW*t2*t2
+				default:
+					radial = linW*t + powW*math.Pow(t, 1+fall)
+				}
+				blend := radial * strength
+
+				c.Style.FG = lerpIfRGB(resolveFG(c.Style.FG, ctx), tint, blend)
+				c.Style.BG = lerpIfRGB(resolveBG(c.Style.BG, ctx), tint, blend)
+				rowPainted = true
 			}
-
-			// radial distance from the nearest rect edge (same as drop shadow).
-			ex := max(ref.X, min(x, ref.X+ref.W-1))
-			ey := max(ref.Y, min(y, ref.Y+ref.H-1))
-			dxEdge := float64(x - ex)
-			dyEdge := float64(y - ey)
-			dist := math.Sqrt(dxEdge*dxEdge + dyEdge*dyEdge)
-			if dist >= radius {
-				continue
+			// we mutate cells by direct pointer, so the buffer's per-row dirty
+			// tracking never sees these writes. without marking, ClearDirty()
+			// would skip the rows we painted (if they're past rendered content)
+			// and paint would accumulate across frames. mark only the rows we
+			// actually touched — keeps the per-row-clear optimisation intact.
+			if rowPainted {
+				if y > buf.dirtyMaxY {
+					buf.dirtyMaxY = y
+				}
+				buf.dirtyRows[y] = true
 			}
-
-			c := &buf.cells[base+x]
-
-			// Project halo cells onto the same rectangular perimeter path
-			// as the rim. A polar angle around a wide, short rect makes
-			// nearby x/y cells sample visibly different bands.
-			tint := sampleSpinGlowRectColor(x, y, ref, phase, n, palette)
-
-			// radial falloff: linW*t + powW*t^(1+fall). higher fall pulls
-			// the drop-off closer to the rect, while the linear term keeps
-			// the halo visible all the way to the radius — so the declared
-			// Radius is always the visual disappearing point, regardless
-			// of curve shape. integer values 0..3 are fast-pathed to avoid
-			// math.Pow. rotation signal comes purely from palette position
-			// shift, not intensity modulation.
-			t := 1.0 - dist/radius
-			var radial float64
-			switch fall {
-			case 0.0:
-				radial = t
-			case 1.0:
-				radial = linW*t + powW*t*t
-			case 2.0:
-				radial = linW*t + powW*t*t*t
-			case 3.0:
-				t2 := t * t
-				radial = linW*t + powW*t2*t2
-			default:
-				radial = linW*t + powW*math.Pow(t, 1+fall)
-			}
-			blend := radial * strength
-
-			c.Style.FG = lerpIfRGB(resolveFG(c.Style.FG, ctx), tint, blend)
-			c.Style.BG = lerpIfRGB(resolveBG(c.Style.BG, ctx), tint, blend)
-			rowPainted = true
-		}
-		// we mutate cells by direct pointer, so the buffer's per-row dirty
-		// tracking never sees these writes. without marking, ClearDirty()
-		// would skip the rows we painted (if they're past rendered content)
-		// and paint would accumulate across frames. mark only the rows we
-		// actually touched — keeps the per-row-clear optimisation intact.
-		if rowPainted {
-			if y > buf.dirtyMaxY {
-				buf.dirtyMaxY = y
-			}
-			buf.dirtyRows[y] = true
 		}
 	}
 
 	if s.rim {
-		s.paintRim(buf, ctx, phase, n, palette)
+		s.paintRim(buf, ctx, phase, n, palette, effectOpacity)
 	}
 }
 
@@ -831,7 +885,7 @@ func sampleSpinGlowPerimeterIndex(idx, total int, phase, n float64, palette []Co
 // across coarse terminal cells, especially on wide/short cards where polar
 // sampling makes adjacent x/y edge cells jump through very different parts
 // of the gradient.
-func (s spinGlowEffect) paintRim(buf *Buffer, ctx PostContext, phase, n float64, palette []Color) {
+func (s spinGlowEffect) paintRim(buf *Buffer, ctx PostContext, phase, n float64, palette []Color, opacity float64) {
 	ref := s.focus
 	top := ref.Y - 1
 	bottom := ref.Y + ref.H
@@ -847,7 +901,7 @@ func (s spinGlowEffect) paintRim(buf *Buffer, ctx PostContext, phase, n float64,
 		return sampleSpinGlowPerimeterIndex(idx, total, phase, n, palette)
 	}
 
-	paint := func(x, y int, r rune, idx int) {
+	paintHalfBlock := func(x, y int, r rune, idx int) {
 		if x < 0 || x >= ctx.Width || y < 0 || y >= ctx.Height {
 			return
 		}
@@ -858,33 +912,44 @@ func (s spinGlowEffect) paintRim(buf *Buffer, ctx PostContext, phase, n float64,
 		// the rim's tint and the rim looks broken. Leave BG alone: the
 		// block glyph carries the stroke geometry, while BG is a full-cell
 		// fill and would make half-height top/bottom strokes look too thick.
-		c := &buf.cells[y*buf.width+x]
-		c.Rune = r
-		c.Style.FG = tint
-		c.Style.Attr = AttrNone
+		buf.SetOpacity(x, y, Cell{Rune: r, Style: Style{FG: tint, Attr: AttrNone}}, opacity, s.opacityMode)
 		// c.Style.BG = Magenta <- set this and you will screw up the border
 	}
 
-	// Top/bottom use half-height blocks; left/right use full blocks. In
-	// typical terminal cell geometry, a full-width vertical column reads as
-	// the closest visual match for a half-height horizontal stroke. Keep it
-	// foreground-only: setting BG would fill the whole cell and thicken the
-	// horizontal edges into slabs.
+	paintFullCell := func(x, y int, idx int) {
+		if x < 0 || x >= ctx.Width || y < 0 || y >= ctx.Height {
+			return
+		}
+		tint := sample(idx)
+		buf.SetOpacity(x, y, Cell{Rune: ' ', Style: Style{BG: tint, Attr: AttrNone}}, opacity, s.opacityMode)
+		if opacity >= 1 {
+			c := buf.Get(x, y)
+			c.Rune = ' '
+			c.Style.FG = Color{}
+			c.Style.BG = tint
+			c.Style.Attr = AttrNone
+			buf.SetFast(x, y, c)
+		}
+	}
+
+	// Top/bottom use half-height foreground blocks. Left/right are full-cell
+	// geometry, so paint them through BG instead; this avoids foreground block
+	// blending making the vertical bars read brighter or dimmer than the rim.
 	idx := 0
 	for x := left; x <= right; x++ {
-		paint(x, top, '▄', idx)
+		paintHalfBlock(x, top, '▄', idx)
 		idx++
 	}
 	for y := top + 1; y < bottom; y++ {
-		paint(right, y, '█', idx)
+		paintFullCell(right, y, idx)
 		idx++
 	}
 	for x := right; x >= left; x-- {
-		paint(x, bottom, '▀', idx)
+		paintHalfBlock(x, bottom, '▀', idx)
 		idx++
 	}
 	for y := bottom - 1; y > top; y-- {
-		paint(left, y, '█', idx)
+		paintFullCell(left, y, idx)
 		idx++
 	}
 

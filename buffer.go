@@ -118,6 +118,28 @@ func (b *Buffer) SetFast(x, y int, c Cell) {
 	b.dirtyRows[y] = true
 }
 
+// SetOpacity composites c over the existing cell using glyph's terminal
+// opacity rules. Default BG on c is treated as transparent and preserves the
+// existing cell BG; set an explicit BG when the source should fade a fill.
+func (b *Buffer) SetOpacity(x, y int, c Cell, opacity float64, mode OpacityMode) {
+	if y < 0 || y >= b.height || x < 0 || x >= b.width {
+		return
+	}
+	idx := y*b.width + x
+	back := b.cells[idx]
+	if c.Style.BG.Mode == ColorDefault {
+		c.Style.BG = back.Style.BG
+	}
+	if c.Style.FG.Mode == ColorDefault && b.defaultStyle.FG.Mode != ColorDefault {
+		c.Style.FG = b.defaultStyle.FG
+	}
+	b.cells[idx] = composeOpacityCell(c, back, opacity, mode, x, y, b.defaultStyle)
+	if y > b.dirtyMaxY {
+		b.dirtyMaxY = y
+	}
+	b.dirtyRows[y] = true
+}
+
 // RowWriter writes cells to a single row with per-row work hoisted once:
 // the default style merge, dirty tracking, and base index computation.
 // Use when writing many runes to the same row — avoids per-cell overhead.
@@ -963,7 +985,9 @@ func (b BorderStyle) PadH() int16 { return b.PadLeft() + b.PadRight() }
 func (b BorderStyle) PadV() int16 { return b.PadTop() + b.PadBottom() }
 
 // HasBorder returns true if any edge is drawn.
-func (b BorderStyle) HasBorder() bool { return b.HasTop() || b.HasBottom() || b.HasLeft() || b.HasRight() }
+func (b BorderStyle) HasBorder() bool {
+	return b.HasTop() || b.HasBottom() || b.HasLeft() || b.HasRight()
+}
 
 // Standard border styles.
 var (
