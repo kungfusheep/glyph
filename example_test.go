@@ -2470,26 +2470,6 @@ func ExampleAnimateFn_conditional() {
 	// ╰──────────────────╯
 }
 
-// Appear animation.
-// From sets the starting value. The element animates from that value to the target on first render.
-func ExampleAnimateFn_from() {
-	// example:
-	tree := VBox.Height(
-		Animate.From(int16(0)).Duration(500 * time.Millisecond)(int16(3)),
-	).Border(BorderRounded)(
-		Text("appears"),
-	)
-	// :example
-
-	renderAndPrint("AnimateFn_from", tree, 20, 5)
-	// Output:
-	// ╭──────────────────╮
-	// │appears           │
-	// │                  │
-	// │                  │
-	// ╰──────────────────╯
-}
-
 // Completion callback.
 // OnComplete fires once when the animation reaches its target value.
 func ExampleAnimateFn_onComplete() {
@@ -2507,5 +2487,31 @@ func ExampleAnimateFn_onComplete() {
 	// Output:
 	// ╭──────────────────╮
 	// │animating         │
+	// ╰──────────────────╯
+}
+
+// Enter and exit transitions.
+// Wrap any property value with In for the entry and Out for the exit. Pass a
+// tween to either side to animate it; pass a plain value to snap. Both sides
+// are tied to the surrounding conditional, and Glyph keeps the outgoing branch
+// on screen until its Out tween completes.
+func ExampleIn() {
+	// example:
+	visible := true
+	tree := If(&visible).Then(
+		VBox.Border(BorderRounded).
+			Width(
+				In(20).
+				Out(Animate(0)),
+			)(
+				Text("hello"),
+			),
+	)
+	// :example
+
+	renderAndPrint("In", tree, 20, 3)
+	// Output:
+	// ╭──────────────────╮
+	// │hello             │
 	// ╰──────────────────╯
 }
