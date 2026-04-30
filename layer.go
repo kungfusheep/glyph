@@ -1,5 +1,7 @@
 package glyph
 
+import "sync/atomic"
+
 // Layer is a pre-rendered buffer with scroll management.
 // Content is rendered once (expensive), then blitted to screen each frame (cheap).
 //
@@ -18,6 +20,7 @@ type Layer struct {
 	// Track dimensions at last render to detect when re-render needed
 	lastRenderWidth  int
 	lastRenderHeight int
+	renderDirty      atomic.Bool
 
 	// Cursor state (buffer-relative coordinates)
 	cursor Cursor
@@ -51,6 +54,7 @@ func NewLayer() *Layer {
 func (l *Layer) SetContent(tmpl *Template, width, height int) {
 	l.buffer = NewBuffer(width, height)
 	tmpl.Execute(l.buffer, int16(width), int16(height))
+	l.renderDirty.Store(false)
 	l.scrollY = 0
 	l.updateMaxScroll()
 }
@@ -59,6 +63,7 @@ func (l *Layer) SetContent(tmpl *Template, width, height int) {
 // Use this if you're managing the buffer yourself.
 func (l *Layer) SetBuffer(buf *Buffer) {
 	l.buffer = buf
+	l.renderDirty.Store(false)
 	l.scrollY = 0
 	l.updateMaxScroll()
 }
@@ -99,7 +104,14 @@ func (l *Layer) NeedsRender() bool {
 	if l.Render == nil {
 		return false
 	}
-	return l.AlwaysRender || l.lastRenderWidth == 0 || l.lastRenderWidth != l.viewWidth
+	return l.AlwaysRender || l.renderDirty.Load() || l.lastRenderWidth == 0 || l.lastRenderWidth != l.viewWidth
+}
+
+// Invalidate marks the layer content dirty so Render runs on the next display
+// pass. This is a non-blocking signal; the render thread still owns the actual
+// buffer/template rebuild.
+func (l *Layer) Invalidate() {
+	l.renderDirty.Store(true)
 }
 
 // prepare ensures the layer is ready to blit. Called by the framework before
@@ -110,6 +122,7 @@ func (l *Layer) prepare() {
 	}
 	l.lastRenderWidth = l.viewWidth
 	l.lastRenderHeight = l.viewHeight
+	l.renderDirty.Store(false)
 	l.Render()
 }
 

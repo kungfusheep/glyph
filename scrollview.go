@@ -88,8 +88,7 @@ func (sv *ScrollViewC) SetChildren(children ...Component) {
 // Refresh forces re-render of children on the next frame.
 // Call when the content has changed.
 func (sv *ScrollViewC) Refresh() {
-	sv.childTmpl = nil
-	sv.layer.lastRenderWidth = 0
+	sv.layer.Invalidate()
 }
 
 func (t *Template) compileScrollViewC(v *ScrollViewC, parent int16, depth int) int16 {

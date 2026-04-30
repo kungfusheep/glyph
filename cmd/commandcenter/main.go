@@ -299,7 +299,8 @@ func main() {
 		}()
 	}
 
-	anim := Animate.Duration(900 * time.Millisecond).Ease(EaseOutCubic).From(0.0)
+	animIn := Animate.Duration(900 * time.Millisecond).Ease(EaseOutCubic).From(0.0)
+	animOut := Animate.Duration(900 * time.Millisecond).Ease(EaseOutCubic)
 
 	var popupRef NodeRef
 	app.SetView(
@@ -347,55 +348,56 @@ func main() {
 				HRule().Char(BorderDouble.Horizontal).FG(&s.pal.overlay),
 				Text("[enter] inspect  [ctrl+s] sparklines  [ctrl+l] log  [ctrl+c] quit").FG(&s.pal.muted),
 
-				If(&s.showModal).Then(OverlayNode{
-					Centered: true,
-					Child: VBox.Width(46).Fill(&s.pal.surface).Opacity(In(anim(1)).Out(anim(0))).NodeRef(&popupRef)(
-						SpaceH(1),
-						HBox(
-							If(&s.selectedSvc.Status).Eq("warn").
-								Then(Text("  ○ ").FG(&s.pal.gold)).
-								Else(Text("  ● ").FG(&s.pal.foam)),
-							If(&s.selectedSvc.Status).Eq("warn").
-								Then(Text(&s.selectedSvc.Name).FG(&s.pal.gold).Bold()).
-								Else(Text(&s.selectedSvc.Name).FG(&s.pal.foam).Bold()),
-						),
-						HRule().FG(&s.pal.overlay),
-						Text("  cpu history").FG(&s.pal.muted),
-						Sparkline(&s.selectedSvc.CPUHistory).FG(&s.pal.iris),
-						HBox.Gap(3)(
-							VBox(
-								Text("  cpu").FG(&s.pal.muted),
-								Text("  mem").FG(&s.pal.muted),
+				If(&s.showModal).Then(
+					Overlay.Centered()(
+						VBox.Width(46).Fill(&s.pal.surface).Opacity(In(animIn(1)).Out(animOut(0))).NodeRef(&popupRef)(
+							SpaceH(1),
+							HBox(
+								If(&s.selectedSvc.Status).Eq("warn").
+									Then(Text("  ○ ").FG(&s.pal.gold)).
+									Else(Text("  ● ").FG(&s.pal.foam)),
+								If(&s.selectedSvc.Status).Eq("warn").
+									Then(Text(&s.selectedSvc.Name).FG(&s.pal.gold).Bold()).
+									Else(Text(&s.selectedSvc.Name).FG(&s.pal.foam).Bold()),
 							),
-							VBox(
-								IfOrd(&s.selectedSvc.CPU).Gt(20.0).
-									Then(Text(&s.selectedSvc.CPUStr).FG(&s.pal.gold)).
-									Else(Text(&s.selectedSvc.CPUStr).FG(&s.pal.text)),
-								Text(&s.selectedSvc.Mem).FG(&s.pal.text),
-							),
-						),
-						HRule().FG(&s.pal.overlay),
-						If(&s.restarting).
-							Then(
-								HBox.Gap(1)(
-									Text("  restarting").FG(&s.pal.muted),
-									HBox.Grow(1)(
-										Progress(
-											Animate.Duration(restartDuration).Ease(EaseOutCubic).OnComplete(restartComplete)(&s.restartPct),
-										).FG(&s.pal.foam),
-									),
+							HRule().FG(&s.pal.overlay),
+							Text("  cpu history").FG(&s.pal.muted),
+							Sparkline(&s.selectedSvc.CPUHistory).FG(&s.pal.iris),
+							HBox.Gap(3)(
+								VBox(
+									Text("  cpu").FG(&s.pal.muted),
+									Text("  mem").FG(&s.pal.muted),
 								),
-							).
-							Else(
-								Text("  [r] restart service  [esc] close").FG(&s.pal.muted),
+								VBox(
+									IfOrd(&s.selectedSvc.CPU).Gt(20.0).
+										Then(Text(&s.selectedSvc.CPUStr).FG(&s.pal.gold)).
+										Else(Text(&s.selectedSvc.CPUStr).FG(&s.pal.text)),
+									Text(&s.selectedSvc.Mem).FG(&s.pal.text),
+								),
 							),
-						SpaceH(1),
-						ScreenEffect(
-							SEVignette().Dodge(&popupRef).Smooth().Strength(In(anim(0.5)).Out(anim(0))),
-							SEGlow().Focus(&popupRef).Brightness(1.1).Strength(In(anim(0.5)).Out(anim(0))),
+							HRule().FG(&s.pal.overlay),
+							If(&s.restarting).
+								Then(
+									HBox.Gap(1)(
+										Text("  restarting").FG(&s.pal.muted),
+										HBox.Grow(1)(
+											Progress(
+												Animate.Duration(restartDuration).Ease(EaseOutCubic).OnComplete(restartComplete)(&s.restartPct),
+											).FG(&s.pal.foam),
+										),
+									),
+								).
+								Else(
+									Text("  [r] restart service  [esc] close").FG(&s.pal.muted),
+								),
+							SpaceH(1),
+							ScreenEffect(
+								SEVignette().Dodge(&popupRef).Smooth().Strength(In(animIn(0.5)).Out(animOut(0))),
+								SEGlow().Focus(&popupRef).Brightness(1.1).Strength(In(animIn(0.5)).Out(animOut(0))),
+							),
 						),
 					),
-				}),
+				),
 			),
 		),
 	)
