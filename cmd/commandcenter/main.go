@@ -349,7 +349,7 @@ func main() {
 
 				If(&s.showModal).Then(OverlayNode{
 					Centered: true,
-					Child: VBox.Width(46).Fill(&s.pal.surface).NodeRef(&popupRef)(
+					Child: VBox.Width(46).Fill(&s.pal.surface).Opacity(In(anim(1)).Out(anim(0))).NodeRef(&popupRef)(
 						SpaceH(1),
 						HBox(
 							If(&s.selectedSvc.Status).Eq("warn").
@@ -391,8 +391,8 @@ func main() {
 							),
 						SpaceH(1),
 						ScreenEffect(
-							SEVignette().Dodge(&popupRef).Smooth().Strength(anim(0.88)),
-							SEGlow().Focus(&popupRef).Brightness(1.1).Strength(anim(0.5)),
+							SEVignette().Dodge(&popupRef).Smooth().Strength(In(anim(0.5)).Out(anim(0))),
+							SEGlow().Focus(&popupRef).Brightness(1.1).Strength(In(anim(0.5)).Out(anim(0))),
 						),
 					),
 				}),
