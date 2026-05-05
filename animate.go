@@ -108,13 +108,6 @@ func (p *presence) Out(out *tween) *presence {
 	return p
 }
 
-// Out attaches an exit tween. When the surrounding conditional branch becomes
-// inactive, Glyph keeps that branch rendered until this tween finishes.
-func (tw *tween) Out(out *tween) *tween {
-	tw.out = out
-	return tw
-}
-
 // tweenNode interface for the compiler to detect tween nodes
 type tweenNode interface {
 	getTarget() any
