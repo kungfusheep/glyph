@@ -103,8 +103,8 @@ func TestColor(t *testing.T) {
 
 		// t=0.5 should return midpoint
 		c = LerpColor(black, white, 0.5)
-		if c.R != 127 || c.G != 127 || c.B != 127 {
-			t.Errorf("t=0.5: expected gray(127), got %+v", c)
+		if c.R != 128 || c.G != 128 || c.B != 128 {
+			t.Errorf("t=0.5: expected gray(128), got %+v", c)
 		}
 
 		// test clamping

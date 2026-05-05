@@ -594,3 +594,40 @@ func TestSelectionListOverflowScrolling(t *testing.T) {
 		t.Errorf("Footer should still be visible: %q", footerLine)
 	}
 }
+
+func TestSelectionListClampsSelectionAfterShrink(t *testing.T) {
+	items := []string{"first", "second"}
+	selected := 1
+
+	list := &SelectionList{
+		Items:      &items,
+		Selected:   &selected,
+		Marker:     "> ",
+		MaxVisible: 20,
+		Render: func(s *string) Component {
+			return Text(s)
+		},
+	}
+
+	view := VBox.Border(BorderSingle).Title("test")(
+		Text("header"),
+		HRule(),
+		VBox.Grow(1)(list),
+		HRule(),
+		Text("footer"),
+	)
+
+	tmpl := Build(view)
+	buf := NewBuffer(40, 8)
+	tmpl.Execute(buf, 40, 8)
+
+	items = items[:1]
+	tmpl.Execute(buf, 40, 8)
+
+	if selected != 0 {
+		t.Fatalf("selected = %d, want 0 after list shrink", selected)
+	}
+	if line := buf.GetLine(3); !contains(line, "> first") {
+		t.Fatalf("expected remaining item to be selected, got %q", line)
+	}
+}

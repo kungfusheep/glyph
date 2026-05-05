@@ -162,6 +162,11 @@ type Template struct {
 	// per-frame evaluators — conditions, animations, etc. run at start of Execute
 	evals []func()
 
+	// exit evaluators — non-item Animate.Out evaluators owned by this template.
+	// These can be primed when a retained branch first renders as exiting, so
+	// NodeRefs see the correct opacity before effects sample them.
+	exitEvals []func()
+
 	// per-item evaluators — run once per ForEach item with elemBase set
 	itemEvals []func()
 
@@ -313,6 +318,34 @@ func (t *Template) runItemEvals(elemBase unsafe.Pointer) {
 	t.elemBase = elemBase
 	for _, eval := range t.itemEvals {
 		eval()
+	}
+}
+
+func (t *Template) runExitEvals() {
+	if t == nil {
+		return
+	}
+	for _, eval := range t.exitEvals {
+		eval()
+	}
+	for i := range t.ops {
+		switch ext := t.ops[i].Ext.(type) {
+		case *opOverlay:
+			ext.childTmpl.runExitEvals()
+		case *opIf:
+			ext.thenTmpl.runExitEvals()
+			ext.elseTmpl.runExitEvals()
+		case *opSwitch:
+			for _, tmpl := range ext.cases {
+				tmpl.runExitEvals()
+			}
+			ext.def.runExitEvals()
+		case *opMatch:
+			for _, tmpl := range ext.cases {
+				tmpl.runExitEvals()
+			}
+			ext.def.runExitEvals()
+		}
 	}
 }
 
@@ -1278,9 +1311,13 @@ func (t *Template) compileTweenScalar(tw tweenNode, elemBase unsafe.Pointer, ele
 		state.startVal = fromVal
 		state.current = fromVal
 	}
-	root.evals = append(root.evals, func() {
+	eval := func() {
 		run(state, t.exit.rendering, nil)
-	})
+	}
+	root.evals = append(root.evals, eval)
+	if outTw != nil {
+		t.exitEvals = append(t.exitEvals, eval)
+	}
 }
 
 func (t *Template) compileTweenInt16(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr) *int16 {
@@ -1512,7 +1549,7 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 	// tracks whether resolve() was called last frame (effect was active)
 	wasActive := armed == nil // nil armed = always active (non-effect tweens)
 
-	root.evals = append(root.evals, func() {
+	eval := func() {
 		dur := durVal
 		if durPtr != nil {
 			dur = *durPtr
@@ -1627,7 +1664,11 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 		}
 		*storage = startVal + progress*(target-startVal)
 		root.animating = true
-	})
+	}
+	root.evals = append(root.evals, eval)
+	if outTw != nil {
+		t.exitEvals = append(t.exitEvals, eval)
+	}
 	return storage
 }
 
@@ -1922,9 +1963,13 @@ func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer,
 			state.startVal = fromVal
 			state.current = fromVal
 		}
-		root.evals = append(root.evals, func() {
+		eval := func() {
 			run(state, t.exit.rendering)
-		})
+		}
+		root.evals = append(root.evals, eval)
+		if outTw != nil {
+			t.exitEvals = append(t.exitEvals, eval)
+		}
 	}
 	return storage
 }
@@ -2085,9 +2130,13 @@ func (t *Template) compileTweenStyle(tw tweenNode, elemBase unsafe.Pointer, elem
 			state.startVal = fromVal
 			state.current = fromVal
 		}
-		root.evals = append(root.evals, func() {
+		eval := func() {
 			run(state, t.exit.rendering)
-		})
+		}
+		root.evals = append(root.evals, eval)
+		if outTw != nil {
+			t.exitEvals = append(t.exitEvals, eval)
+		}
 	}
 
 	return storage
@@ -7271,6 +7320,9 @@ func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, glo
 	sub.setExitRenderingFor(elemBase, exiting)
 	sub.pendingOverlays = sub.pendingOverlays[:0]
 	sub.pendingScreenEffects = sub.pendingScreenEffects[:0]
+	if exiting && !sub.hasActiveExitLeases() {
+		sub.runExitEvals()
+	}
 	sub.runItemEvals(elemBase)
 	oldRefOpacity := sub.refOpacity
 	oldRefOpacitySet := sub.refOpacitySet
@@ -7743,26 +7795,39 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 	if sliceHdr.Len == 0 || len(ext.geoms) == 0 {
 		return
 	}
+	visibleLen := sliceHdr.Len
+	if visibleLen > len(ext.geoms) {
+		visibleLen = len(ext.geoms)
+	}
+	if visibleLen == 0 {
+		return
+	}
 
 	selectedIdx := -1
 	if ext.selectedPtr != nil {
 		selectedIdx = *ext.selectedPtr
+		if selectedIdx < 0 {
+			selectedIdx = 0
+		}
+		if selectedIdx >= visibleLen {
+			selectedIdx = visibleLen - 1
+		}
 	}
 
 	// height-aware windowing: determine visible item range using per-item heights
 	startIdx := 0
-	endIdx := sliceHdr.Len
-	if endIdx > len(ext.geoms) {
-		endIdx = len(ext.geoms)
-	}
+	endIdx := visibleLen
 	if ext.listPtr != nil && ext.listPtr.MaxVisible > 0 {
 		startIdx = ext.listPtr.offset
-		endIdx = startIdx + ext.listPtr.MaxVisible
-		if endIdx > sliceHdr.Len {
-			endIdx = sliceHdr.Len
+		if startIdx < 0 {
+			startIdx = 0
 		}
-		if endIdx > len(ext.geoms) {
-			endIdx = len(ext.geoms)
+		if startIdx >= visibleLen {
+			startIdx = visibleLen - 1
+		}
+		endIdx = startIdx + ext.listPtr.MaxVisible
+		if endIdx > visibleLen {
+			endIdx = visibleLen
 		}
 	}
 
@@ -7791,8 +7856,8 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 				startIdx = selectedIdx
 				// recalculate endIdx forward from new startIdx
 				rowsUsed = 0
-				endIdx = sliceHdr.Len
-				for ci := startIdx; ci < sliceHdr.Len; ci++ {
+				endIdx = visibleLen
+				for ci := startIdx; ci < visibleLen; ci++ {
 					ih := int(ext.geoms[ci].H)
 					if rowsUsed+ih > availableRows {
 						endIdx = ci

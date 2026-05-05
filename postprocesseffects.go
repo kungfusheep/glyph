@@ -228,17 +228,22 @@ func (v vignetteEffect) Apply(buf *Buffer, ctx PostContext) {
 	maxX := math.Max(cx, float64(ctx.Width)-cx)
 	maxY := math.Max(cy, float64(ctx.Height)-cy) * 2
 	maxDist := math.Sqrt(maxX*maxX + maxY*maxY)
+	dodgeOpacity := 0.0
+	if v.dodge != nil {
+		opacity := refOpacity(v.dodge)
+		dodgeOpacity = opacity * opacity
+	}
 
 	for y := range ctx.Height {
 		base := y * buf.width
 		dy := (float64(y) - cy) * 2
 		for x := range ctx.Width {
-			if v.dodge != nil && inRect(x, y, v.dodge) {
-				continue
-			}
 			dx := float64(x) - cx
 			dist := math.Sqrt(dx*dx+dy*dy) / maxDist
 			dim := dist * dist * v.strength.resolve()
+			if v.dodge != nil {
+				dim *= 1 - dodgeOpacity*vignetteDodgeWeight(x, y, v.dodge)
+			}
 			if dim > 1 {
 				dim = 1
 			}
@@ -252,6 +257,34 @@ func (v vignetteEffect) Apply(buf *Buffer, ctx PostContext) {
 			c.Style.BG = lerpIfRGB(resolveBG(c.Style.BG, ctx), black, dim)
 		}
 	}
+}
+
+func vignetteDodgeWeight(x, y int, ref *NodeRef) float64 {
+	if ref == nil {
+		return 0
+	}
+	if inRect(x, y, ref) {
+		return 1
+	}
+	const feather = 4.0
+	dx := 0
+	if x < ref.X {
+		dx = ref.X - x
+	} else if x >= ref.X+ref.W {
+		dx = x - (ref.X + ref.W - 1)
+	}
+	dy := 0
+	if y < ref.Y {
+		dy = ref.Y - y
+	} else if y >= ref.Y+ref.H {
+		dy = y - (ref.Y + ref.H - 1)
+	}
+	dist := math.Sqrt(float64(dx*dx + dy*dy))
+	if dist >= feather {
+		return 0
+	}
+	t := dist / feather
+	return 1 - t*t*(3-2*t)
 }
 
 // desaturateEffect removes colour saturation from all RGB cells.
@@ -410,12 +443,14 @@ func (g gradientMapEffect) Apply(buf *Buffer, ctx PostContext) {
 // from a focus node's perimeter. At offset (0,0) it's a symmetric glow.
 // Any offset displaces the shadow source, giving a directional drop shadow.
 type dropShadowEffect struct {
-	strength dynFloat64
-	radius   dynInt
-	offsetX  int
-	offsetY  int
-	tint     dynColor
-	focus    *NodeRef
+	strength    dynFloat64
+	opacity     dynFloat64
+	radius      dynInt
+	offsetX     int
+	offsetY     int
+	tint        dynColor
+	opacityMode OpacityMode
+	focus       *NodeRef
 }
 
 // SEDropShadow creates a radial glow/shadow emanating outward from a focus node.
@@ -423,10 +458,13 @@ type dropShadowEffect struct {
 // Chain .Focus(&ref) to set the source node, .Offset(x,y) to adjust direction.
 func SEDropShadow() dropShadowEffect {
 	return dropShadowEffect{
-		strength: dynFloat64{val: 0.2},
-		radius:   dynInt{val: 8},
-		offsetX:  -1, offsetY: -1,
-		tint: dynColor{val: Color{Mode: ColorRGB}},
+		strength:    dynFloat64{val: 0.2},
+		opacity:     dynFloat64{val: 1.0},
+		radius:      dynInt{val: 8},
+		offsetX:     -1,
+		offsetY:     -1,
+		tint:        dynColor{val: Color{Mode: ColorRGB}},
+		opacityMode: OpacitySmooth,
 	}
 }
 
@@ -435,8 +473,20 @@ func (d dropShadowEffect) Strength(s any) dropShadowEffect { d.strength.set(s); 
 
 func (d dropShadowEffect) compileEffect(tmpl *Template) Effect {
 	d.strength.compileArmed(tmpl, nil, 0)
+	d.opacity.compileArmed(tmpl, nil, 0)
 	d.radius.compile(tmpl)
 	d.tint.compile(tmpl)
+	return d
+}
+
+// Opacity sets the compositor opacity for the shadow surface. The focused
+// node's own opacity is also applied automatically, so shadows fade with the
+// thing that casts them.
+func (d dropShadowEffect) Opacity(o any) dropShadowEffect { d.opacity.set(o); return d }
+
+// OpacityMode sets how shadow cells hand back to backing runes during fades.
+func (d dropShadowEffect) OpacityMode(mode OpacityMode) dropShadowEffect {
+	d.opacityMode = mode
 	return d
 }
 
@@ -459,15 +509,33 @@ func (d dropShadowEffect) Apply(buf *Buffer, ctx PostContext) {
 
 	ref := d.focus
 	radius := float64(d.radius.resolve())
+	effectOpacity := clampOpacity(refOpacity(ref) * d.opacity.resolve())
+	strength := d.strength.resolve()
+	if strength <= 0 || radius <= 0 {
+		return
+	}
+	radiusI := int(math.Ceil(radius))
 	sx, sy := ref.X+d.offsetX, ref.Y+d.offsetY
+	minX := max(0, sx-radiusI)
+	maxX := min(ctx.Width, sx+ref.W+radiusI)
+	minY := max(0, sy-radiusI)
+	maxY := min(ctx.Height, sy+ref.H+radiusI)
 
-	for y := range ctx.Height {
-		base := y * buf.width
-		for x := range ctx.Width {
+	for y := minY; y < maxY; y++ {
+		if y > buf.dirtyMaxY {
+			buf.dirtyMaxY = y
+		}
+		buf.dirtyRows[y] = true
+	}
+	if effectOpacity <= 0 {
+		return
+	}
+
+	for y := minY; y < maxY; y++ {
+		for x := minX; x < maxX; x++ {
 			if inRect(x, y, ref) {
 				continue
 			}
-
 			cx := max(sx, min(x, sx+ref.W-1))
 			cy := max(sy, min(y, sy+ref.H-1))
 			dx := float64(x - cx)
@@ -479,10 +547,10 @@ func (d dropShadowEffect) Apply(buf *Buffer, ctx PostContext) {
 			}
 
 			t := 1.0 - dist/radius
-			dim := t * t * d.strength.resolve()
+			dim := t * t * strength * effectOpacity
 
 			tintColor := d.tint.resolve()
-			c := &buf.cells[base+x]
+			c := &buf.cells[y*buf.width+x]
 			c.Style.FG = lerpIfRGB(resolveFG(c.Style.FG, ctx), tintColor, dim)
 			c.Style.BG = lerpIfRGB(resolveBG(c.Style.BG, ctx), tintColor, dim)
 		}
@@ -535,6 +603,10 @@ func (g glowEffect) Apply(buf *Buffer, ctx PostContext) {
 
 	ref := g.focus
 	radius := float64(g.radius.resolve())
+	strength := g.strength.resolve() * refOpacity(ref)
+	if strength <= 0 {
+		return
+	}
 
 	for y := range ctx.Height {
 		base := y * buf.width
@@ -568,7 +640,7 @@ func (g glowEffect) Apply(buf *Buffer, ctx PostContext) {
 			}
 
 			t := 1.0 - dist/radius
-			blend := t * t * g.strength.resolve()
+			blend := t * t * strength
 
 			c := &buf.cells[base+x]
 			c.Style.FG = lerpIfRGB(resolveFG(c.Style.FG, ctx), boosted, blend)
@@ -1017,6 +1089,13 @@ func (b bloomEffect) Apply(buf *Buffer, ctx PostContext) {
 
 	radius := b.radius.resolve()
 	thresh := b.threshold.resolve()
+	strength := b.strength.resolve()
+	if b.focus != nil {
+		strength *= refOpacity(b.focus)
+	}
+	if strength <= 0 {
+		return
+	}
 	thresh256 := thresh * 255
 	maxDist := math.Sqrt(float64(radius*radius) + float64(radius*radius)*4)
 
@@ -1076,7 +1155,7 @@ func (b bloomEffect) Apply(buf *Buffer, ctx PostContext) {
 					uint8(min(255, sumG/sumWt)),
 					uint8(min(255, sumB/sumWt)),
 				)
-				blend := (sumWt / (sumWt + 1)) * b.strength.resolve()
+				blend := (sumWt / (sumWt + 1)) * strength
 				c := &buf.cells[base+x]
 				c.Style.FG = lerpIfRGB(resolveFG(c.Style.FG, ctx), bloom, blend)
 				c.Style.BG = lerpIfRGB(resolveBG(c.Style.BG, ctx), bloom, blend*0.3)

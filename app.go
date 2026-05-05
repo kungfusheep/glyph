@@ -60,6 +60,7 @@ type App struct {
 	renderChan     chan struct{}
 	frameFlushed   atomic.Bool // set when input renders directly, cleared by debounce timer
 	forceFullFlush bool        // set by Go() to force full redraw on next frame
+	effectsActive  bool        // previous frame used post-processing; clear pooled buffers fully
 
 	// Cursor state
 	cursorX, cursorY int
@@ -774,6 +775,9 @@ func (a *App) render() {
 
 	size := a.screen.Size()
 	buf := a.pool.Current()
+	if a.effectsActive {
+		buf.Clear()
+	}
 
 	// For inline mode, use view height instead of terminal height
 	renderHeight := int16(size.Height)
@@ -840,7 +844,9 @@ func (a *App) render() {
 
 	// post-processing pipeline: tree-declared ScreenEffects first, then imperative
 	treeEffects := activeTmpl.ScreenEffects()
-	a.screen.forceRGB = len(treeEffects) > 0 || len(a.postProcess) > 0
+	effectsActive := len(treeEffects) > 0 || len(a.postProcess) > 0
+	a.effectsActive = effectsActive
+	a.screen.forceRGB = effectsActive
 	if a.screen.forceRGB {
 		var tEffect time.Time
 		if DebugTiming {
@@ -888,6 +894,7 @@ func (a *App) render() {
 		for _, pp := range a.postProcess {
 			pp.Apply(buf, ppCtx)
 		}
+		buf.MarkAllDirty()
 		a.frameCount++
 
 		if DebugTiming {

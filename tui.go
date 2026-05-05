@@ -1,7 +1,10 @@
 // Package glyph provides a terminal UI framework for Go.
 package glyph
 
-import "unsafe"
+import (
+	"math"
+	"unsafe"
+)
 
 // Attribute represents text styling attributes that can be combined.
 type Attribute uint8
@@ -159,9 +162,9 @@ func LerpColor(a, b Color, t float64) Color {
 		t = 1
 	}
 	return RGB(
-		uint8(float64(a.R)+t*(float64(b.R)-float64(a.R))),
-		uint8(float64(a.G)+t*(float64(b.G)-float64(a.G))),
-		uint8(float64(a.B)+t*(float64(b.B)-float64(a.B))),
+		uint8(math.Round(float64(a.R)+t*(float64(b.R)-float64(a.R)))),
+		uint8(math.Round(float64(a.G)+t*(float64(b.G)-float64(a.G)))),
+		uint8(math.Round(float64(a.B)+t*(float64(b.B)-float64(a.B)))),
 	)
 }
 
@@ -495,7 +498,27 @@ type SelectionList struct {
 
 // ensureVisible adjusts scroll offset so selected item is visible.
 func (s *SelectionList) ensureVisible() {
-	if s.Selected == nil || s.MaxVisible <= 0 {
+	if s.Selected == nil {
+		return
+	}
+	if s.len <= 0 {
+		*s.Selected = 0
+		s.offset = 0
+		return
+	}
+	if *s.Selected < 0 {
+		*s.Selected = 0
+	}
+	if *s.Selected >= s.len {
+		*s.Selected = s.len - 1
+	}
+	if s.offset < 0 {
+		s.offset = 0
+	}
+	if s.offset >= s.len {
+		s.offset = s.len - 1
+	}
+	if s.MaxVisible <= 0 {
 		return
 	}
 	sel := *s.Selected

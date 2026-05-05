@@ -1,6 +1,7 @@
 package glyph
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"strings"
@@ -5792,6 +5793,294 @@ func TestAnimate(t *testing.T) {
 		tmpl.Execute(buf, 20, 5)
 		if got := len(tmpl.ScreenEffects()); got != 0 {
 			t.Fatalf("expected overlay screen effect gone after exit lease, got %d", got)
+		}
+	})
+
+	t.Run("Overlay child ref opacity tracks Out", func(t *testing.T) {
+		active := true
+		ref := NodeRef{}
+		tmpl := Build(VBox(
+			If(&active).Then(OverlayNode{
+				Centered: true,
+				Child: VBox.Width(8).Height(1).
+					NodeRef(&ref).
+					Opacity(In(1.0).Out(Animate.Duration(120*time.Millisecond)(0.0)))(
+					Text("card"),
+					ScreenEffect(SEDropShadow().Focus(&ref)),
+				),
+			}),
+		))
+		buf := NewBuffer(20, 5)
+
+		tmpl.Execute(buf, 20, 5)
+		tmpl.Execute(buf, 20, 5)
+		if ref.Opacity < 0.99 {
+			t.Fatalf("expected active ref opacity near 1, got %f", ref.Opacity)
+		}
+
+		active = false
+		tmpl.Execute(buf, 20, 5)
+		start := ref.Opacity
+		time.Sleep(70 * time.Millisecond)
+		tmpl.Execute(buf, 20, 5)
+		mid := ref.Opacity
+		if mid >= start {
+			t.Fatalf("expected ref opacity to fall during exit, start=%f mid=%f", start, mid)
+		}
+		if mid <= 0 {
+			t.Fatalf("expected ref opacity to fade before branch drops, got %f", mid)
+		}
+	})
+
+	t.Run("Overlay child drop shadow fades with ref Out", func(t *testing.T) {
+		active := true
+		ref := NodeRef{}
+		bg := RGB(160, 160, 160)
+		tmpl := Build(VBox(
+			VBox.Width(20).Height(5).Fill(bg)(),
+			If(&active).Then(OverlayNode{
+				Centered: true,
+				Child: VBox.Width(8).
+					Fill(RGB(20, 20, 20)).
+					NodeRef(&ref).
+					Opacity(In(1.0).Out(Animate.Duration(120*time.Millisecond)(0.0)))(
+					Text("card"),
+					ScreenEffect(SEDropShadow().Focus(&ref).Strength(1).Radius(4)),
+				),
+			}),
+		))
+		buf := NewBuffer(20, 5)
+		pctx := PostContext{Width: 20, Height: 5, DefaultFG: bg, DefaultBG: bg}
+		distance := func(a, b Color) int {
+			dr := int(a.R) - int(b.R)
+			if dr < 0 {
+				dr = -dr
+			}
+			dg := int(a.G) - int(b.G)
+			if dg < 0 {
+				dg = -dg
+			}
+			db := int(a.B) - int(b.B)
+			if db < 0 {
+				db = -db
+			}
+			return dr + dg + db
+		}
+		render := func() (Color, int, int, float64) {
+			buf.Clear()
+			for y := range 5 {
+				for x := range 20 {
+					buf.Set(x, y, Cell{Rune: ' ', Style: Style{FG: bg, BG: bg}})
+				}
+			}
+			tmpl.Execute(buf, 20, 5)
+			effects := tmpl.ScreenEffects()
+			for _, eff := range effects {
+				eff.Apply(buf, pctx)
+			}
+			maxDist := 0
+			for y := range 5 {
+				for x := range 20 {
+					if inRect(x, y, &ref) {
+						continue
+					}
+					maxDist = max(maxDist, distance(buf.Get(x, y).Style.BG, bg))
+				}
+			}
+			return buf.Get(ref.X+ref.W, ref.Y).Style.BG, maxDist, len(effects), ref.Opacity
+		}
+
+		render()
+		opaque, opaqueDist, opaqueEffects, opaqueOpacity := render()
+		active = false
+		start, startDist, _, _ := render()
+		time.Sleep(70 * time.Millisecond)
+		mid, midDist, _, _ := render()
+
+		if opaqueEffects != 1 {
+			t.Fatalf("expected one shadow effect, got %d", opaqueEffects)
+		}
+		if opaqueDist == 0 {
+			t.Fatalf("expected opaque card to cast a visible shadow, opacity=%f ref=%+v sample=%#v", opaqueOpacity, ref, opaque)
+		}
+		if midDist >= startDist {
+			t.Fatalf("expected shadow to move back toward backing during exit, start=%#v/%d mid=%#v/%d backing=%#v", start, startDist, mid, midDist, bg)
+		}
+	})
+
+	t.Run("Overlay child remains stronger than shadow while both fade", func(t *testing.T) {
+		active := true
+		ref := NodeRef{}
+		bg := RGB(160, 160, 160)
+		panel := RGB(0, 0, 0)
+		tmpl := Build(VBox(
+			VBox.Width(40).Height(10).Fill(bg)(),
+			If(&active).Then(OverlayNode{
+				Centered: true,
+				Child: VBox.Width(12).
+					Fill(panel).
+					NodeRef(&ref).
+					Opacity(In(1.0).Out(Animate.Duration(300*time.Millisecond)(0.0)))(
+					Text("card").FG(RGB(220, 220, 220)),
+					ScreenEffect(
+						SEVignette().Dodge(&ref).Smooth().Strength(
+							In(0.55).Out(Animate.Duration(300*time.Millisecond)(0.0)),
+						),
+						SEDropShadow().Focus(&ref).Strength(0.28).Radius(10),
+					),
+				),
+			}),
+		))
+		buf := NewBuffer(40, 10)
+		pctx := PostContext{Width: 40, Height: 10, DefaultFG: bg, DefaultBG: bg}
+		distance := func(a, b Color) int {
+			dr := int(a.R) - int(b.R)
+			if dr < 0 {
+				dr = -dr
+			}
+			dg := int(a.G) - int(b.G)
+			if dg < 0 {
+				dg = -dg
+			}
+			db := int(a.B) - int(b.B)
+			if db < 0 {
+				db = -db
+			}
+			return dr + dg + db
+		}
+		render := func() (float64, int, int) {
+			buf.Clear()
+			tmpl.Execute(buf, 40, 10)
+			for _, eff := range tmpl.ScreenEffects() {
+				eff.Apply(buf, pctx)
+			}
+
+			inside := 0
+			for y := ref.Y; y < ref.Y+ref.H; y++ {
+				for x := ref.X; x < ref.X+ref.W; x++ {
+					inside = max(inside, distance(buf.Get(x, y).Style.BG, bg))
+				}
+			}
+			shadow := 0
+			radius := 10
+			for y := max(0, ref.Y-radius); y < min(10, ref.Y+ref.H+radius); y++ {
+				for x := max(0, ref.X-radius); x < min(40, ref.X+ref.W+radius); x++ {
+					if inRect(x, y, &ref) {
+						continue
+					}
+					shadow = max(shadow, distance(buf.Get(x, y).Style.BG, bg))
+				}
+			}
+			return ref.Opacity, inside, shadow
+		}
+
+		render()
+		active = false
+		for i := 0; i < 4; i++ {
+			time.Sleep(80 * time.Millisecond)
+			opacity, inside, shadow := render()
+			if opacity <= 0 {
+				continue
+			}
+			if inside < shadow {
+				t.Fatalf("card should not become less visible than shadow while opacity is %f: inside=%d shadow=%d ref=%+v", opacity, inside, shadow, ref)
+			}
+		}
+	})
+
+	t.Run("App render keeps fading card stronger than shadow", func(t *testing.T) {
+		active := true
+		ref := NodeRef{}
+		bg := RGB(25, 27, 27)
+		panel := RGB(8, 8, 8)
+		tmpl := Build(VBox.Fill(bg)(
+			VBox.Width(40).Height(10).Fill(bg)(),
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(12).
+					Fill(panel).
+					NodeRef(&ref).
+					Opacity(In(1.0).Out(Animate.Duration(300*time.Millisecond)(0.0)))(
+					Text("card").FG(RGB(220, 220, 220)),
+					ScreenEffect(
+						SEVignette().Dodge(&ref).Smooth().Strength(
+							In(0.55).Out(Animate.Duration(300*time.Millisecond)(0.0)),
+						),
+						SEDropShadow().Focus(&ref).Strength(0.28).Radius(10),
+					),
+				),
+			)),
+		))
+		var out bytes.Buffer
+		screen := NewScreen(&out)
+		screen.width = 40
+		screen.height = 10
+		screen.front.Resize(40, 10)
+		screen.back.Resize(40, 10)
+		app := &App{
+			screen:       screen,
+			template:     tmpl,
+			pool:         NewBufferPool(40, 10),
+			renderChan:   make(chan struct{}, 1),
+			defaultStyle: Style{FG: RGB(200, 200, 200), BG: bg},
+		}
+		tmpl.SetApp(app)
+		for _, buf := range app.pool.buffers {
+			buf.defaultStyle = app.defaultStyle
+			buf.Clear()
+		}
+		screen.front.defaultStyle = app.defaultStyle
+		screen.back.defaultStyle = app.defaultStyle
+
+		distance := func(a, b Color) int {
+			dr := int(a.R) - int(b.R)
+			if dr < 0 {
+				dr = -dr
+			}
+			dg := int(a.G) - int(b.G)
+			if dg < 0 {
+				dg = -dg
+			}
+			db := int(a.B) - int(b.B)
+			if db < 0 {
+				db = -db
+			}
+			return dr + dg + db
+		}
+		strengths := func() (float64, int, int) {
+			inside := 0
+			for y := ref.Y; y < ref.Y+ref.H; y++ {
+				for x := ref.X; x < ref.X+ref.W; x++ {
+					inside = max(inside, distance(screen.front.Get(x, y).Style.BG, bg))
+				}
+			}
+			shadow := 0
+			radius := 10
+			for y := max(0, ref.Y-radius); y < min(10, ref.Y+ref.H+radius); y++ {
+				for x := max(0, ref.X-radius); x < min(40, ref.X+ref.W+radius); x++ {
+					if inRect(x, y, &ref) {
+						continue
+					}
+					shadow = max(shadow, distance(screen.front.Get(x, y).Style.BG, bg))
+				}
+			}
+			return ref.Opacity, inside, shadow
+		}
+
+		app.render()
+		app.render()
+		active = false
+		app.render()
+		time.Sleep(150 * time.Millisecond)
+		app.render()
+		opacity, inside, shadow := strengths()
+		if opacity <= 0 || opacity >= 1 {
+			t.Fatalf("expected mid-exit opacity, got %f", opacity)
+		}
+		if shadow == 0 {
+			t.Fatalf("expected visible shadow during exit, opacity=%f", opacity)
+		}
+		if inside < shadow {
+			t.Fatalf("expected app-rendered card to remain at least as strong as shadow, opacity=%f inside=%d shadow=%d", opacity, inside, shadow)
 		}
 	})
 
