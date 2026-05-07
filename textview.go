@@ -159,6 +159,194 @@ func wrapTextLines(s string, width int, charWrap bool) int {
 	return wrapDrawWord(s, nil, 0, 0, width, 0, Style{})
 }
 
+// wrapSpansDraw wraps styled spans to width and writes them to buf.
+// It mirrors TextBlock wrapping while preserving each span's style.
+func wrapSpansDraw(spans []Span, buf *Buffer, x, y int, width, maxLines int, charWrap bool) int {
+	if width <= 0 {
+		return 0
+	}
+	if charWrap {
+		return wrapSpansChar(spans, buf, x, y, width, maxLines)
+	}
+	return wrapSpansWord(spans, buf, x, y, width, maxLines)
+}
+
+func wrapSpansLines(spans []Span, width int, charWrap bool) int {
+	if width <= 0 {
+		return 0
+	}
+	return wrapSpansDraw(spans, nil, 0, 0, width, 0, charWrap)
+}
+
+func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
+	row := 0
+	col := 0
+	var rw RowWriter
+	style := Style{}
+	if buf != nil {
+		rw = buf.Row(y, style)
+	}
+
+	write := func(r rune, s Style) {
+		if buf == nil || (maxLines > 0 && row >= maxLines) {
+			return
+		}
+		if !s.Equal(style) {
+			style = s
+			rw = buf.Row(y+row, style)
+		}
+		rw.Put(x+col, r)
+	}
+	flush := func() {
+		row++
+		col = 0
+		if buf != nil {
+			rw = buf.Row(y+row, style)
+		}
+	}
+
+	pendingSpace := false
+	for _, span := range spans {
+		text := span.Text
+		for i := 0; i < len(text); {
+			if text[i] == '\n' {
+				flush()
+				pendingSpace = false
+				i++
+				continue
+			}
+			spaceBefore := pendingSpace
+			pendingSpace = false
+			for i < len(text) && (text[i] == ' ' || text[i] == '\t') {
+				if col > 0 {
+					spaceBefore = true
+				}
+				i++
+			}
+			if i >= len(text) {
+				pendingSpace = spaceBefore
+				continue
+			}
+			if text[i] == '\n' {
+				pendingSpace = false
+				continue
+			}
+			wordStart := i
+			wordRunes := 0
+			for i < len(text) && text[i] != ' ' && text[i] != '\t' && text[i] != '\n' {
+				_, size := utf8.DecodeRuneInString(text[i:])
+				i += size
+				wordRunes++
+			}
+			word := text[wordStart:i]
+
+			if col == 0 {
+				if wordRunes <= width {
+					for _, r := range word {
+						write(r, span.Style)
+						col++
+					}
+				} else {
+					for _, r := range word {
+						if col >= width {
+							flush()
+						}
+						write(r, span.Style)
+						col++
+					}
+				}
+			} else if spaceBefore && col+1+wordRunes <= width {
+				write(' ', span.Style)
+				col++
+				for _, r := range word {
+					write(r, span.Style)
+					col++
+				}
+			} else if !spaceBefore && col+wordRunes <= width {
+				for _, r := range word {
+					write(r, span.Style)
+					col++
+				}
+			} else {
+				flush()
+				if wordRunes <= width {
+					for _, r := range word {
+						write(r, span.Style)
+						col++
+					}
+				} else {
+					for _, r := range word {
+						if col >= width {
+							flush()
+						}
+						write(r, span.Style)
+						col++
+					}
+				}
+			}
+		}
+	}
+	return row + 1
+}
+
+func wrapSpansChar(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
+	const tabWidth = 4
+	row := 0
+	col := 0
+	var rw RowWriter
+	style := Style{}
+	if buf != nil {
+		rw = buf.Row(y, style)
+	}
+
+	write := func(r rune, s Style) {
+		if buf == nil || (maxLines > 0 && row >= maxLines) {
+			return
+		}
+		if !s.Equal(style) {
+			style = s
+			rw = buf.Row(y+row, style)
+		}
+		rw.Put(x+col, r)
+	}
+	flush := func() {
+		row++
+		col = 0
+		if buf != nil {
+			rw = buf.Row(y+row, style)
+		}
+	}
+
+	for _, span := range spans {
+		for i := 0; i < len(span.Text); {
+			r, size := utf8.DecodeRuneInString(span.Text[i:])
+			i += size
+
+			if r == '\n' {
+				flush()
+				continue
+			}
+			if r == '\t' {
+				spaces := tabWidth - (col % tabWidth)
+				for j := 0; j < spaces; j++ {
+					if col >= width {
+						flush()
+					}
+					write(' ', span.Style)
+					col++
+				}
+				continue
+			}
+			if col >= width {
+				flush()
+			}
+			write(r, span.Style)
+			col++
+		}
+	}
+	return row + 1
+}
+
 // wrapDrawWord does the actual word-wrap draw. If buf is nil, only counts lines.
 func wrapDrawWord(s string, buf *Buffer, x, y, width, maxLines int, style Style) int {
 	row := 0

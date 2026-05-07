@@ -630,6 +630,7 @@ type RichTextNode struct {
 	Flex
 	Spans    any       // []Span or *[]Span
 	spanPtrs []*string // per-span *string pointers for Textf (nil = static text)
+	charWrap bool
 }
 
 // Rich creates a RichText from a mix of strings and Spans.
@@ -649,6 +650,12 @@ func Rich(parts ...any) RichTextNode {
 		}
 	}
 	return RichTextNode{Spans: spans}
+}
+
+// CharWrap switches RichText wrapping from word boundaries to character width.
+func (r RichTextNode) CharWrap() RichTextNode {
+	r.charWrap = true
+	return r
 }
 
 // Styled creates a span with the given style.

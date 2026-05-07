@@ -2416,6 +2416,7 @@ type opRichText struct {
 	spansPtr    *[]Span
 	off         uintptr
 	spanStrOffs []uintptr
+	charWrap    bool
 }
 
 func (rt *opRichText) resolve(elemBase unsafe.Pointer) []Span {
@@ -2435,6 +2436,17 @@ func (rt *opRichText) resolve(elemBase unsafe.Pointer) []Span {
 		return resolveSpanStrs(spans, rt.spanStrOffs, elemBase)
 	}
 	return spans
+}
+
+func styleSpans(spans []Span, styleFor func(Style) Style) []Span {
+	if len(spans) == 0 {
+		return spans
+	}
+	styled := make([]Span, len(spans))
+	for i, span := range spans {
+		styled[i] = Span{Text: span.Text, Style: styleFor(span.Style)}
+	}
+	return styled
 }
 
 // leader variant modes
@@ -2931,7 +2943,7 @@ func (t *Template) compileBox(box Box, parent int16, depth int, elemBase unsafe.
 }
 
 func (t *Template) compileRichText(v RichTextNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
-	ext := &opRichText{}
+	ext := &opRichText{charWrap: v.charWrap}
 
 	switch spans := v.Spans.(type) {
 	case []Span:
@@ -5511,8 +5523,22 @@ func (t *Template) layout(_ int16) {
 			geom := &t.geom[idx]
 
 			switch op.Kind {
-			case OpText, OpProgress, OpRichText, OpLeader, OpCounter:
+			case OpText, OpProgress, OpLeader, OpCounter:
 				geom.H = 1
+
+			case OpRichText:
+				ext := op.Ext.(*opRichText)
+				spans := ext.resolve(t.elemBase)
+				w := int(geom.W)
+				if w <= 0 {
+					w = 72
+				}
+				n := wrapSpansLines(spans, w, ext.charWrap)
+				if n == 0 {
+					geom.H = 1
+				} else {
+					geom.H = int16(n)
+				}
 
 			case OpTextBlock:
 				ext := op.Ext.(*opText)
@@ -5627,7 +5653,7 @@ func (t *Template) layout(_ int16) {
 					itemH := int16(1) // default for simple text items
 					if ext.iterTmpl != nil && len(ext.iterTmpl.ops) > 0 {
 						firstOp := &ext.iterTmpl.ops[0]
-						if firstOp.Kind == OpContainer || firstOp.Kind == OpLayout || firstOp.Kind == OpJump {
+						if firstOp.Kind == OpContainer || firstOp.Kind == OpLayout || firstOp.Kind == OpJump || firstOp.Kind == OpRichText || firstOp.Kind == OpTextBlock {
 							elemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(li)*ext.elemSize)
 							if ext.elemIsPtr {
 								elemPtr = *(*unsafe.Pointer)(elemPtr)
@@ -6826,7 +6852,11 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		ext := op.Ext.(*opRichText)
 		spans := ext.resolve(t.elemBase)
 		if spans != nil {
-			buf.WriteSpans(int(absX), int(absY), spans, int(maxW))
+			spans = styleSpans(spans, t.effectiveStyle)
+			maxLines := buf.Height() - int(absY)
+			if maxLines > 0 {
+				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap)
+			}
 		}
 
 	case OpLeader:
@@ -7426,7 +7456,11 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		ext := op.Ext.(*opRichText)
 		spans := ext.resolve(elemBase)
 		if spans != nil {
-			buf.WriteSpans(int(absX), int(absY), spans, int(maxW))
+			spans = styleSpans(spans, mergeStyle)
+			maxLines := buf.Height() - int(absY)
+			if maxLines > 0 {
+				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap)
+			}
 		}
 
 	case OpLeader:
@@ -7892,7 +7926,7 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 	needsFullPipeline := false
 	if ext.iterTmpl != nil && len(ext.iterTmpl.ops) > 0 {
 		firstOp := &ext.iterTmpl.ops[0]
-		needsFullPipeline = firstOp.Kind == OpContainer || firstOp.Kind == OpLayout || firstOp.Kind == OpJump
+		needsFullPipeline = firstOp.Kind == OpContainer || firstOp.Kind == OpLayout || firstOp.Kind == OpJump || firstOp.Kind == OpRichText || firstOp.Kind == OpTextBlock
 	}
 
 	var defaultStyle, selectedStyle, markerBaseStyle Style

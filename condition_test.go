@@ -1043,6 +1043,85 @@ func TestRichTextInsideForEach(t *testing.T) {
 	})
 }
 
+func TestRichTextWrapsAcrossLines(t *testing.T) {
+	t.Run("word wraps static spans", func(t *testing.T) {
+		view := VBox.Width(12)(
+			RichTextNode{Spans: []Span{
+				{Text: "hello", Style: Style{Attr: AttrBold}},
+				{Text: " world again", Style: Style{Attr: AttrDim}},
+			}},
+			Text("after"),
+		)
+
+		tmpl := Build(view)
+		buf := NewBuffer(20, 5)
+		tmpl.Execute(buf, 20, 5)
+
+		if line := extractLine(buf, 0, 12); line != "hello world " {
+			t.Errorf("row 0 expected wrapped prefix, got %q", line)
+		}
+		if line := extractLine(buf, 1, 12); line != "again       " {
+			t.Errorf("row 1 expected wrapped suffix, got %q", line)
+		}
+		if line := extractLine(buf, 2, 12); line != "after       " {
+			t.Errorf("row 2 expected following content after rich text height, got %q", line)
+		}
+	})
+
+	t.Run("preserves span styles after wrapping", func(t *testing.T) {
+		view := VBox.Width(10)(
+			RichTextNode{Spans: []Span{
+				{Text: "plain ", Style: Style{}},
+				{Text: "selected", Style: Style{Attr: AttrInverse}},
+			}},
+		)
+
+		tmpl := Build(view)
+		buf := NewBuffer(20, 5)
+		tmpl.Execute(buf, 20, 5)
+
+		if line := extractLine(buf, 0, 10); line != "plain     " {
+			t.Errorf("row 0 expected first wrapped line, got %q", line)
+		}
+		if line := extractLine(buf, 1, 10); line != "selected  " {
+			t.Errorf("row 1 expected second wrapped line, got %q", line)
+		}
+		if !buf.cells[1*buf.width+0].Style.Attr.Has(AttrInverse) {
+			t.Errorf("expected wrapped styled span to keep inverse style")
+		}
+	})
+
+	t.Run("dynamic spans inside ForEach wrap to natural height", func(t *testing.T) {
+		type Line struct {
+			Spans []Span
+		}
+		lines := []Line{
+			{Spans: []Span{{Text: "one two three"}}},
+			{Spans: []Span{{Text: "four"}}},
+		}
+
+		view := VBox.Width(8)(
+			ForEach(&lines, func(line *Line) Component {
+				return RichTextNode{Spans: &line.Spans}
+			}),
+		)
+
+		tmpl := Build(view)
+		buf := NewBuffer(20, 5)
+		tmpl.Execute(buf, 20, 5)
+
+		if line := extractLine(buf, 0, 8); line != "one two " {
+			t.Errorf("row 0 expected first wrapped line, got %q", line)
+		}
+		if line := extractLine(buf, 1, 8); line != "three   " {
+			t.Errorf("row 1 expected second wrapped line, got %q", line)
+		}
+		if line := extractLine(buf, 2, 8); line != "four    " {
+			t.Errorf("row 2 expected next ForEach item after wrapped height, got %q", line)
+		}
+	})
+}
+
 func TestTextf(t *testing.T) {
 	t.Run("static strings compose into single line", func(t *testing.T) {
 		view := VBox(
