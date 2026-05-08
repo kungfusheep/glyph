@@ -27,7 +27,7 @@ func main() {
 				Placeholder("filter...").
 				MaxVisible(20).
 				Render(func(e *LogEntry) Component {
-					return RichTextNode{Spans: &e.Display}
+					return Rich(&e.Display)
 				}).
 				Ref(func(f *FilterListC[LogEntry]) { fl = f }).
 				HandleClear("<Esc>", app.Stop),

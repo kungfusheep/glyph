@@ -639,7 +639,21 @@ type RichTextNode struct {
 // Example:
 //
 //	Rich("Hello ", Bold("world"), "!")
+//
+// Single-arg shortcut: pass a *[]Span (or []Span) to render a live span
+// slice. The renderer reads it every frame, so mutating the slice after
+// construction updates the render next frame.
+//
+//	Rich(&statusSpans)  // live spans, mutate slice to update
 func Rich(parts ...any) RichTextNode {
+	if len(parts) == 1 {
+		switch v := parts[0].(type) {
+		case *[]Span:
+			return RichTextNode{Spans: v}
+		case []Span:
+			return RichTextNode{Spans: v}
+		}
+	}
 	spans := make([]Span, 0, len(parts))
 	for _, p := range parts {
 		switch v := p.(type) {

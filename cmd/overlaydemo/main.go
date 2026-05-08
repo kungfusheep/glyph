@@ -75,9 +75,8 @@ func main() {
 			Text("  Press 'm' to toggle modal | 'q' to quit").Style(Style{FG: rpMuted}),
 
 			// overlay owns its vignette — no separate If() needed
-			If(&showModal).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Gap(1).Width(52).Fill(rpSurface).NodeRef(&popupRef)(
+			If(&showModal).Then(Overlay.Centered()(
+				VBox.Gap(1).Width(52).Fill(rpSurface).NodeRef(&popupRef)(
 					Space(),
 					Text("  Confirm Action").Style(Style{FG: rpIris, Attr: AttrBold}),
 					Text(&modalMessage).Style(Style{FG: rpText}),
@@ -102,7 +101,7 @@ func main() {
 					// ScreenEffect(SEHighContrast().Strength(1.8)),               // contrast boost
 					// ScreenEffect(SEFocusDim(&popupRef)),                        // spotlight panel
 				),
-			}),
+			)),
 		),
 	)
 

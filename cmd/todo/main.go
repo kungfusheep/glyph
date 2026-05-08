@@ -10,7 +10,7 @@ type Todo struct {
 func main() {
 
 	todos := []Todo{{"Learn glyph", true}, {"Build something", false}}
-	var input InputState
+	input := Input().Width(30)
 
 	app := NewApp()
 	app.SetView(
@@ -21,16 +21,16 @@ func main() {
 				BindDelete("<C-d>"),
 			HBox.Gap(1)(
 				Text("Add:"),
-				TextInput{Field: &input, Width: 30},
+				input,
 			),
 		)).
 		Handle("<enter>", func() {
-			if input.Value != "" {
-				todos = append(todos, Todo{Text: input.Value})
+			if input.Value() != "" {
+				todos = append(todos, Todo{Text: input.Value()})
 				input.Clear()
 			}
 		}).
 		Handle("<C-c>", app.Stop).
-		BindField(&input).
+		BindField(input.State()).
 		Run()
 }

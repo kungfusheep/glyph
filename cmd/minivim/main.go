@@ -3487,7 +3487,7 @@ func buildWindowView(w *Window, focused bool) glyph.Component {
 		// Width is set for vertical splits to constrain each window's area
 		glyph.LayerView(w.contentLayer).ViewHeight(int16(w.viewportHeight)).ViewWidth(int16(w.viewportWidth)),
 		// Vim-style status bar (inverse video, shows filename and position)
-		glyph.RichTextNode{Spans: &w.StatusBar},
+		glyph.Rich(&w.StatusBar),
 	)
 }
 
@@ -3517,7 +3517,7 @@ func buildView(ed *Editor) glyph.Component {
 	return glyph.VBox(
 		windowTree,
 		// Wildmenu appears above status line when active
-		glyph.If(&ed.cmdCompletionActive).Eq(true).Then(glyph.RichTextNode{Spans: &ed.cmdWildmenuSpans}),
+		glyph.If(&ed.cmdCompletionActive).Eq(true).Then(glyph.Rich(&ed.cmdWildmenuSpans)),
 		glyph.Text(&ed.StatusLine),
 	)
 }
@@ -3528,15 +3528,13 @@ func buildFuzzyView(ed *Editor) glyph.Component {
 		// Prompt line with query
 		glyph.Text(&ed.fuzzy.Query).Bold(),
 		// Results list with selection
-		&glyph.SelectionList{
-			Items:      &ed.fuzzy.Matches,
-			Selected:   &ed.fuzzy.Selected,
-			Marker:     "> ",
-			MaxVisible: 20,
-			Render: func(s *string) glyph.Component {
+		glyph.List(&ed.fuzzy.Matches).
+			Selection(&ed.fuzzy.Selected).
+			Marker("> ").
+			MaxVisible(20).
+			Render(func(s *string) glyph.Component {
 				return glyph.Text(s)
-			},
-		},
+			}),
 		// Status line
 		glyph.Text(&ed.StatusLine),
 	)
