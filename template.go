@@ -2569,15 +2569,6 @@ type opOverlay struct {
 	anchorPos    AnchorPosition
 }
 
-type opTable struct {
-	columns     []TableColumn
-	rowsPtr     *[][]string
-	showHeader  bool
-	headerStyle Style
-	rowStyle    Style
-	altStyle    Style
-}
-
 type opAutoTable struct {
 	slicePtr any
 	fields   []int
@@ -2636,7 +2627,6 @@ const (
 
 	OpSelectionList // SelectionList (data in Ext)
 
-	OpTable     // Table (data in Ext)
 	OpAutoTable // AutoTable (data in Ext)
 
 	OpSparkline // Sparkline (data in Ext)
@@ -2746,16 +2736,10 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		return t.compileSelectionList(&v, parent, depth, elemBase, elemSize)
 	case *SelectionList:
 		return t.compileSelectionList(v, parent, depth, elemBase, elemSize)
-	case Table:
-		return t.compileTable(v, parent, depth)
-	case TabsNode:
-		return t.compileTabs(v, parent, depth)
 	case TreeView:
 		return t.compileTreeView(v, parent, depth)
 	case TextInput:
 		return t.compileTextInput(v, parent, depth)
-	case OverlayNode:
-		return t.compileOverlay(v, parent, depth)
 	case ScreenEffectNode:
 		for i, eff := range v.Effects {
 			if ec, ok := eff.(effectCompilable); ok {
@@ -3124,51 +3108,6 @@ func (t *Template) compileSelectionList(v *SelectionList, parent int16, depth in
 	return idx
 }
 
-func (t *Template) compileTable(v Table, parent int16, depth int) int16 {
-	var rowsPtr *[][]string
-	switch rows := v.Rows.(type) {
-	case *[][]string:
-		rowsPtr = rows
-	case [][]string:
-		rowsPtr = &rows
-	}
-
-	ext := &opTable{
-		columns:     v.Columns,
-		rowsPtr:     rowsPtr,
-		showHeader:  v.ShowHeader,
-		headerStyle: v.HeaderStyle,
-		rowStyle:    v.RowStyle,
-		altStyle:    v.AltRowStyle,
-	}
-
-	return t.addOp(Op{
-		Kind:   OpTable,
-		Parent: parent,
-		Ext:    ext,
-	}, depth)
-}
-
-func (t *Template) compileTabs(v TabsNode, parent int16, depth int) int16 {
-	gap := v.Gap
-	if gap == 0 {
-		gap = 2
-	}
-	ext := &opTabs{
-		labels:        v.Labels,
-		selectedPtr:   v.Selected,
-		styleType:     v.Style,
-		gap:           gap,
-		activeStyle:   v.ActiveStyle,
-		inactiveStyle: v.InactiveStyle,
-	}
-	return t.addOp(Op{
-		Kind:   OpTabs,
-		Parent: parent,
-		Ext:    ext,
-	}, depth)
-}
-
 func (t *Template) compileTreeView(v TreeView, parent int16, depth int) int16 {
 	indent := v.Indent
 	if indent == 0 {
@@ -3230,38 +3169,6 @@ func (t *Template) compileTextInput(v TextInput, parent int16, depth int) int16 
 		Parent: parent,
 		Width:  int16(v.Width),
 		Margin: v.Style.margin,
-		Ext:    ext,
-	}, depth)
-}
-
-func (t *Template) compileOverlay(v OverlayNode, parent int16, depth int) int16 {
-	var childTmpl *Template
-	if v.Child != nil {
-		childTmpl = t.buildWithRoot(v.Child)
-	}
-
-	centered := v.Centered || (v.X == 0 && v.Y == 0)
-
-	backdropFG := v.BackdropFG
-	if backdropFG.Mode == ColorDefault && v.Backdrop {
-		backdropFG = BrightBlack
-	}
-
-	ext := &opOverlay{
-		centered:   centered,
-		x:          int16(v.X),
-		y:          int16(v.Y),
-		backdrop:   v.Backdrop,
-		backdropFG: backdropFG,
-		bg:         v.BG,
-		childTmpl:  childTmpl,
-	}
-
-	return t.addOp(Op{
-		Kind:   OpOverlay,
-		Parent: parent,
-		Width:  int16(v.Width),
-		Height: int16(v.Height),
 		Ext:    ext,
 	}, depth)
 }
@@ -4928,18 +4835,6 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 	case OpAutoTable:
 		geom.W = availW
 
-	case OpTable:
-		ext := op.Ext.(*opTable)
-		totalW := 0
-		for _, col := range ext.columns {
-			if col.Width > 0 {
-				totalW += col.Width
-			} else {
-				totalW += 10
-			}
-		}
-		geom.W = int16(totalW)
-
 	case OpSparkline:
 		geom.W = op.width()
 		if geom.W == 0 {
@@ -5565,20 +5460,6 @@ func (t *Template) layout(_ int16) {
 					visibleRows = sc.maxVisible
 				}
 				geom.H = int16(visibleRows + 1)
-				if geom.H == 0 {
-					geom.H = 1
-				}
-
-			case OpTable:
-				ext := op.Ext.(*opTable)
-				rowCount := 0
-				if ext.rowsPtr != nil {
-					rowCount = len(*ext.rowsPtr)
-				}
-				if ext.showHeader {
-					rowCount++
-				}
-				geom.H = int16(rowCount)
 				if geom.H == 0 {
 					geom.H = 1
 				}
@@ -6910,9 +6791,6 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpAutoTable:
 		t.renderAutoTable(buf, op, absX, absY, maxW)
 
-	case OpTable:
-		t.renderTable(buf, op, absX, absY, maxW)
-
 	case OpSparkline:
 		op.Ext.(*opSparkline).render(t, buf, absX, absY, contentW, geom.H)
 
@@ -7510,9 +7388,6 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		b = strconv.AppendInt(b, int64(*ext.totalPtr), 10)
 		text := unsafe.String(&b[0], len(b))
 		buf.WriteStringFast(int(absX), int(absY), text, style, int(maxW))
-
-	case OpTable:
-		sub.renderTable(buf, op, absX, absY, maxW)
 
 	case OpSparkline:
 		op.Ext.(*opSparkline).render(sub, buf, absX, absY, contentW, geom.H)
@@ -8639,59 +8514,9 @@ func (t *Template) renderScrollbar(buf *Buffer, op *Op, geom *Geom, absX, absY i
 	}
 }
 
-func (t *Template) renderTable(buf *Buffer, op *Op, absX, absY, maxW int16) {
-	ext := op.Ext.(*opTable)
-	if ext.rowsPtr == nil {
-		return
-	}
-	rows := *ext.rowsPtr
-	y := int(absY)
-
-	// Render header if enabled
-	if ext.showHeader {
-		x := int(absX)
-		for _, col := range ext.columns {
-			width := col.Width
-			if width == 0 {
-				width = 10
-			}
-			t.writeTableCell(buf, x, y, col.Header, width, col.Align, ext.headerStyle)
-			x += width
-		}
-		y++
-	}
-
-	// Render data rows
-	for rowIdx, row := range rows {
-		x := int(absX)
-		style := ext.rowStyle
-		// Alternating row style (check if AltStyle has any non-default values)
-		if rowIdx%2 == 1 && ext.altStyle != (Style{}) {
-			style = ext.altStyle
-		}
-
-		for colIdx, col := range ext.columns {
-			width := col.Width
-			if width == 0 {
-				width = 10
-			}
-			cellText := ""
-			if colIdx < len(row) {
-				cellText = row[colIdx]
-			}
-			t.writeTableCell(buf, x, y, cellText, width, col.Align, style)
-			x += width
-		}
-		y++
-	}
-}
-
 func (t *Template) writeTableCell(buf *Buffer, x, y int, text string, width int, align Align, style Style) {
 	textLen := StringWidth(text)
 	if textLen > width {
-		// Truncate (rune-wise; width-correct truncation for wide chars is a
-		// follow-up — this may still over-trim by 1 cell for emoji-heavy
-		// cells but won't cause row overflow).
 		runes := []rune(text)
 		text = string(runes[:width])
 		textLen = StringWidth(text)
@@ -8699,18 +8524,16 @@ func (t *Template) writeTableCell(buf *Buffer, x, y int, text string, width int,
 
 	padding := width - textLen
 	var leftPad, rightPad int
-
 	switch align {
 	case AlignRight:
 		leftPad = padding
 	case AlignCenter:
 		leftPad = padding / 2
 		rightPad = padding - leftPad
-	default: // AlignLeft
+	default:
 		rightPad = padding
 	}
 
-	// Write padding and text
 	pos := x
 	for i := 0; i < leftPad; i++ {
 		buf.Set(pos, y, Cell{Rune: ' ', Style: style})
@@ -9020,7 +8843,7 @@ func opKindName(k OpKind) string {
 		OpContainer: "Container", OpIf: "If", OpForEach: "ForEach", OpSwitch: "Switch", OpMatch: "Match",
 		OpCustom: "Custom", OpLayout: "Layout", OpLayer: "Layer",
 		OpSelectionList: "SelectionList",
-		OpTable:         "Table", OpAutoTable: "AutoTable", OpSparkline: "Sparkline",
+		OpAutoTable: "AutoTable", OpSparkline: "Sparkline",
 		OpHRule: "HRule", OpVRule: "VRule", OpSpacer: "Spacer",
 		OpSpinner: "Spinner", OpScrollbar: "Scrollbar", OpTabs: "Tabs", OpTreeView: "TreeView",
 		OpJump: "Jump", OpTextInput: "TextInput", OpOverlay: "Overlay", OpScreenEffect: "ScreenEffect",

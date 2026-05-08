@@ -21,11 +21,8 @@ func (s ScrollbarC) Build() Component        { return s }
 func (a AutoTableC) Build() Component        { return a }
 func (t TextBlockC) Build() Component        { return t }
 func (c Custom) Build() Component            { return c }
-func (t Table) Build() Component             { return t }
-func (t TabsNode) Build() Component          { return t }
 func (t TreeView) Build() Component          { return t }
 func (t TextInput) Build() Component         { return t }
-func (o OverlayNode) Build() Component       { return o }
 func (s ScreenEffectNode) Build() Component  { return s }
 func (s SelectionList) Build() Component     { return s }
 func (c *CheckboxC) Build() Component        { return c }

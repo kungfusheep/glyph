@@ -2298,32 +2298,6 @@ func ExampleTextViewC() {
 	// third
 }
 
-// Manual table.
-// Table renders tabular data with explicit column definitions, widths, and alignment.
-func ExampleTable() {
-	// example:
-	rows := [][]string{
-		{"Alice", "30", "Engineer"},
-		{"Bob", "25", "Designer"},
-	}
-	tree := Table{
-		Columns: []TableColumn{
-			{Header: "Name", Width: 10},
-			{Header: "Age", Width: 5, Align: AlignRight},
-			{Header: "Role", Width: 10},
-		},
-		Rows:       &rows,
-		ShowHeader: true,
-	}
-	// :example
-
-	renderAndPrint("Table", tree, 25, 3)
-	// Output:
-	// Name        AgeRole
-	// Alice        30Engineer
-	// Bob          25Designer
-}
-
 // Tree structure.
 // TreeNode builds a hierarchical tree. Set Expanded to control which branches are open.
 func ExampleTreeNode() {

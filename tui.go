@@ -378,24 +378,6 @@ const (
 	AlignCenter
 )
 
-// TableColumn defines a column in a Table.
-type TableColumn struct {
-	Header string // column header text
-	Width  int    // column width (0 = auto-size)
-	Align  Align  // text alignment
-}
-
-// Table displays tabular data with columns and optional headers.
-// Uses pointer bindings for dynamic data updates.
-type Table struct {
-	Columns     []TableColumn // column definitions
-	Rows        any           // *[][]string - pointer to row data
-	ShowHeader  bool          // show header row
-	HeaderStyle Style         // style for header row
-	RowStyle    Style         // style for data rows
-	AltRowStyle Style         // style for alternating rows (if non-zero)
-}
-
 // SpinnerBraille is the default spinner animation (braille dots).
 var SpinnerBraille = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -416,16 +398,6 @@ const (
 	TabsStyleBox                        // tabs in boxes
 	TabsStyleBracket                    // tabs with [ ] brackets
 )
-
-// TabsNode displays a row of tab headers with active tab indicator.
-type TabsNode struct {
-	Labels        []string  // tab labels
-	Selected      *int      // pointer to selected tab index
-	Style         TabsStyle // visual style
-	Gap           int       // gap between tabs (default: 2)
-	ActiveStyle   Style     // style for active tab
-	InactiveStyle Style     // style for inactive tabs
-}
 
 // TreeNode represents a node in a tree structure.
 type TreeNode struct {
@@ -773,22 +745,6 @@ type TextInput struct {
 	Style            Style  // Text style
 	PlaceholderStyle Style  // Placeholder style (zero = dim text)
 	CursorStyle      Style  // Cursor style (zero = reverse video)
-}
-
-// OverlayNode displays content floating above the main view.
-// Use for modals, dialogs, and floating windows.
-// Control visibility with glyph.If:
-//
-//	glyph.If(&showModal).Eq(true).Then(glyph.Overlay{Child: ...})
-type OverlayNode struct {
-	Centered   bool      // true = center on screen (default behavior if X/Y not set)
-	X, Y       int       // explicit position (used if Centered is false)
-	Width      int       // explicit width (0 = auto from content)
-	Height     int       // explicit height (0 = auto from content)
-	Backdrop   bool      // draw dimmed backdrop behind overlay
-	BackdropFG Color     // backdrop dim color (default: BrightBlack)
-	BG         Color     // background color for overlay content area (fills before rendering child)
-	Child      Component // overlay content
 }
 
 // sliceHeader is the runtime representation of a slice.

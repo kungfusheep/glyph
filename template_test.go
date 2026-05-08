@@ -5751,9 +5751,8 @@ func TestAnimate(t *testing.T) {
 		active := true
 		tmpl := Build(VBox(
 			Text("X").FG(RGB(200, 200, 200)),
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(8).Height(1)(
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).Height(1)(
 					Text("card"),
 					ScreenEffect(
 						SEVignette().Smooth().
@@ -5763,7 +5762,7 @@ func TestAnimate(t *testing.T) {
 							),
 					),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(20, 5)
 		pctx := PostContext{Width: 20, Height: 5}
@@ -5800,15 +5799,14 @@ func TestAnimate(t *testing.T) {
 		active := true
 		ref := NodeRef{}
 		tmpl := Build(VBox(
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(8).Height(1).
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).Height(1).
 					NodeRef(&ref).
 					Opacity(In(1.0).Out(Animate.Duration(120*time.Millisecond)(0.0)))(
 					Text("card"),
 					ScreenEffect(SEDropShadow().Focus(&ref)),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(20, 5)
 
@@ -5838,16 +5836,15 @@ func TestAnimate(t *testing.T) {
 		bg := RGB(160, 160, 160)
 		tmpl := Build(VBox(
 			VBox.Width(20).Height(5).Fill(bg)(),
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(8).
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).
 					Fill(RGB(20, 20, 20)).
 					NodeRef(&ref).
 					Opacity(In(1.0).Out(Animate.Duration(120*time.Millisecond)(0.0)))(
 					Text("card"),
 					ScreenEffect(SEDropShadow().Focus(&ref).Strength(1).Radius(4)),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(20, 5)
 		pctx := PostContext{Width: 20, Height: 5, DefaultFG: bg, DefaultBG: bg}
@@ -5915,9 +5912,8 @@ func TestAnimate(t *testing.T) {
 		panel := RGB(0, 0, 0)
 		tmpl := Build(VBox(
 			VBox.Width(40).Height(10).Fill(bg)(),
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(12).
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(12).
 					Fill(panel).
 					NodeRef(&ref).
 					Opacity(In(1.0).Out(Animate.Duration(300*time.Millisecond)(0.0)))(
@@ -5929,7 +5925,7 @@ func TestAnimate(t *testing.T) {
 						SEDropShadow().Focus(&ref).Strength(0.28).Radius(10),
 					),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(40, 10)
 		pctx := PostContext{Width: 40, Height: 10, DefaultFG: bg, DefaultBG: bg}
@@ -6089,9 +6085,8 @@ func TestAnimate(t *testing.T) {
 		ref := NodeRef{}
 		tmpl := Build(VBox(
 			Text("X").FG(RGB(200, 200, 200)),
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(8).Height(1).NodeRef(&ref)(
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).Height(1).NodeRef(&ref)(
 					Text("card"),
 					ScreenEffect(
 						SEVignette().Dodge(&ref).
@@ -6106,7 +6101,7 @@ func TestAnimate(t *testing.T) {
 							),
 					),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(20, 5)
 		pctx := PostContext{Width: 20, Height: 5}
