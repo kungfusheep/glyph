@@ -10,7 +10,7 @@ func TestV2SelectionListBasic(t *testing.T) {
 	selected := 1
 
 	view := VBox(
-		&SelectionList{
+		&selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "> ",
@@ -54,7 +54,7 @@ func TestV2SelectionListWithRender(t *testing.T) {
 	selected := 0
 
 	view := VBox(
-		&SelectionList{
+		&selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "* ",
@@ -81,7 +81,7 @@ func TestV2SelectionListMaxVisible(t *testing.T) {
 	items := []string{"One", "Two", "Three", "Four", "Five"}
 	selected := 0
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",
@@ -124,7 +124,7 @@ func TestV2SelectionListScrolling(t *testing.T) {
 	items := []string{"One", "Two", "Three", "Four", "Five"}
 	selected := 3 // Select "Four"
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",
@@ -174,7 +174,7 @@ func TestSelectionListOverflowClipped(t *testing.T) {
 	}
 	selected := 0
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",
@@ -245,7 +245,7 @@ func TestSelectionListVariableHeight(t *testing.T) {
 	}
 	selected := 1
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:    &items,
 		Selected: &selected,
 		Marker:   "> ",
@@ -324,7 +324,7 @@ func TestSelectionListVariableHeightMaxVisible(t *testing.T) {
 	}
 	selected := 0
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",
@@ -379,7 +379,7 @@ func TestSelectionListVariableHeightScrolling(t *testing.T) {
 	}
 	selected := 4 // select last item
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",
@@ -440,7 +440,7 @@ func TestSelectionListVariableHeightSelectedRef(t *testing.T) {
 	selected := 1
 	ref := &NodeRef{}
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:       &items,
 		Selected:    &selected,
 		Marker:      "> ",
@@ -488,7 +488,7 @@ func TestSelectionListVariableHeightClipped(t *testing.T) {
 	}
 	selected := 0
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",
@@ -548,7 +548,7 @@ func TestSelectionListOverflowScrolling(t *testing.T) {
 	}
 	selected := 24 // last item
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",
@@ -599,7 +599,7 @@ func TestSelectionListClampsSelectionAfterShrink(t *testing.T) {
 	items := []string{"first", "second"}
 	selected := 1
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",

@@ -446,12 +446,12 @@ type flex struct {
 	flexGrowPtr     *float32
 }
 
-// SelectionList displays a list of items with selection marker.
+// selectionList displays a list of items with selection marker.
 // Items must be a pointer to a slice (*[]T).
 // Selected must be a pointer to an int (*int) tracking the selected index.
 // Render is optional - if nil, items are rendered using fmt.Sprintf("%v", item).
 // Marker defaults to "> " if not specified.
-type SelectionList struct {
+type selectionList struct {
 	Items            any      // *[]T - pointer to slice of items
 	Selected         *int     // pointer to selected index
 	Marker           string   // selection marker (default "> ", use " " for no visible marker)
@@ -469,7 +469,7 @@ type SelectionList struct {
 }
 
 // ensureVisible adjusts scroll offset so selected item is visible.
-func (s *SelectionList) ensureVisible() {
+func (s *selectionList) ensureVisible() {
 	if s.Selected == nil {
 		return
 	}
@@ -505,7 +505,7 @@ func (s *SelectionList) ensureVisible() {
 }
 
 // Up moves selection up by one. Safe to use directly with app.Handle.
-func (s *SelectionList) Up(m any) {
+func (s *selectionList) Up(m any) {
 	if s.Selected != nil && *s.Selected > 0 {
 		old := *s.Selected
 		*s.Selected--
@@ -517,7 +517,7 @@ func (s *SelectionList) Up(m any) {
 }
 
 // Down moves selection down by one. Safe to use directly with app.Handle.
-func (s *SelectionList) Down(m any) {
+func (s *selectionList) Down(m any) {
 	if s.Selected != nil && s.len > 0 && *s.Selected < s.len-1 {
 		old := *s.Selected
 		*s.Selected++
@@ -529,7 +529,7 @@ func (s *SelectionList) Down(m any) {
 }
 
 // PageUp moves selection up by page size (MaxVisible or 10).
-func (s *SelectionList) PageUp(m any) {
+func (s *selectionList) PageUp(m any) {
 	if s.Selected != nil {
 		old := *s.Selected
 		pageSize := 10
@@ -548,7 +548,7 @@ func (s *SelectionList) PageUp(m any) {
 }
 
 // PageDown moves selection down by page size (MaxVisible or 10).
-func (s *SelectionList) PageDown(m any) {
+func (s *selectionList) PageDown(m any) {
 	if s.Selected != nil && s.len > 0 {
 		old := *s.Selected
 		pageSize := 10
@@ -567,7 +567,7 @@ func (s *SelectionList) PageDown(m any) {
 }
 
 // First moves selection to the first item.
-func (s *SelectionList) First(m any) {
+func (s *selectionList) First(m any) {
 	if s.Selected != nil {
 		old := *s.Selected
 		*s.Selected = 0
@@ -579,7 +579,7 @@ func (s *SelectionList) First(m any) {
 }
 
 // Last moves selection to the last item.
-func (s *SelectionList) Last(m any) {
+func (s *selectionList) Last(m any) {
 	if s.Selected != nil && s.len > 0 {
 		old := *s.Selected
 		*s.Selected = s.len - 1
@@ -596,9 +596,9 @@ type Span struct {
 	Style Style
 }
 
-// RichTextNode displays text with mixed inline styles.
-// Spans can be []Span (static) or *[]Span (dynamic binding).
-type RichTextNode struct {
+// richTextNode is the internal compiled form for inline-styled text.
+// Constructed via Rich(...) or Textf(...).
+type richTextNode struct {
 	Flex
 	Spans    any       // []Span or *[]Span
 	spanPtrs []*string // per-span *string pointers for Textf (nil = static text)
@@ -617,13 +617,13 @@ type RichTextNode struct {
 // construction updates the render next frame.
 //
 //	Rich(&statusSpans)  // live spans, mutate slice to update
-func Rich(parts ...any) RichTextNode {
+func Rich(parts ...any) Component {
 	if len(parts) == 1 {
 		switch v := parts[0].(type) {
 		case *[]Span:
-			return RichTextNode{Spans: v}
+			return richTextNode{Spans: v}
 		case []Span:
-			return RichTextNode{Spans: v}
+			return richTextNode{Spans: v}
 		}
 	}
 	spans := make([]Span, 0, len(parts))
@@ -635,13 +635,7 @@ func Rich(parts ...any) RichTextNode {
 			spans = append(spans, v)
 		}
 	}
-	return RichTextNode{Spans: spans}
-}
-
-// CharWrap switches RichText wrapping from word boundaries to character width.
-func (r RichTextNode) CharWrap() RichTextNode {
-	r.charWrap = true
-	return r
+	return richTextNode{Spans: spans}
 }
 
 // Styled creates a span with the given style.
@@ -697,7 +691,6 @@ func BG(text any, color Color) any {
 }
 
 // InputState bundles the state for a text input field.
-// Use with TextInput.Field for cleaner multi-field forms.
 type InputState struct {
 	Value  string
 	Cursor int
@@ -715,19 +708,9 @@ type FocusGroup struct {
 	Current int
 }
 
-// TextInput is a single-line text input field.
-// Wire up input handling via riffkey.NewTextHandler or riffkey.NewFieldHandler.
-//
-// Example with InputState + FocusGroup (recommended for forms):
-//
-//	name := tui.InputState{}
-//	focus := tui.FocusGroup{}
-//	tui.TextInput{Field: &name, FocusGroup: &focus, FocusIndex: 0}
-//
-// Example with separate pointers (for single fields):
-//
-//	tui.TextInput{Value: &query, Cursor: &cursor, Placeholder: "Search..."}
-type TextInput struct {
+// textInput is the internal compiled form of a single-line text input.
+// Constructed via Input(...) and InputC.toTextInput.
+type textInput struct {
 	// Field-based API (recommended for forms)
 	Field      *InputState // Bundles Value + Cursor in one struct
 	FocusGroup *FocusGroup // Shared focus tracker - cursor shows when FocusGroup.Current == FocusIndex

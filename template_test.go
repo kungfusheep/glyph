@@ -1619,8 +1619,8 @@ func TestForEachMultipleStringFields(t *testing.T) {
 	}
 }
 
-// TestSelectionListMultipleFields tests SelectionList with complex HBox render
-// SelectionList now supports complex layouts (HBox/VBox) in the Render function
+// TestSelectionListMultipleFields tests selectionList with complex HBox render
+// selectionList now supports complex layouts (HBox/VBox) in the Render function
 func TestSelectionListMultipleFields(t *testing.T) {
 	type Item struct {
 		Icon        string
@@ -1636,7 +1636,7 @@ func TestSelectionListMultipleFields(t *testing.T) {
 
 	selected := 0
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",
@@ -1658,9 +1658,9 @@ func TestSelectionListMultipleFields(t *testing.T) {
 	line1 := buf.GetLine(1)
 	line2 := buf.GetLine(2)
 
-	t.Logf("SelectionList Line 0: %q", line0)
-	t.Logf("SelectionList Line 1: %q", line1)
-	t.Logf("SelectionList Line 2: %q", line2)
+	t.Logf("selectionList Line 0: %q", line0)
+	t.Logf("selectionList Line 1: %q", line1)
+	t.Logf("selectionList Line 2: %q", line2)
 
 	// Verify that each line contains the expected content
 	// Line 0 is selected, should have "> " marker
@@ -1696,7 +1696,7 @@ func TestSelectionListDefaultStyle(t *testing.T) {
 	bgColor := PaletteColor(236)    // Default background
 	selectedBG := PaletteColor(240) // Selected background
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:         &items,
 		Selected:      &selected,
 		Marker:        "> ",
@@ -1996,7 +1996,7 @@ func TestComplexNestedLayouts(t *testing.T) {
 		}
 	})
 
-	t.Run("SelectionList with deeply nested Render", func(t *testing.T) {
+	t.Run("selectionList with deeply nested Render", func(t *testing.T) {
 		type MenuItem struct {
 			Icon     string
 			Label    string
@@ -2010,7 +2010,7 @@ func TestComplexNestedLayouts(t *testing.T) {
 		}
 		selected := 1
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:      &items,
 			Selected:   &selected,
 			Marker:     "> ",
@@ -2293,7 +2293,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 		}
 	})
 
-	t.Run("LayerView with SelectionList sidebar", func(t *testing.T) {
+	t.Run("LayerView with selectionList sidebar", func(t *testing.T) {
 		// This is the exact pattern that was causing issues
 		layer := NewLayer()
 		layer.EnsureSize(50, 10)
@@ -2314,7 +2314,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 		tmpl := Build(HBox(
 			VBox.Border(BorderSingle).Width(20)(
 				Text("Browser"),
-				&SelectionList{
+				&selectionList{
 					Items:    &items,
 					Selected: &selected,
 					Marker:   "> ",
@@ -2425,7 +2425,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 		}
 		selected := 0
 
-		sidebarList := &SelectionList{
+		sidebarList := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "> ",
@@ -4667,11 +4667,11 @@ func TestV2SplitLayout(t *testing.T) {
 		HBox(
 			VBox(
 				LayerView(layer1).ViewHeight(5),
-				RichTextNode{Spans: spans1},
+				richTextNode{Spans: spans1},
 			),
 			VBox(
 				LayerView(layer2).ViewHeight(5),
-				RichTextNode{Spans: spans2},
+				richTextNode{Spans: spans2},
 			),
 		),
 		Text("Global status"),

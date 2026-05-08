@@ -41,7 +41,7 @@ type forEachCompiler interface {
 
 // listCompiler is implemented by generic List types to compile themselves
 type listCompiler interface {
-	toSelectionList() *SelectionList
+	toSelectionList() *selectionList
 }
 
 // bindable is implemented by components that declare key bindings as data.
@@ -112,10 +112,10 @@ type Template struct {
 	// App reference for jump mode coordination
 	app *App
 
-	// per-item index for ForEach/SelectionList (reset per iteration, used by per-item tweens)
+	// per-item index for ForEach/selectionList (reset per iteration, used by per-item tweens)
 	itemIndex int
 
-	// row styling for SelectionList selected rows (merged with cell styles)
+	// row styling for selectionList selected rows (merged with cell styles)
 	rowBG   Color
 	rowFG   Color
 	rowAttr Attribute
@@ -2531,7 +2531,7 @@ type opTreeView struct {
 
 type opSelectionList struct {
 	opForEach
-	listPtr      *SelectionList
+	listPtr      *selectionList
 	selectedPtr  *int
 	selectedRef  *NodeRef
 	marker       string
@@ -2625,7 +2625,7 @@ const (
 	OpLayout // Custom layout
 	OpLayer  // LayerView (data in Ext)
 
-	OpSelectionList // SelectionList (data in Ext)
+	OpSelectionList // selectionList (data in Ext)
 
 	OpAutoTable // AutoTable (data in Ext)
 
@@ -2730,17 +2730,17 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		return t.compileBox(v, parent, depth, elemBase, elemSize)
 	case conditionNode:
 		return t.compileCondition(v, parent, depth, elemBase, elemSize)
-	case RichTextNode:
+	case richTextNode:
 		return t.compileRichText(v, parent, depth, elemBase, elemSize)
-	case SelectionList:
+	case selectionList:
 		return t.compileSelectionList(&v, parent, depth, elemBase, elemSize)
-	case *SelectionList:
+	case *selectionList:
 		return t.compileSelectionList(v, parent, depth, elemBase, elemSize)
 	case TreeView:
 		return t.compileTreeView(v, parent, depth)
-	case TextInput:
+	case textInput:
 		return t.compileTextInput(v, parent, depth)
-	case ScreenEffectNode:
+	case screenEffectNode:
 		for i, eff := range v.Effects {
 			if ec, ok := eff.(effectCompilable); ok {
 				v.Effects[i] = ec.compileEffect(t)
@@ -2926,7 +2926,7 @@ func (t *Template) compileBox(box Box, parent int16, depth int, elemBase unsafe.
 	return idx
 }
 
-func (t *Template) compileRichText(v RichTextNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *Template) compileRichText(v richTextNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	ext := &opRichText{charWrap: v.charWrap}
 
 	switch spans := v.Spans.(type) {
@@ -3001,15 +3001,15 @@ func resolveSpanStrs(spans []Span, offs []uintptr, elemBase unsafe.Pointer) []Sp
 	return resolved
 }
 
-func (t *Template) compileSelectionList(v *SelectionList, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *Template) compileSelectionList(v *selectionList, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	// Analyze slice using reflection
 	sliceRV := reflect.ValueOf(v.Items)
 	if sliceRV.Kind() != reflect.Ptr {
-		panic("SelectionList Items must be pointer to slice")
+		panic("selectionList Items must be pointer to slice")
 	}
 	sliceType := sliceRV.Type().Elem()
 	if sliceType.Kind() != reflect.Slice {
-		panic("SelectionList Items must be pointer to slice")
+		panic("selectionList Items must be pointer to slice")
 	}
 	elemType := sliceType.Elem()
 	sliceElemSize := elemType.Size()
@@ -3142,7 +3142,7 @@ func (t *Template) compileTreeView(v TreeView, parent int16, depth int) int16 {
 	}, depth)
 }
 
-func (t *Template) compileTextInput(v TextInput, parent int16, depth int) int16 {
+func (t *Template) compileTextInput(v textInput, parent int16, depth int) int16 {
 	ext := &opTextInput{
 		fieldPtr:       v.Field,
 		focusGroupPtr:  v.FocusGroup,
@@ -8842,7 +8842,7 @@ func opKindName(k OpKind) string {
 		OpLeader: "Leader", OpCounter: "Counter",
 		OpContainer: "Container", OpIf: "If", OpForEach: "ForEach", OpSwitch: "Switch", OpMatch: "Match",
 		OpCustom: "Custom", OpLayout: "Layout", OpLayer: "Layer",
-		OpSelectionList: "SelectionList",
+		OpSelectionList: "selectionList",
 		OpAutoTable: "AutoTable", OpSparkline: "Sparkline",
 		OpHRule: "HRule", OpVRule: "VRule", OpSpacer: "Spacer",
 		OpSpinner: "Spinner", OpScrollbar: "Scrollbar", OpTabs: "Tabs", OpTreeView: "TreeView",

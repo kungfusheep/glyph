@@ -950,7 +950,7 @@ func (t TextC) MarginTRBL(a, b, c, d int16) TextC { t.style.margin = [4]int16{a,
 //
 //	Textf("Hello ", Bold("world"), "!")
 //	Textf("Name: ", Bold(&it.Name), " Status: ", &it.Status)  // ForEach compatible
-func Textf(parts ...any) RichTextNode {
+func Textf(parts ...any) Component {
 	spans := make([]Span, 0, len(parts))
 	ptrs := make([]*string, 0, len(parts))
 	hasPtrs := false
@@ -985,7 +985,7 @@ func Textf(parts ...any) RichTextNode {
 		}
 	}
 
-	node := RichTextNode{Spans: spans}
+	node := richTextNode{Spans: spans}
 	if hasPtrs {
 		node.spanPtrs = ptrs
 	}
@@ -2064,7 +2064,7 @@ func (f ForEachC[T]) compileTo(t *Template, parent int16, depth int) int16 {
 }
 
 // ============================================================================
-// SelectionList - Navigable list with selection
+// selectionList - Navigable list with selection
 // ============================================================================
 
 type ListC[T any] struct {
@@ -2081,7 +2081,7 @@ type ListC[T any] struct {
 	styleDyn         any
 	selectedStyleDyn any
 	selectedRef      *NodeRef
-	cached           *SelectionList // cached instance for consistent reference
+	cached           *selectionList // cached instance for consistent reference
 	declaredBindings []binding
 }
 
@@ -2239,11 +2239,11 @@ func (l *ListC[T]) MarginTRBL(t, r, b, li int16) *ListC[T] {
 	return l
 }
 
-// toSelectionList returns the internal SelectionList (creates on first call).
+// toSelectionList returns the internal selectionList (creates on first call).
 // Same instance is returned for both template compilation and method calls.
-func (l *ListC[T]) toSelectionList() *SelectionList {
+func (l *ListC[T]) toSelectionList() *selectionList {
 	if l.cached == nil {
-		sl := &SelectionList{
+		sl := &selectionList{
 			Items:         l.items,
 			Selected:      l.selected,
 			Marker:        l.marker,
@@ -2814,7 +2814,7 @@ type CheckListC[T any] struct {
 	selectedStyle    Style
 	gap              int8
 	declaredBindings []binding
-	cached           *SelectionList
+	cached           *selectionList
 	gapPtr           *int8
 	gapCond          any
 }
@@ -3037,7 +3037,7 @@ func (c *CheckListC[T]) First(m any) { c.toSelectionList().First(m) }
 // Last moves selection to last item.
 func (c *CheckListC[T]) Last(m any) { c.toSelectionList().Last(m) }
 
-func (c *CheckListC[T]) toSelectionList() *SelectionList {
+func (c *CheckListC[T]) toSelectionList() *selectionList {
 	if c.cached == nil {
 		// Start with explicit functions (may be nil)
 		checkedFn := c.checked
@@ -3075,7 +3075,7 @@ func (c *CheckListC[T]) toSelectionList() *SelectionList {
 		c.checked = checkedFn
 		c.render = renderFn
 
-		c.cached = &SelectionList{
+		c.cached = &selectionList{
 			Items:         c.items,
 			Selected:      c.selected,
 			Marker:        c.marker,
@@ -3304,14 +3304,14 @@ func (i *InputC) Clear() {
 	i.field.Clear()
 }
 
-// State returns a pointer to the internal input state (for TextInput compatibility).
+// State returns a pointer to the internal input state.
 func (i *InputC) State() *InputState {
 	return &i.field
 }
 
-// toTextInput converts to the underlying TextInput for rendering.
-func (i *InputC) toTextInput() TextInput {
-	ti := TextInput{
+// toTextInput converts to the underlying compiled form for rendering.
+func (i *InputC) toTextInput() textInput {
+	ti := textInput{
 		Field:       &i.field,
 		Placeholder: i.placeholder,
 		Width:       i.width,

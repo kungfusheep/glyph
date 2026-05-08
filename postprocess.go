@@ -34,7 +34,7 @@ type Effect interface {
 }
 
 // effectCompilable is implemented by effects that have dynamic properties (e.g. animated strength).
-// The template compiler calls this during ScreenEffectNode compilation to wire tween evaluators.
+// The template compiler calls this during screenEffectNode compilation to wire tween evaluators.
 // Returns a new Effect with dynamic pointers wired in (effects are value types).
 type effectCompilable interface {
 	compileEffect(t *Template) Effect
@@ -46,18 +46,18 @@ type funcEffect func(*Buffer, PostContext)
 
 func (f funcEffect) Apply(buf *Buffer, ctx PostContext) { f(buf, ctx) }
 
-// ScreenEffectNode is a declarative node that registers one or more full-screen
+// screenEffectNode is a declarative node that registers one or more full-screen
 // post-processing effects. Place it anywhere in the view tree. It takes zero
 // layout space and applies to the entire screen. Works with If() for reactive
 // toggling. Accepts multiple effects in a single node.
-type ScreenEffectNode struct {
+type screenEffectNode struct {
 	Effects []Effect
 }
 
 // ScreenEffect creates a declarative full-screen post-processing node.
 // Accepts multiple effects — they apply in order, left to right.
-func ScreenEffect(pp ...Effect) ScreenEffectNode {
-	return ScreenEffectNode{Effects: pp}
+func ScreenEffect(pp ...Effect) Component {
+	return screenEffectNode{Effects: pp}
 }
 
 // PostContext provides frame metadata to post-processing passes.
