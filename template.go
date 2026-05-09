@@ -10,6 +10,8 @@ import (
 	"time"
 	"unicode"
 	"unsafe"
+
+	"github.com/kungfusheep/riffkey"
 )
 
 // Component is the extension interface for custom components.
@@ -47,6 +49,12 @@ type listCompiler interface {
 // bindable is implemented by components that declare key bindings as data.
 type bindable interface {
 	bindings() []binding
+}
+
+// routeBindable is implemented by zero-size routing nodes that declare
+// handlers directly in the view tree.
+type routeBindable interface {
+	routeBindings() []binding
 }
 
 // textInputBindable is implemented by InputC for text input routing.
@@ -154,10 +162,13 @@ type Template struct {
 	// ext pools — contiguous allocations for cache-friendly render access.
 
 	// Declarative bindings collected during compile, wired during setup
-	pendingBindings     []binding
-	pendingTIB          *textInputBinding
-	pendingLogs         []*LogC       // Logs that need app.RequestRender wiring
-	pendingFocusManager *FocusManager // Focus manager for multi-input routing
+	pendingBindings      []binding
+	pendingRouteBindings []binding
+	pendingTIB           *textInputBinding
+	pendingLogs          []*LogC       // Logs that need app.RequestRender wiring
+	pendingFocusManager  *FocusManager // Focus manager for multi-input routing
+	routeRouter          *riffkey.Router
+	routeAttached        bool
 
 	// per-frame evaluators — conditions, animations, etc. run at start of Execute
 	evals []func()
@@ -409,6 +420,62 @@ func branchAt(branches []*Template, idx int) *Template {
 	return branches[idx]
 }
 
+func routeChildTemplates(t *Template) []*Template {
+	if t == nil {
+		return nil
+	}
+	var children []*Template
+	for i := range t.ops {
+		switch ext := t.ops[i].Ext.(type) {
+		case *opIf:
+			if ext.thenTmpl != nil {
+				children = append(children, ext.thenTmpl)
+			}
+			if ext.elseTmpl != nil {
+				children = append(children, ext.elseTmpl)
+			}
+		case *opSwitch:
+			children = append(children, ext.cases...)
+			if ext.def != nil {
+				children = append(children, ext.def)
+			}
+		case *opMatch:
+			children = append(children, ext.cases...)
+			if ext.def != nil {
+				children = append(children, ext.def)
+			}
+		}
+	}
+	return children
+}
+
+func setRouteBranchActive(branches []*Template, activeIdx int) {
+	for idx, tmpl := range branches {
+		if tmpl == nil {
+			continue
+		}
+		tmpl.setRouteActive(idx == activeIdx)
+	}
+}
+
+func (t *Template) setRouteActive(active bool) {
+	if t == nil {
+		return
+	}
+	if t.routeRouter != nil {
+		if active {
+			t.routeRouter.Enable()
+		} else {
+			t.routeRouter.Disable()
+		}
+	}
+	if !active {
+		for _, child := range routeChildTemplates(t) {
+			child.setRouteActive(false)
+		}
+	}
+}
+
 func ifBranches(ifExt *opIf, elemBase unsafe.Pointer) ([]*Template, int) {
 	branches := []*Template{ifExt.thenTmpl, ifExt.elseTmpl}
 	if ifExt.eval(elemBase) {
@@ -466,6 +533,12 @@ func (t *Template) SetApp(a *App) {
 func (t *Template) collectBindings(node any) {
 	if b, ok := node.(bindable); ok {
 		t.pendingBindings = append(t.pendingBindings, b.bindings()...)
+	}
+}
+
+func (t *Template) collectRouteBindings(node any) {
+	if b, ok := node.(routeBindable); ok {
+		t.pendingRouteBindings = append(t.pendingRouteBindings, b.routeBindings()...)
 	}
 }
 
@@ -2764,6 +2837,9 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		}
 		ext := &opScreenEffect{fns: v.Effects}
 		return t.addOp(Op{Kind: OpScreenEffect, Parent: parent, Ext: ext}, depth)
+	case OnC:
+		t.collectRouteBindings(v)
+		return -1
 
 	case VBoxC:
 		return t.compileVBoxC(v, parent, depth, elemBase, elemSize)
@@ -4894,6 +4970,13 @@ func (t *Template) computeIntrinsicWidth(idx int16) int16 {
 	return op.marginH()
 }
 
+func templateIntrinsicWidth(tmpl *Template) int16 {
+	if tmpl == nil || len(tmpl.ops) == 0 {
+		return 0
+	}
+	return tmpl.computeIntrinsicWidth(0)
+}
+
 // setOpWidth sets a single op's width based on available space.
 func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemBase unsafe.Pointer) {
 	switch op.Kind {
@@ -5059,7 +5142,7 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 			// computeIntrinsicWidth handles both ContentSized containers and
 			// leaf nodes (OpText, etc.) that have a computable fixed width.
 			// Falls back to 0 for truly flexible content (Space, unsized containers).
-			intrinsicW := subTmpl.computeIntrinsicWidth(0)
+			intrinsicW := templateIntrinsicWidth(subTmpl)
 			if intrinsicW > 0 {
 				subTmpl.distributeWidths(intrinsicW, elemBase)
 				geom.W = intrinsicW
@@ -5074,23 +5157,54 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 			geom.W = 0
 		}
 
-	case OpMatch:
-		mExt := op.Ext.(*opMatch)
+	case OpSwitch:
+		swExt := op.Ext.(*opSwitch)
 		var maxW int16
-		allTmpls := append(mExt.cases, mExt.def)
+		hasVisualBranch := false
+		allTmpls := append(swExt.cases, swExt.def)
 		for _, ct := range allTmpls {
 			if ct == nil {
 				continue
 			}
-			w := ct.computeIntrinsicWidth(0)
+			if len(ct.ops) > 0 {
+				hasVisualBranch = true
+			}
+			w := templateIntrinsicWidth(ct)
 			if w > maxW {
 				maxW = w
 			}
 		}
 		if maxW > 0 {
 			geom.W = maxW
-		} else {
+		} else if hasVisualBranch {
 			geom.W = availW
+		} else {
+			geom.W = 0
+		}
+
+	case OpMatch:
+		mExt := op.Ext.(*opMatch)
+		var maxW int16
+		hasVisualBranch := false
+		allTmpls := append(mExt.cases, mExt.def)
+		for _, ct := range allTmpls {
+			if ct == nil {
+				continue
+			}
+			if len(ct.ops) > 0 {
+				hasVisualBranch = true
+			}
+			w := templateIntrinsicWidth(ct)
+			if w > maxW {
+				maxW = w
+			}
+		}
+		if maxW > 0 {
+			geom.W = maxW
+		} else if hasVisualBranch {
+			geom.W = availW
+		} else {
+			geom.W = 0
 		}
 
 	case OpContainer:
@@ -7245,6 +7359,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
 		branches, requested := ifBranches(ifExt, t.elemBase)
+		setRouteBranchActive(branches, requested)
 		selector := ifExt.selector(t.elemBase)
 		selected, exiting := selector.selectBranch(requested, branches)
 		if tmpl := branchAt(branches, selected); tmpl != nil {
@@ -7303,6 +7418,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpSwitch:
 		swExt := op.Ext.(*opSwitch)
 		branches, requested := switchBranches(swExt, t.elemBase)
+		setRouteBranchActive(branches, requested)
 		selector := swExt.selector(t.elemBase)
 		selected, exiting := selector.selectBranch(requested, branches)
 		tmpl := branchAt(branches, selected)
@@ -7316,6 +7432,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpMatch:
 		mExt := op.Ext.(*opMatch)
 		branches, requested := matchBranches(mExt, t.elemBase)
+		setRouteBranchActive(branches, requested)
 		selector := mExt.selector(t.elemBase)
 		selected, exiting := selector.selectBranch(requested, branches)
 		tmpl := branchAt(branches, selected)
@@ -7768,6 +7885,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
 		branches, requested := ifBranches(ifExt, elemBase)
+		setRouteBranchActive(branches, requested)
 		selector := ifExt.selector(elemBase)
 		selected, exiting := selector.selectBranch(requested, branches)
 		if tmpl := branchAt(branches, selected); tmpl != nil {
@@ -7797,6 +7915,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 	case OpSwitch:
 		swExt := op.Ext.(*opSwitch)
 		branches, requested := switchBranches(swExt, elemBase)
+		setRouteBranchActive(branches, requested)
 		selector := swExt.selector(elemBase)
 		selected, exiting := selector.selectBranch(requested, branches)
 		tmpl := branchAt(branches, selected)
@@ -7810,6 +7929,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 	case OpMatch:
 		mExt := op.Ext.(*opMatch)
 		branches, requested := matchBranches(mExt, elemBase)
+		setRouteBranchActive(branches, requested)
 		selector := mExt.selector(elemBase)
 		selected, exiting := selector.selectBranch(requested, branches)
 		tmpl := branchAt(branches, selected)

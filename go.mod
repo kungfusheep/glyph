@@ -4,7 +4,7 @@ go 1.25.1
 
 require (
 	github.com/junegunn/fzf v0.67.0
-	github.com/kungfusheep/riffkey v0.0.0-20260216102013-df19649e3a0d
+	github.com/kungfusheep/riffkey v0.0.0-20260424163050-c13d19def76f
 	github.com/mattn/go-runewidth v0.0.19
 	golang.org/x/sys v0.40.0
 )

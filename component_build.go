@@ -27,6 +27,7 @@ func (t TreeView) Build() Component          { return t }
 func (t TextInput) Build() Component         { return t }
 func (o OverlayNode) Build() Component       { return o }
 func (s ScreenEffectNode) Build() Component  { return s }
+func (o OnC) Build() Component               { return o }
 func (s SelectionList) Build() Component     { return s }
 func (c *CheckboxC) Build() Component        { return c }
 func (r *RadioC) Build() Component           { return r }

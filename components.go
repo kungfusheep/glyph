@@ -11,6 +11,41 @@ type binding struct {
 	handler any
 }
 
+type onDecl interface {
+	routeBindings() []binding
+}
+
+// KeyC declares a key pattern and handler for an On scope.
+type KeyC struct {
+	declaredBindings []binding
+}
+
+// Key declares a key handler for an On scope.
+func Key(pattern string, handler any) KeyC {
+	return KeyC{declaredBindings: []binding{{pattern: pattern, handler: handler}}}
+}
+
+func (k KeyC) routeBindings() []binding { return k.declaredBindings }
+
+// OnC declares a zero-size event routing scope inside the view tree.
+type OnC struct {
+	declaredBindings []binding
+}
+
+// On declares event handlers as part of the view tree. It renders no cells.
+func On(decls ...onDecl) OnC {
+	var bindings []binding
+	for _, decl := range decls {
+		if decl == nil {
+			continue
+		}
+		bindings = append(bindings, decl.routeBindings()...)
+	}
+	return OnC{declaredBindings: bindings}
+}
+
+func (o OnC) routeBindings() []binding { return o.declaredBindings }
+
 // textInputBinding represents an InputC that wants unmatched keys routed to it.
 type textInputBinding struct {
 	value    *string

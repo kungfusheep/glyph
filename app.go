@@ -285,18 +285,9 @@ func (a *App) SetView(view Component) *App {
 // wireBindings to keep the existing eager-push behaviour. Multi-view callers
 // (View) leave the push to happen on Go/RunFrom/PushView.
 func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
+	a.wireBindingList(router, tmpl.pendingRouteBindings)
 	for _, b := range tmpl.pendingBindings {
-		switch h := b.handler.(type) {
-		case func(riffkey.Match):
-			pattern := b.pattern
-			router.Handle(pattern, func(m riffkey.Match) { h(m); a.RequestRender() })
-		case func(any):
-			pattern := b.pattern
-			router.Handle(pattern, func(_ riffkey.Match) { h(nil); a.RequestRender() })
-		case func():
-			pattern := b.pattern
-			router.Handle(pattern, func(_ riffkey.Match) { h(); a.RequestRender() })
-		}
+		a.wireBinding(router, b)
 	}
 	// focus manager takes precedence over single pendingTIB
 	if fm := tmpl.pendingFocusManager; fm != nil {
@@ -367,6 +358,40 @@ func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
 	// wire Log invalidation
 	for _, lv := range tmpl.pendingLogs {
 		lv.onUpdate = a.RequestRender
+	}
+	a.wireChildRouteScopes(tmpl)
+}
+
+func (a *App) wireBindingList(router *riffkey.Router, bindings []binding) {
+	for _, b := range bindings {
+		a.wireBinding(router, b)
+	}
+}
+
+func (a *App) wireBinding(router *riffkey.Router, b binding) {
+	switch h := b.handler.(type) {
+	case func(riffkey.Match):
+		pattern := b.pattern
+		router.Handle(pattern, func(m riffkey.Match) { h(m); a.RequestRender() })
+	case func(any):
+		pattern := b.pattern
+		router.Handle(pattern, func(_ riffkey.Match) { h(nil); a.RequestRender() })
+	case func():
+		pattern := b.pattern
+		router.Handle(pattern, func(_ riffkey.Match) { h(); a.RequestRender() })
+	}
+}
+
+func (a *App) wireChildRouteScopes(tmpl *Template) {
+	if tmpl == nil {
+		return
+	}
+	for _, child := range routeChildTemplates(tmpl) {
+		if len(child.pendingRouteBindings) > 0 {
+			child.routeRouter = riffkey.NewRouter().Disable()
+			a.wireBindingList(child.routeRouter, child.pendingRouteBindings)
+		}
+		a.wireChildRouteScopes(child)
 	}
 }
 
@@ -500,6 +525,7 @@ func (a *App) activateTemplateFM(tmpl *Template) {
 	if tmpl == nil {
 		return
 	}
+	a.attachRouteScopes(tmpl)
 	if fm := tmpl.pendingFocusManager; fm != nil {
 		fm.initialPush()
 	}
@@ -517,6 +543,35 @@ func (a *App) deactivateTemplateFM(tmpl *Template) {
 			fm.pop()
 		}
 		fm.pushed = false
+	}
+	a.detachRouteScopes(tmpl)
+}
+
+func (a *App) attachRouteScopes(tmpl *Template) {
+	if tmpl == nil || a.input == nil {
+		return
+	}
+	for _, child := range routeChildTemplates(tmpl) {
+		if child.routeRouter != nil && !child.routeAttached {
+			child.routeRouter.Disable()
+			a.input.Attach(child.routeRouter)
+			child.routeAttached = true
+		}
+		a.attachRouteScopes(child)
+	}
+}
+
+func (a *App) detachRouteScopes(tmpl *Template) {
+	if tmpl == nil || a.input == nil {
+		return
+	}
+	for _, child := range routeChildTemplates(tmpl) {
+		a.detachRouteScopes(child)
+		if child.routeRouter != nil && child.routeAttached {
+			child.routeRouter.Disable()
+			a.input.Detach(child.routeRouter)
+			child.routeAttached = false
+		}
 	}
 }
 
