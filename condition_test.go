@@ -463,7 +463,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "One"}, {Name: "Two"}, {Name: "Three"}}
 		selected := 1
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Render: func(item *Item) Component {
@@ -498,7 +498,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "A"}, {Name: "B"}}
 		selected := 0
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Render: func(item *Item) Component {
@@ -539,7 +539,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "X"}}
 		selected := 0
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "→ ",
@@ -565,7 +565,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "A"}, {Name: "B"}, {Name: "C"}}
 		selected := 0
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Render: func(item *Item) Component {
@@ -627,7 +627,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}, {Name: "E"}}
 		selected := 0
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:      &items,
 			Selected:   &selected,
 			MaxVisible: 3, // Only show 3 items at a time
@@ -665,7 +665,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}, {Name: "E"}}
 		selected := 0
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:      &items,
 			Selected:   &selected,
 			MaxVisible: 3,
@@ -707,7 +707,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}, {Name: "E"}}
 		selected := 4 // Start at end
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:      &items,
 			Selected:   &selected,
 			MaxVisible: 3,
@@ -944,7 +944,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 			ForEach(&lines, func(dl *DisplayLine) Component {
 				return HBox(
 					Text(&dl.LineNum),
-					RichTextNode{Spans: &dl.Spans},
+					richTextNode{Spans: &dl.Spans},
 				)
 			}),
 		)
@@ -980,7 +980,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 
 		view := VBox(
 			ForEach(&lines, func(l *Line) Component {
-				return RichTextNode{Spans: &l.Spans}
+				return richTextNode{Spans: &l.Spans}
 			}),
 		)
 
@@ -1027,7 +1027,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 
 		view := VBox(
 			ForEach(&lines, func(dl *DisplayLine) Component {
-				return RichTextNode{Spans: &dl.Spans}
+				return richTextNode{Spans: &dl.Spans}
 			}),
 		)
 
@@ -1046,7 +1046,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 func TestRichTextWrapsAcrossLines(t *testing.T) {
 	t.Run("word wraps static spans", func(t *testing.T) {
 		view := VBox.Width(12)(
-			RichTextNode{Spans: []Span{
+			richTextNode{Spans: []Span{
 				{Text: "hello", Style: Style{Attr: AttrBold}},
 				{Text: " world again", Style: Style{Attr: AttrDim}},
 			}},
@@ -1070,7 +1070,7 @@ func TestRichTextWrapsAcrossLines(t *testing.T) {
 
 	t.Run("preserves span styles after wrapping", func(t *testing.T) {
 		view := VBox.Width(10)(
-			RichTextNode{Spans: []Span{
+			richTextNode{Spans: []Span{
 				{Text: "plain ", Style: Style{}},
 				{Text: "selected", Style: Style{Attr: AttrInverse}},
 			}},
@@ -1102,7 +1102,7 @@ func TestRichTextWrapsAcrossLines(t *testing.T) {
 
 		view := VBox.Width(8)(
 			ForEach(&lines, func(line *Line) Component {
-				return RichTextNode{Spans: &line.Spans}
+				return richTextNode{Spans: &line.Spans}
 			}),
 		)
 

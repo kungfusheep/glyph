@@ -2298,32 +2298,6 @@ func ExampleTextViewC() {
 	// third
 }
 
-// Manual table.
-// Table renders tabular data with explicit column definitions, widths, and alignment.
-func ExampleTable() {
-	// example:
-	rows := [][]string{
-		{"Alice", "30", "Engineer"},
-		{"Bob", "25", "Designer"},
-	}
-	tree := Table{
-		Columns: []TableColumn{
-			{Header: "Name", Width: 10},
-			{Header: "Age", Width: 5, Align: AlignRight},
-			{Header: "Role", Width: 10},
-		},
-		Rows:       &rows,
-		ShowHeader: true,
-	}
-	// :example
-
-	renderAndPrint("Table", tree, 25, 3)
-	// Output:
-	// Name        AgeRole
-	// Alice        30Engineer
-	// Bob          25Designer
-}
-
 // Tree structure.
 // TreeNode builds a hierarchical tree. Set Expanded to control which branches are open.
 func ExampleTreeNode() {
@@ -2349,29 +2323,6 @@ func ExampleTreeNode() {
 	//     README.md
 }
 
-// Low-level selection list.
-// SelectionList renders items with a selection marker. Use List() for the ergonomic generic wrapper.
-func ExampleSelectionList() {
-	// example:
-	items := []string{"Alpha", "Beta", "Gamma"}
-	selected := 1
-	tree := &SelectionList{
-		Items:    &items,
-		Selected: &selected,
-		Marker:   "> ",
-		Render: func(s *string) Component {
-			return Text(s)
-		},
-	}
-	// :example
-
-	renderAndPrint("SelectionList", tree, 20, 3)
-	// Output:
-	//   Alpha
-	// > Beta
-	//   Gamma
-}
-
 // Labeled form field.
 // Field pairs a label with a control. Used as arguments to Form().
 func ExampleFormField() {
@@ -2386,30 +2337,6 @@ func ExampleFormField() {
 	// Output: ▸Name: enter name
 }
 
-// Post-processing node.
-// ScreenEffectNode holds one or more screen effects. Place anywhere in the tree — it takes zero layout space.
-func ExampleScreenEffectNode() {
-	// example:
-	tree := VBox(
-		VBox.Border(BorderRounded)(
-			HBox(
-				Text("● active").FG(Green),
-				Text("  "),
-				Text("████").FG(Cyan),
-			),
-			Text("dimmed via node literal").FG(RGB(200, 196, 184)),
-		),
-		ScreenEffectNode{Effects: []Effect{SEDimAll()}},
-	)
-	// :example
-
-	renderWithEffects("ScreenEffectNode", tree, 40, 4)
-	// Output:
-	// ╭──────────────────────────────────────╮
-	// │● active  ████                        │
-	// │dimmed via node literal               │
-	// ╰──────────────────────────────────────╯
-}
 
 // Animation tween.
 // Animate interpolates toward a target value over time. Configure duration and easing, then apply to any numeric property.

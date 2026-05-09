@@ -1619,8 +1619,8 @@ func TestForEachMultipleStringFields(t *testing.T) {
 	}
 }
 
-// TestSelectionListMultipleFields tests SelectionList with complex HBox render
-// SelectionList now supports complex layouts (HBox/VBox) in the Render function
+// TestSelectionListMultipleFields tests selectionList with complex HBox render
+// selectionList now supports complex layouts (HBox/VBox) in the Render function
 func TestSelectionListMultipleFields(t *testing.T) {
 	type Item struct {
 		Icon        string
@@ -1636,7 +1636,7 @@ func TestSelectionListMultipleFields(t *testing.T) {
 
 	selected := 0
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",
@@ -1658,9 +1658,9 @@ func TestSelectionListMultipleFields(t *testing.T) {
 	line1 := buf.GetLine(1)
 	line2 := buf.GetLine(2)
 
-	t.Logf("SelectionList Line 0: %q", line0)
-	t.Logf("SelectionList Line 1: %q", line1)
-	t.Logf("SelectionList Line 2: %q", line2)
+	t.Logf("selectionList Line 0: %q", line0)
+	t.Logf("selectionList Line 1: %q", line1)
+	t.Logf("selectionList Line 2: %q", line2)
 
 	// Verify that each line contains the expected content
 	// Line 0 is selected, should have "> " marker
@@ -1696,7 +1696,7 @@ func TestSelectionListDefaultStyle(t *testing.T) {
 	bgColor := PaletteColor(236)    // Default background
 	selectedBG := PaletteColor(240) // Selected background
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:         &items,
 		Selected:      &selected,
 		Marker:        "> ",
@@ -1996,7 +1996,7 @@ func TestComplexNestedLayouts(t *testing.T) {
 		}
 	})
 
-	t.Run("SelectionList with deeply nested Render", func(t *testing.T) {
+	t.Run("selectionList with deeply nested Render", func(t *testing.T) {
 		type MenuItem struct {
 			Icon     string
 			Label    string
@@ -2010,7 +2010,7 @@ func TestComplexNestedLayouts(t *testing.T) {
 		}
 		selected := 1
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:      &items,
 			Selected:   &selected,
 			Marker:     "> ",
@@ -2293,7 +2293,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 		}
 	})
 
-	t.Run("LayerView with SelectionList sidebar", func(t *testing.T) {
+	t.Run("LayerView with selectionList sidebar", func(t *testing.T) {
 		// This is the exact pattern that was causing issues
 		layer := NewLayer()
 		layer.EnsureSize(50, 10)
@@ -2314,7 +2314,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 		tmpl := Build(HBox(
 			VBox.Border(BorderSingle).Width(20)(
 				Text("Browser"),
-				&SelectionList{
+				&selectionList{
 					Items:    &items,
 					Selected: &selected,
 					Marker:   "> ",
@@ -2425,7 +2425,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 		}
 		selected := 0
 
-		sidebarList := &SelectionList{
+		sidebarList := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "> ",
@@ -4667,11 +4667,11 @@ func TestV2SplitLayout(t *testing.T) {
 		HBox(
 			VBox(
 				LayerView(layer1).ViewHeight(5),
-				RichTextNode{Spans: spans1},
+				richTextNode{Spans: spans1},
 			),
 			VBox(
 				LayerView(layer2).ViewHeight(5),
-				RichTextNode{Spans: spans2},
+				richTextNode{Spans: spans2},
 			),
 		),
 		Text("Global status"),
@@ -5751,9 +5751,8 @@ func TestAnimate(t *testing.T) {
 		active := true
 		tmpl := Build(VBox(
 			Text("X").FG(RGB(200, 200, 200)),
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(8).Height(1)(
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).Height(1)(
 					Text("card"),
 					ScreenEffect(
 						SEVignette().Smooth().
@@ -5763,7 +5762,7 @@ func TestAnimate(t *testing.T) {
 							),
 					),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(20, 5)
 		pctx := PostContext{Width: 20, Height: 5}
@@ -5800,15 +5799,14 @@ func TestAnimate(t *testing.T) {
 		active := true
 		ref := NodeRef{}
 		tmpl := Build(VBox(
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(8).Height(1).
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).Height(1).
 					NodeRef(&ref).
 					Opacity(In(1.0).Out(Animate.Duration(120*time.Millisecond)(0.0)))(
 					Text("card"),
 					ScreenEffect(SEDropShadow().Focus(&ref)),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(20, 5)
 
@@ -5838,16 +5836,15 @@ func TestAnimate(t *testing.T) {
 		bg := RGB(160, 160, 160)
 		tmpl := Build(VBox(
 			VBox.Width(20).Height(5).Fill(bg)(),
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(8).
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).
 					Fill(RGB(20, 20, 20)).
 					NodeRef(&ref).
 					Opacity(In(1.0).Out(Animate.Duration(120*time.Millisecond)(0.0)))(
 					Text("card"),
 					ScreenEffect(SEDropShadow().Focus(&ref).Strength(1).Radius(4)),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(20, 5)
 		pctx := PostContext{Width: 20, Height: 5, DefaultFG: bg, DefaultBG: bg}
@@ -5915,9 +5912,8 @@ func TestAnimate(t *testing.T) {
 		panel := RGB(0, 0, 0)
 		tmpl := Build(VBox(
 			VBox.Width(40).Height(10).Fill(bg)(),
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(12).
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(12).
 					Fill(panel).
 					NodeRef(&ref).
 					Opacity(In(1.0).Out(Animate.Duration(300*time.Millisecond)(0.0)))(
@@ -5929,7 +5925,7 @@ func TestAnimate(t *testing.T) {
 						SEDropShadow().Focus(&ref).Strength(0.28).Radius(10),
 					),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(40, 10)
 		pctx := PostContext{Width: 40, Height: 10, DefaultFG: bg, DefaultBG: bg}
@@ -6089,9 +6085,8 @@ func TestAnimate(t *testing.T) {
 		ref := NodeRef{}
 		tmpl := Build(VBox(
 			Text("X").FG(RGB(200, 200, 200)),
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(8).Height(1).NodeRef(&ref)(
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).Height(1).NodeRef(&ref)(
 					Text("card"),
 					ScreenEffect(
 						SEVignette().Dodge(&ref).
@@ -6106,7 +6101,7 @@ func TestAnimate(t *testing.T) {
 							),
 					),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(20, 5)
 		pctx := PostContext{Width: 20, Height: 5}

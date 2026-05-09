@@ -190,13 +190,10 @@ func main() {
 
 			// mode selector
 			HBox.Gap(1)(
-				TabsNode{
-					Labels:        modes,
-					Selected:      &selectedMode,
-					Style:         TabsStyleBracket,
-					ActiveStyle:   Style{FG: Green, Attr: AttrBold},
-					InactiveStyle: Style{FG: BrightBlack},
-				},
+				Tabs(modes, &selectedMode).
+					Kind(TabsStyleBracket).
+					ActiveStyle(Style{FG: Green, Attr: AttrBold}).
+					InactiveStyle(Style{FG: BrightBlack}),
 			),
 
 			SpaceH(1),

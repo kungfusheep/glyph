@@ -119,10 +119,8 @@ func TestCommandCenterLayout(t *testing.T) {
 			}),
 		),
 
-		If(&showModal).Then(OverlayNode{
-			Backdrop: true,
-			Centered: true,
-			Child: VBox.Width(46).Border(BorderRounded).BorderFG(BrightBlack)(
+		If(&showModal).Then(Overlay.Backdrop().Centered()(
+			VBox.Width(46).Border(BorderRounded).BorderFG(BrightBlack)(
 				HBox(
 					If(&selectedSvc.Status).Eq("warn").
 						Then(Text("○ ").FG(Yellow)).
@@ -154,7 +152,7 @@ func TestCommandCenterLayout(t *testing.T) {
 					Then(HBox(Spinner(&spinnerFrame).FG(Cyan), Text("  restarting...").FG(BrightBlack))).
 					Else(Text("[r] restart service").FG(BrightBlack)),
 			),
-		}),
+		)),
 	)
 
 	tmpl := Build(view)
