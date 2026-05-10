@@ -37,7 +37,7 @@ func main() {
 			),
 			VBox.Grow(2).Border(BorderRounded)(
 				TextView(&preview).Grow(1).
-					BindScroll("J", "K").BindPageScroll("<C-f>", "<C-b>"),
+					BindNav("J", "K").BindPageNav("<C-f>", "<C-b>"),
 			),
 		),
 	).

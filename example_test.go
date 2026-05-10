@@ -2279,11 +2279,11 @@ func ExampleTextBlockC() {
 }
 
 // Scrollable text viewer.
-// TextView wraps text with character-level wrapping and provides a scrollable layer. Bind keys for scrolling.
+// TextView wraps text with character-level wrapping and provides a scrollable layer. Bind keys to navigate.
 func ExampleTextViewC() {
 	// example:
 	content := "first\nsecond\nthird"
-	TextView(&content).Grow(1).BindScroll("j", "k")
+	TextView(&content).Grow(1).BindNav("j", "k")
 	// :example
 
 	tree := VBox(

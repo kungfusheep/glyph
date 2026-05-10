@@ -2771,10 +2771,10 @@ func (r *RadioC) Horizontal() *RadioC {
 }
 
 // BindNav registers key bindings for cycling selection.
-func (r *RadioC) BindNav(next, prev string) *RadioC {
+func (r *RadioC) BindNav(down, up string) *RadioC {
 	r.declaredBindings = append(r.declaredBindings,
-		binding{pattern: next, handler: func() { r.Next() }},
-		binding{pattern: prev, handler: func() { r.Prev() }},
+		binding{pattern: down, handler: func() { r.Next() }},
+		binding{pattern: up, handler: func() { r.Prev() }},
 	)
 	return r
 }
@@ -3140,14 +3140,20 @@ func (c *CheckListC[T]) toSelectionList() *selectionList {
 
 // InputC is a text input with internal state management.
 type InputC struct {
-	field       InputState
-	placeholder string
-	width       int
-	mask        rune
-	style       Style
-	declaredTIB *textInputBinding
-	widthPtr    *int16
-	widthCond   any
+	field            InputState
+	placeholder      string
+	width            int
+	mask             rune
+	style            Style
+	placeholderStyle Style
+	cursorStyle      Style
+	declaredTIB      *textInputBinding
+	widthPtr         *int16
+	widthCond        any
+
+	externalField *InputState
+	focusGroup    *FocusGroup
+	focusIndex    int
 
 	// value binding
 	boundValue *string
@@ -3213,6 +3219,31 @@ func (i *InputC) Placeholder(p string) *InputC {
 	return i
 }
 
+// Field binds this input to an external InputState.
+func (i *InputC) Field(f *InputState) *InputC {
+	i.externalField = f
+	return i
+}
+
+// FocusGroup controls cursor visibility for a group of externally-managed inputs.
+func (i *InputC) FocusGroup(group *FocusGroup, index int) *InputC {
+	i.focusGroup = group
+	i.focusIndex = index
+	return i
+}
+
+// PlaceholderStyle sets the style used when rendering placeholder text.
+func (i *InputC) PlaceholderStyle(s Style) *InputC {
+	i.placeholderStyle = s
+	return i
+}
+
+// CursorStyle sets the style used for the rendered cursor cell.
+func (i *InputC) CursorStyle(s Style) *InputC {
+	i.cursorStyle = s
+	return i
+}
+
 // Width sets the input width. Accepts int16, int, or *int16 for dynamic values.
 func (i *InputC) Width(w any) *InputC {
 	switch val := w.(type) {
@@ -3262,9 +3293,13 @@ func (i *InputC) MarginTRBL(t, r, b, l int16) *InputC {
 
 // Bind routes unmatched key input to this text field.
 func (i *InputC) Bind() *InputC {
+	field := &i.field
+	if i.externalField != nil {
+		field = i.externalField
+	}
 	i.declaredTIB = &textInputBinding{
-		value:    &i.field.Value,
-		cursor:   &i.field.Cursor,
+		value:    &field.Value,
+		cursor:   &field.Cursor,
 		onChange: i.handleChange,
 	}
 	return i
@@ -3325,33 +3360,45 @@ func (i *InputC) Focused() bool {
 
 // Value returns the current text value.
 func (i *InputC) Value() string {
-	return i.field.Value
+	return i.State().Value
 }
 
 // SetValue sets the text value.
 func (i *InputC) SetValue(v string) {
-	i.field.Value = v
-	i.field.Cursor = len(v)
+	state := i.State()
+	state.Value = v
+	state.Cursor = len(v)
 }
 
 // Clear resets the input.
 func (i *InputC) Clear() {
-	i.field.Clear()
+	i.State().Clear()
 }
 
 // State returns a pointer to the internal input state.
 func (i *InputC) State() *InputState {
+	if i.externalField != nil {
+		return i.externalField
+	}
 	return &i.field
 }
 
 // toTextInput converts to the underlying compiled form for rendering.
 func (i *InputC) toTextInput() textInput {
+	field := &i.field
+	if i.externalField != nil {
+		field = i.externalField
+	}
 	ti := textInput{
-		Field:       &i.field,
-		Placeholder: i.placeholder,
-		Width:       i.width,
-		Mask:        i.mask,
-		Style:       i.style,
+		Field:            field,
+		FocusGroup:       i.focusGroup,
+		FocusIndex:       i.focusIndex,
+		Placeholder:      i.placeholder,
+		Width:            i.width,
+		Mask:             i.mask,
+		Style:            i.style,
+		PlaceholderStyle: i.placeholderStyle,
+		CursorStyle:      i.cursorStyle,
 	}
 	// if managed by focus manager, use focused state for cursor visibility
 	if i.manager != nil {

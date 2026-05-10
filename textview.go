@@ -69,8 +69,8 @@ func (tv *TextViewC) MarginTRBL(t, r, b, l int16) *TextViewC {
 // Layer returns the underlying layer for external scroll wiring.
 func (tv *TextViewC) Layer() *Layer { return tv.layer }
 
-// BindScroll registers keys for line-by-line scrolling.
-func (tv *TextViewC) BindScroll(down, up string) *TextViewC {
+// BindNav registers keys for line-by-line navigation.
+func (tv *TextViewC) BindNav(down, up string) *TextViewC {
 	tv.declaredBindings = append(tv.declaredBindings,
 		binding{pattern: down, handler: func() { tv.layer.ScrollDown(1) }},
 		binding{pattern: up, handler: func() { tv.layer.ScrollUp(1) }},
@@ -78,8 +78,8 @@ func (tv *TextViewC) BindScroll(down, up string) *TextViewC {
 	return tv
 }
 
-// BindPageScroll registers keys for half-page scrolling.
-func (tv *TextViewC) BindPageScroll(down, up string) *TextViewC {
+// BindPageNav registers keys for half-page navigation.
+func (tv *TextViewC) BindPageNav(down, up string) *TextViewC {
 	tv.declaredBindings = append(tv.declaredBindings,
 		binding{pattern: down, handler: func() { tv.layer.HalfPageDown() }},
 		binding{pattern: up, handler: func() { tv.layer.HalfPageUp() }},
