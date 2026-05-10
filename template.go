@@ -162,13 +162,16 @@ type Template struct {
 	// ext pools — contiguous allocations for cache-friendly render access.
 
 	// Declarative bindings collected during compile, wired during setup
-	pendingBindings      []binding
-	pendingRouteBindings []binding
-	pendingTIB           *textInputBinding
-	pendingLogs          []*LogC       // Logs that need app.RequestRender wiring
-	pendingFocusManager  *FocusManager // Focus manager for multi-input routing
-	routeRouter          *riffkey.Router
-	routeAttached        bool
+	pendingBindings           []binding
+	pendingRouteBindings      []binding
+	pendingModalRouteBindings []binding
+	pendingTIB                *textInputBinding
+	pendingLogs               []*LogC       // Logs that need app.RequestRender wiring
+	pendingFocusManager       *FocusManager // Focus manager for multi-input routing
+	routeRouter               *riffkey.Router
+	routeAttached             bool
+	routeModalRouter          *riffkey.Router
+	routeModalPushed          bool
 
 	// per-frame evaluators — conditions, animations, etc. run at start of Execute
 	evals []func()
@@ -444,6 +447,10 @@ func routeChildTemplates(t *Template) []*Template {
 			if ext.def != nil {
 				children = append(children, ext.def)
 			}
+		case *opOverlay:
+			if ext.childTmpl != nil {
+				children = append(children, ext.childTmpl)
+			}
 		}
 	}
 	return children
@@ -462,6 +469,11 @@ func (t *Template) setRouteActive(active bool) {
 	if t == nil {
 		return
 	}
+	if !active {
+		for _, child := range routeChildTemplates(t) {
+			child.setRouteActive(false)
+		}
+	}
 	if t.routeRouter != nil {
 		if active {
 			t.routeRouter.Enable()
@@ -469,9 +481,20 @@ func (t *Template) setRouteActive(active bool) {
 			t.routeRouter.Disable()
 		}
 	}
-	if !active {
-		for _, child := range routeChildTemplates(t) {
-			child.setRouteActive(false)
+	if t.routeModalRouter != nil {
+		app := t.evalRoot().app
+		if active && !t.routeModalPushed {
+			t.routeModalRouter.Enable()
+			if app != nil && app.input != nil {
+				app.input.Push(t.routeModalRouter)
+				t.routeModalPushed = true
+			}
+		} else if !active && t.routeModalPushed {
+			if app != nil && app.input != nil {
+				app.input.Pop()
+			}
+			t.routeModalRouter.Disable()
+			t.routeModalPushed = false
 		}
 	}
 }
@@ -537,7 +560,14 @@ func (t *Template) collectBindings(node any) {
 }
 
 func (t *Template) collectRouteBindings(node any) {
-	if b, ok := node.(routeBindable); ok {
+	switch b := node.(type) {
+	case OnC:
+		if b.modal {
+			t.pendingModalRouteBindings = append(t.pendingModalRouteBindings, b.routeBindings()...)
+		} else {
+			t.pendingRouteBindings = append(t.pendingRouteBindings, b.routeBindings()...)
+		}
+	case routeBindable:
 		t.pendingRouteBindings = append(t.pendingRouteBindings, b.routeBindings()...)
 	}
 }
@@ -7326,9 +7356,13 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 // renderSubTemplate renders a sub-template (for ForEach) with element-bound data.
 func (t *Template) renderSubTemplate(buf *Buffer, sub *Template, globalX, globalY, maxW int16, elemBase unsafe.Pointer) {
 	sub.app = t.app
-	sub.clipMaxY = t.clipMaxY           // propagate vertical clip
-	sub.inheritedFill = t.inheritedFill // propagate fill so blank cells use parent bg
-	sub.elemBase = elemBase             // ensure renderOp paths (e.g. via renderJump) see the correct element
+	sub.clipMaxY = t.clipMaxY // propagate vertical clip
+	if sub.rowBG.Mode != ColorDefault {
+		sub.inheritedFill = sub.rowBG
+	} else {
+		sub.inheritedFill = t.inheritedFill // propagate fill so blank cells use parent bg
+	}
+	sub.elemBase = elemBase // ensure renderOp paths (e.g. via renderJump) see the correct element
 	for i := range sub.ops {
 		if sub.ops[i].Parent == -1 {
 			sub.renderSubOp(buf, int16(i), globalX, globalY, maxW, elemBase)
@@ -7915,7 +7949,14 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 
 	spaces := ext.markerSpaces
 
-	contentW := int16(maxW) - ext.markerWidth
+	rowW := geom.W
+	if maxW > 0 && maxW < rowW {
+		rowW = maxW
+	}
+	contentW := rowW - ext.markerWidth
+	if contentW < 0 {
+		contentW = 0
+	}
 	contentX := absX + ext.markerWidth
 
 	needsFullPipeline := false
@@ -7945,7 +7986,7 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 			rowStyle.BG = defaultStyle.BG
 		}
 		if rowStyle.BG.Mode != 0 || rowStyle.Attr != 0 {
-			buf.FillRect(int(absX), y, int(maxW), itemH, Cell{Rune: ' ', Style: rowStyle})
+			buf.FillRect(int(absX), y, int(rowW), itemH, Cell{Rune: ' ', Style: rowStyle})
 		}
 
 		// Determine marker text and style
@@ -8464,6 +8505,7 @@ func (t *Template) renderOverlay(buf *Buffer, op *Op, screenW, screenH int16) {
 	// Render the overlay content
 	// Re-layout with actual available space
 	childTmpl.pendingScreenEffects = childTmpl.pendingScreenEffects[:0]
+	childTmpl.setRouteActive(true)
 	childTmpl.distributeWidths(overlayW, nil)
 	childTmpl.layout(overlayH)
 	childTmpl.distributeFlexGrow(overlayH)
@@ -8963,7 +9005,7 @@ func opKindName(k OpKind) string {
 		OpContainer: "Container", OpIf: "If", OpForEach: "ForEach", OpSwitch: "Switch", OpMatch: "Match",
 		OpCustom: "Custom", OpLayout: "Layout", OpLayer: "Layer",
 		OpSelectionList: "selectionList",
-		OpAutoTable: "AutoTable", OpSparkline: "Sparkline",
+		OpAutoTable:     "AutoTable", OpSparkline: "Sparkline",
 		OpHRule: "HRule", OpVRule: "VRule", OpSpacer: "Spacer",
 		OpSpinner: "Spinner", OpScrollbar: "Scrollbar", OpTabs: "Tabs", OpTreeView: "TreeView",
 		OpJump: "Jump", OpTextInput: "TextInput", OpOverlay: "Overlay", OpScreenEffect: "ScreenEffect",

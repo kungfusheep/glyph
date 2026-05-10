@@ -304,6 +304,32 @@ func TestFilterListDefaultRenderShowsStringItems(t *testing.T) {
 	}
 }
 
+func TestFilterListSelectedStyleFillsCustomRowWidth(t *testing.T) {
+	items := []string{"Compose New", "Resume Draft"}
+	selectedBG := Hex(0x333333)
+	fl := FilterList(&items, func(s *string) string { return *s }).
+		Marker("  ").
+		SelectedStyle(Style{BG: selectedBG}).
+		Render(func(s *string) Component {
+			return VBox.PaddingVH(1, 2)(
+				Text(s),
+				Text("compose").Dim(),
+			)
+		})
+
+	tmpl := Build(VBox.Width(40).Fill(Hex(0x111111))(fl))
+	buf := NewBuffer(40, 8)
+	tmpl.Execute(buf, 40, 8)
+
+	for _, y := range []int{2, 3} {
+		for x := range 40 {
+			if got := buf.Get(x, y).Style.BG; got != selectedBG {
+				t.Fatalf("expected selected row background at %d,%d to be %v, got %v", x, y, selectedBG, got)
+			}
+		}
+	}
+}
+
 func TestFilterListSelectedMapsToOriginal(t *testing.T) {
 	items := []string{"Go", "Rust", "Python", "JavaScript"}
 	fl := FilterList(&items, func(s *string) string { return *s })

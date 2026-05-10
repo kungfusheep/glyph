@@ -30,10 +30,13 @@ func (k KeyC) routeBindings() []binding { return k.declaredBindings }
 // OnC declares a zero-size event routing scope inside the view tree.
 type OnC struct {
 	declaredBindings []binding
+	modal            bool
 }
 
+type OnFn func(decls ...onDecl) OnC
+
 // On declares event handlers as part of the view tree. It renders no cells.
-func On(decls ...onDecl) OnC {
+var On OnFn = func(decls ...onDecl) OnC {
 	var bindings []binding
 	for _, decl := range decls {
 		if decl == nil {
@@ -42,6 +45,13 @@ func On(decls ...onDecl) OnC {
 		bindings = append(bindings, decl.routeBindings()...)
 	}
 	return OnC{declaredBindings: bindings}
+}
+
+// Modal declares event handlers that push a modal routing scope while active.
+func (f OnFn) Modal(decls ...onDecl) OnC {
+	on := f(decls...)
+	on.modal = true
+	return on
 }
 
 func (o OnC) routeBindings() []binding { return o.declaredBindings }

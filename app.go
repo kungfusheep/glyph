@@ -286,6 +286,17 @@ func (a *App) SetView(view Component) *App {
 // (View) leave the push to happen on Go/RunFrom/PushView.
 func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
 	a.wireBindingList(router, tmpl.pendingRouteBindings)
+	componentRouter := router
+	if len(tmpl.pendingModalRouteBindings) > 0 {
+		tmpl.routeModalRouter = riffkey.NewRouter().Disable()
+		a.wireBindingList(tmpl.routeModalRouter, tmpl.pendingModalRouteBindings)
+		componentRouter = tmpl.routeModalRouter
+	}
+	a.wireComponentBindings(tmpl, componentRouter)
+	a.wireChildRouteScopes(tmpl)
+}
+
+func (a *App) wireComponentBindings(tmpl *Template, router *riffkey.Router) {
 	for _, b := range tmpl.pendingBindings {
 		a.wireBinding(router, b)
 	}
@@ -359,7 +370,6 @@ func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
 	for _, lv := range tmpl.pendingLogs {
 		lv.onUpdate = a.RequestRender
 	}
-	a.wireChildRouteScopes(tmpl)
 }
 
 func (a *App) wireBindingList(router *riffkey.Router, bindings []binding) {
@@ -387,9 +397,17 @@ func (a *App) wireChildRouteScopes(tmpl *Template) {
 		return
 	}
 	for _, child := range routeChildTemplates(tmpl) {
-		if len(child.pendingRouteBindings) > 0 {
+		hasModal := len(child.pendingModalRouteBindings) > 0
+		hasScopedComponents := len(child.pendingBindings) > 0 || child.pendingTIB != nil || child.pendingFocusManager != nil
+		if len(child.pendingRouteBindings) > 0 || (!hasModal && hasScopedComponents) {
 			child.routeRouter = riffkey.NewRouter().Disable()
 			a.wireBindingList(child.routeRouter, child.pendingRouteBindings)
+			a.wireComponentBindings(child, child.routeRouter)
+		}
+		if hasModal {
+			child.routeModalRouter = riffkey.NewRouter().Disable()
+			a.wireBindingList(child.routeModalRouter, child.pendingModalRouteBindings)
+			a.wireComponentBindings(child, child.routeModalRouter)
 		}
 		a.wireChildRouteScopes(child)
 	}
@@ -529,6 +547,11 @@ func (a *App) activateTemplateFM(tmpl *Template) {
 	if fm := tmpl.pendingFocusManager; fm != nil {
 		fm.initialPush()
 	}
+	if tmpl.routeModalRouter != nil && !tmpl.routeModalPushed {
+		tmpl.routeModalRouter.Enable()
+		a.input.Push(tmpl.routeModalRouter)
+		tmpl.routeModalPushed = true
+	}
 }
 
 // deactivateTemplateFM pops a template's focus-manager sub-router from the
@@ -538,13 +561,18 @@ func (a *App) deactivateTemplateFM(tmpl *Template) {
 	if tmpl == nil {
 		return
 	}
+	a.detachRouteScopes(tmpl)
+	if tmpl.routeModalRouter != nil && tmpl.routeModalPushed {
+		a.input.Pop()
+		tmpl.routeModalRouter.Disable()
+		tmpl.routeModalPushed = false
+	}
 	if fm := tmpl.pendingFocusManager; fm != nil && fm.pushed {
 		if fm.pop != nil {
 			fm.pop()
 		}
 		fm.pushed = false
 	}
-	a.detachRouteScopes(tmpl)
 }
 
 func (a *App) attachRouteScopes(tmpl *Template) {
@@ -567,6 +595,11 @@ func (a *App) detachRouteScopes(tmpl *Template) {
 	}
 	for _, child := range routeChildTemplates(tmpl) {
 		a.detachRouteScopes(child)
+		if child.routeModalRouter != nil && child.routeModalPushed {
+			a.input.Pop()
+			child.routeModalRouter.Disable()
+			child.routeModalPushed = false
+		}
 		if child.routeRouter != nil && child.routeAttached {
 			child.routeRouter.Disable()
 			a.input.Detach(child.routeRouter)
