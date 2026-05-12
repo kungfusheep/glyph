@@ -141,7 +141,7 @@ func main() {
 					Text("Scrollbar:").Bold(),
 					HBox(
 						Text("Pos: "),
-						Scroll(100, 20, &scrollPos).Length(10).ThumbStyle(Style{FG: Cyan}),
+						Scrollbar(100, 20, &scrollPos).Length(10).ThumbStyle(Style{FG: Cyan}),
 					),
 				),
 			),

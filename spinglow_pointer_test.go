@@ -30,7 +30,7 @@ func TestSESpinGlowPointerParams(t *testing.T) {
 
 	// compile (as ScreenEffectNode would do during template Build)
 	tmpl := &Template{}
-	compiled := eff.compileEffect(tmpl).(spinGlowEffect)
+	compiled := eff.compileEffect(tmpl).(SpinGlowEffect)
 
 	// baseline read-back
 	if got := compiled.strength.resolve(); got != 0.5 {

@@ -1693,8 +1693,8 @@ func TestSelectionListDefaultStyle(t *testing.T) {
 	items := []string{"Apple", "Banana", "Cherry"}
 	selected := 1 // Banana selected
 
-	bgColor := PaletteColor(236)    // Default background
-	selectedBG := PaletteColor(240) // Selected background
+	bgColor := Ansi256(236)    // Default background
+	selectedBG := Ansi256(240) // Selected background
 
 	list := &selectionList{
 		Items:         &items,
@@ -2218,7 +2218,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 			VBox.Width(10)(
 				Text("Sidebar"),
 			),
-			LayerView(layer).ViewWidth(30).ViewHeight(5),
+			LayerView(layer).Width(30).Height(5),
 		))
 
 		buf := NewBuffer(50, 6)
@@ -2255,7 +2255,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 			VBox.Border(BorderRounded).Grow(1)(
 				Text("Editor").FG(Cyan),
 				HRule(),
-				LayerView(layer).ViewHeight(8),
+				LayerView(layer).Height(8),
 			),
 		))
 
@@ -2323,7 +2323,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 					},
 				},
 			),
-			LayerView(layer).ViewWidth(40).ViewHeight(6).Grow(1),
+			LayerView(layer).Width(40).Height(6).Grow(1),
 		))
 
 		buf := NewBuffer(70, 10)
@@ -2361,7 +2361,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 				),
 			),
 			// Editor always visible
-			LayerView(layer).ViewWidth(40).ViewHeight(5).Grow(1),
+			LayerView(layer).Width(40).Height(5).Grow(1),
 		))
 
 		buf := NewBuffer(60, 6)
@@ -2450,7 +2450,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 				VBox.Border(BorderRounded).Grow(1)(
 					Text("Editor"),
 					HRule(),
-					LayerView(layer).ViewHeight(10),
+					LayerView(layer).Height(10),
 				),
 			),
 		))
@@ -3458,7 +3458,7 @@ func TestWidgetReceivesAvailWidth(t *testing.T) {
 		// Track what width the measure function receives
 		var receivedWidth int16
 
-		widget := Widget(
+		widget := Custom(
 			func(availW int16) (w, h int16) {
 				receivedWidth = availW
 				return availW, 1 // fill width, 1 line tall
@@ -3500,7 +3500,7 @@ func TestWidgetReceivesAvailWidth(t *testing.T) {
 
 	t.Run("widget with fixed width in HBox", func(t *testing.T) {
 		// Widget that returns fixed width
-		widget := Widget(
+		widget := Custom(
 			func(availW int16) (w, h int16) {
 				return 10, 1 // fixed 10 chars wide
 			},
@@ -3535,7 +3535,7 @@ func TestWidgetReceivesAvailWidth(t *testing.T) {
 	t.Run("widget inside bordered VBox", func(t *testing.T) {
 		var receivedWidth int16
 
-		widget := Widget(
+		widget := Custom(
 			func(availW int16) (w, h int16) {
 				receivedWidth = availW
 				return availW, 1
@@ -3757,7 +3757,7 @@ func TestAutoTableReactive(t *testing.T) {
 			{"second", "b"},
 		}
 
-		altBG := PaletteColor(235)
+		altBG := Ansi256(235)
 		tmpl := Build(AutoTable(&rows).
 			AltRowStyle(Style{BG: altBG}))
 
@@ -4356,8 +4356,8 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 	t.Run("custom format", func(t *testing.T) {
 		tmpl := Build(AutoTable(&stocks).
-			Column("Price", Currency("$", 2)).
-			Column("Volume", Number(0)))
+			Column("Price", FormatCurrency("$", 2)).
+			Column("Volume", FormatNumber(0)))
 		buf := NewBuffer(80, 10)
 		tmpl.Execute(buf, 80, 10)
 
@@ -4372,7 +4372,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 	t.Run("custom style per cell", func(t *testing.T) {
 		tmpl := Build(AutoTable(&stocks).
-			Column("Change", PercentChange(1)))
+			Column("Change", FormatPercentChange(1)))
 		buf := NewBuffer(80, 10)
 		tmpl.Execute(buf, 80, 10)
 
@@ -4416,7 +4416,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 	t.Run("bool formatting", func(t *testing.T) {
 		tmpl := Build(AutoTable(&stocks).
-			Column("Active", Bool("YES", "NO")))
+			Column("Active", FormatBool("YES", "NO")))
 		buf := NewBuffer(80, 10)
 		tmpl.Execute(buf, 80, 10)
 
@@ -4479,7 +4479,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 			{"AAPL", 178.92, 2.34, 52000000, true},
 		}
 		tmpl := Build(AutoTable(staticStocks).
-			Column("Price", Currency("$", 2)))
+			Column("Price", FormatCurrency("$", 2)))
 		buf := NewBuffer(80, 10)
 		tmpl.Execute(buf, 80, 10)
 
@@ -4494,7 +4494,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 		customGreen := Style{FG: Green}
 		tmpl := Build(AutoTable(&stocks).
 			Column("Price", func(c *ColumnConfig) {
-				Currency("$", 2)(c) // base preset
+				FormatCurrency("$", 2)(c) // base preset
 				c.Style(func(v any) Style { return customGreen })
 			}))
 		buf := NewBuffer(80, 10)
@@ -4521,7 +4521,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 		// right-aligned column should have right-aligned header
 		tmpl := Build(AutoTable(&stocks).
 			Columns("Symbol", "Price").
-			Column("Price", Currency("$", 2)))
+			Column("Price", FormatCurrency("$", 2)))
 		buf := NewBuffer(40, 10)
 		tmpl.Execute(buf, 40, 10)
 
@@ -4547,7 +4547,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 		tmpl := Build(AutoTable(&rows).
 			Columns("Label", "Active").
-			Column("Active", Bool("Y", "N")))
+			Column("Active", FormatBool("Y", "N")))
 		// use tight width to avoid proportional expansion muddling positions
 		buf := NewBuffer(14, 5)
 		tmpl.Execute(buf, 14, 5)
@@ -4586,7 +4586,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 		tmpl := Build(AutoTable(rows).
 			Columns("Label", "Active").
-			Column("Active", Bool("Y", "N")))
+			Column("Active", FormatBool("Y", "N")))
 		buf := NewBuffer(14, 5)
 		tmpl.Execute(buf, 14, 5)
 
@@ -4622,7 +4622,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 		tmpl := Build(AutoTable(&rows).
 			Columns("Name", "Value").
-			Column("Value", Number(0)))
+			Column("Value", FormatNumber(0)))
 		buf := NewBuffer(18, 5)
 		tmpl.Execute(buf, 18, 5)
 
@@ -4666,11 +4666,11 @@ func TestV2SplitLayout(t *testing.T) {
 	view := VBox(
 		HBox(
 			VBox(
-				LayerView(layer1).ViewHeight(5),
+				LayerView(layer1).Height(5),
 				richTextNode{Spans: spans1},
 			),
 			VBox(
-				LayerView(layer2).ViewHeight(5),
+				LayerView(layer2).Height(5),
 				richTextNode{Spans: spans2},
 			),
 		),
@@ -5744,6 +5744,74 @@ func TestAnimate(t *testing.T) {
 		tmpl.Execute(buf, 20, 7)
 		if got := buf.Get(0, 0).Rune; got != 'd' {
 			t.Fatalf("expected else branch after overlay offset exit, got %q", got)
+		}
+	})
+
+	t.Run("Overlay can place content at screen edges and corners", func(t *testing.T) {
+		tests := []struct {
+			name string
+			view Component
+			x    int
+			y    int
+		}{
+			{"centered", Overlay.Centered()(Text("xy")), 9, 2},
+			{"top", Overlay.Top()(Text("xy")), 9, 0},
+			{"bottom", Overlay.Bottom()(Text("xy")), 9, 4},
+			{"left", Overlay.Left()(Text("xy")), 0, 2},
+			{"right", Overlay.Right()(Text("xy")), 18, 2},
+			{"top-left", Overlay.TopLeft()(Text("xy")), 0, 0},
+			{"top-right", Overlay.TopRight()(Text("xy")), 18, 0},
+			{"bottom-left", Overlay.BottomLeft()(Text("xy")), 0, 4},
+			{"bottom-right", Overlay.BottomRight()(Text("xy")), 18, 4},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				tmpl := Build(VBox(Text("base"), tt.view))
+				buf := NewBuffer(20, 5)
+
+				tmpl.Execute(buf, 20, 5)
+				if got := buf.Get(tt.x, tt.y).Rune; got != 'x' {
+					t.Fatalf("expected overlay at %d,%d, got %q", tt.x, tt.y, got)
+				}
+			})
+		}
+	})
+
+	t.Run("BottomRight overlay renders dynamic ForEach content", func(t *testing.T) {
+		type notice struct {
+			Text    string
+			Opacity float64
+		}
+		visible := true
+		items := []notice{{Text: "synced", Opacity: 1}}
+		tmpl := Build(VBox(
+			Text("base"),
+			If(&visible).Then(
+				Overlay.BottomRight().Offset(-2, -2)(
+					VBox.Width(12).FitContent().Gap(1)(
+						ForEach(&items, func(item *notice) Component {
+							return Text(&item.Text).
+								Width(12).
+								Opacity(&item.Opacity).
+								Style(Style{Align: AlignRight})
+						}),
+					),
+				),
+			),
+		))
+		buf := NewBuffer(20, 5)
+
+		tmpl.Execute(buf, 20, 5)
+		if got := buf.GetLine(2); got != "            synced" {
+			t.Fatalf("line 2 = %q, want bottom-right notice\n0:%q\n1:%q\n2:%q\n3:%q\n4:%q",
+				got,
+				buf.GetLine(0),
+				buf.GetLine(1),
+				buf.GetLine(2),
+				buf.GetLine(3),
+				buf.GetLine(4),
+			)
 		}
 	})
 

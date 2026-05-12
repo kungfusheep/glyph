@@ -3485,7 +3485,7 @@ func buildWindowView(w *Window, focused bool) glyph.Component {
 	return glyph.VBox(
 		// Content area - imperative layer, efficiently updated
 		// Width is set for vertical splits to constrain each window's area
-		glyph.LayerView(w.contentLayer).ViewHeight(int16(w.viewportHeight)).ViewWidth(int16(w.viewportWidth)),
+		glyph.LayerView(w.contentLayer).Height(int16(w.viewportHeight)).Width(int16(w.viewportWidth)),
 		// Vim-style status bar (inverse video, shows filename and position)
 		glyph.Rich(&w.StatusBar),
 	)

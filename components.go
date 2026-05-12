@@ -821,17 +821,17 @@ func Arrange(layout LayoutFunc) func(children ...Component) Box {
 // Widget creates a fully custom component with explicit measure and render functions.
 // Use this when you need complete control over sizing and drawing.
 //
-//	Widget(
+//	Custom(
 //	    func(availW int16) (w, h int16) { return 20, 3 },
 //	    func(buf *Buffer, x, y, w, h int16) {
 //	        buf.WriteString(int(x), int(y), "Custom!", Style{})
 //	    },
 //	)
-func Widget(
+func Custom(
 	measure func(availW int16) (w, h int16),
 	render func(buf *Buffer, x, y, w, h int16),
-) Custom {
-	return Custom{Measure: measure, Render: render}
+) Component {
+	return customC{Measure: measure, Render: render}
 }
 
 // ============================================================================
@@ -1848,13 +1848,13 @@ func LayerView(layer *Layer) LayerViewC {
 }
 
 // Height sets a fixed height.
-func (l LayerViewC) ViewHeight(h int16) LayerViewC {
+func (l LayerViewC) Height(h int16) LayerViewC {
 	l.viewHeight = h
 	return l
 }
 
 // Width sets a fixed width.
-func (l LayerViewC) ViewWidth(w int16) LayerViewC {
+func (l LayerViewC) Width(w int16) LayerViewC {
 	l.viewWidth = w
 	return l
 }
@@ -1909,6 +1909,22 @@ func (l LayerViewC) PaddingTRBL(a, b, c, d int16) LayerViewC {
 // Overlay - Modal/popup overlay
 // ============================================================================
 
+// OverlayPlacement defines how an overlay is positioned within its parent.
+type OverlayPlacement int
+
+const (
+	OverlayPlacementAt OverlayPlacement = iota
+	OverlayPlacementCentered
+	OverlayPlacementTop
+	OverlayPlacementBottom
+	OverlayPlacementLeft
+	OverlayPlacementRight
+	OverlayPlacementTopLeft
+	OverlayPlacementTopRight
+	OverlayPlacementBottomLeft
+	OverlayPlacementBottomRight
+)
+
 // AnchorPosition defines how an overlay is positioned relative to a NodeRef
 type AnchorPosition int
 
@@ -1922,20 +1938,21 @@ const (
 )
 
 type OverlayC struct {
-	centered    bool
-	backdrop    bool
-	x, y        int
-	offsetX     any
-	offsetY     any
-	width       int
-	height      int
-	backdropFG  Color
-	bg          Color
-	opacity     dynFloat64
-	opacityMode OpacityMode
-	anchor      *NodeRef
-	anchorPos   AnchorPosition
-	children    []Component
+	placement    OverlayPlacement
+	placementSet bool
+	backdrop     bool
+	x, y         int
+	offsetX      any
+	offsetY      any
+	width        int
+	height       int
+	backdropFG   Color
+	bg           Color
+	opacity      dynFloat64
+	opacityMode  OpacityMode
+	anchor       *NodeRef
+	anchorPos    AnchorPosition
+	children     []Component
 }
 
 type OverlayFn func(children ...Component) OverlayC
@@ -1944,7 +1961,88 @@ type OverlayFn func(children ...Component) OverlayC
 func (f OverlayFn) Centered() OverlayFn {
 	return func(children ...Component) OverlayC {
 		o := f(children...)
-		o.centered = true
+		o.placement = OverlayPlacementCentered
+		o.placementSet = true
+		return o
+	}
+}
+
+// Top centers the overlay on the top edge of the parent bounds.
+func (f OverlayFn) Top() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementTop
+		o.placementSet = true
+		return o
+	}
+}
+
+// Bottom centers the overlay on the bottom edge of the parent bounds.
+func (f OverlayFn) Bottom() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementBottom
+		o.placementSet = true
+		return o
+	}
+}
+
+// Left centers the overlay on the left edge of the parent bounds.
+func (f OverlayFn) Left() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementLeft
+		o.placementSet = true
+		return o
+	}
+}
+
+// Right centers the overlay on the right edge of the parent bounds.
+func (f OverlayFn) Right() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementRight
+		o.placementSet = true
+		return o
+	}
+}
+
+// TopLeft positions the overlay at the top-left corner of the parent bounds.
+func (f OverlayFn) TopLeft() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementTopLeft
+		o.placementSet = true
+		return o
+	}
+}
+
+// TopRight positions the overlay at the top-right corner of the parent bounds.
+func (f OverlayFn) TopRight() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementTopRight
+		o.placementSet = true
+		return o
+	}
+}
+
+// BottomLeft positions the overlay at the bottom-left corner of the parent bounds.
+func (f OverlayFn) BottomLeft() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementBottomLeft
+		o.placementSet = true
+		return o
+	}
+}
+
+// BottomRight positions the overlay at the bottom-right corner of the parent bounds.
+func (f OverlayFn) BottomRight() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementBottomRight
+		o.placementSet = true
 		return o
 	}
 }
@@ -1962,6 +2060,8 @@ func (f OverlayFn) Backdrop() OverlayFn {
 func (f OverlayFn) At(x, y int) OverlayFn {
 	return func(children ...Component) OverlayC {
 		o := f(children...)
+		o.placement = OverlayPlacementAt
+		o.placementSet = true
 		o.x = x
 		o.y = y
 		return o
@@ -2476,7 +2576,7 @@ type ScrollbarC struct {
 }
 
 // Scroll creates a scrollbar for tracking position in scrollable content.
-func Scroll(contentSize, viewSize int, position *int) ScrollbarC {
+func Scrollbar(contentSize, viewSize int, position *int) ScrollbarC {
 	return ScrollbarC{
 		contentSize: contentSize,
 		viewSize:    viewSize,
@@ -2560,23 +2660,20 @@ type CheckboxC struct {
 }
 
 // Checkbox creates a checkbox bound to a bool pointer.
-func Checkbox(checked *bool, label string) *CheckboxC {
-	return &CheckboxC{
+// label accepts string (static) or *string (dynamic).
+func Checkbox(checked *bool, label any) *CheckboxC {
+	c := &CheckboxC{
 		checked:     checked,
-		label:       label,
 		checkedMark: "☑",
 		unchecked:   "☐",
 	}
-}
-
-// CheckboxPtr creates a checkbox with a dynamic label.
-func CheckboxPtr(checked *bool, label *string) *CheckboxC {
-	return &CheckboxC{
-		checked:     checked,
-		labelPtr:    label,
-		checkedMark: "☑",
-		unchecked:   "☐",
+	switch v := label.(type) {
+	case string:
+		c.label = v
+	case *string:
+		c.labelPtr = v
 	}
+	return c
 }
 
 // Ref provides access to the component for external references.
@@ -2688,7 +2785,6 @@ func (c *CheckboxC) Checked() bool {
 type RadioC struct {
 	selected         *int
 	options          []string
-	optionsPtr       *[]string
 	selectedMark     string
 	unselected       string
 	style            Style
@@ -2708,16 +2804,6 @@ func Radio(selected *int, options ...string) *RadioC {
 	return &RadioC{
 		selected:     selected,
 		options:      options,
-		selectedMark: "◉",
-		unselected:   "○",
-	}
-}
-
-// RadioPtr creates a radio group with dynamic options.
-func RadioPtr(selected *int, options *[]string) *RadioC {
-	return &RadioC{
-		selected:     selected,
-		optionsPtr:   options,
 		selectedMark: "◉",
 		unselected:   "○",
 	}
@@ -2838,9 +2924,6 @@ func (r *RadioC) Index() int {
 }
 
 func (r *RadioC) getOptions() []string {
-	if r.optionsPtr != nil {
-		return *r.optionsPtr
-	}
 	return r.options
 }
 

@@ -67,16 +67,16 @@ func DefaultColor() Color {
 	return Color{Mode: ColorDefault}
 }
 
-// BasicColor returns one of the 16 basic terminal colours.
+// Ansi16 returns one of the 16 basic terminal colours.
 // RGB values are pre-populated for colour math (post-processing, lerp, etc.).
-func BasicColor(index uint8) Color {
+func Ansi16(index uint8) Color {
 	rgb := basic16RGB[index&0xF]
 	return Color{Mode: Color16, Index: index, R: rgb[0], G: rgb[1], B: rgb[2]}
 }
 
-// PaletteColor returns one of the 256 palette colours.
+// Ansi256 returns one of the 256 palette colours.
 // RGB values are pre-populated for colour math (post-processing, lerp, etc.).
-func PaletteColor(index uint8) Color {
+func Ansi256(index uint8) Color {
 	rgb := palette256RGB[index]
 	return Color{Mode: Color256, Index: index, R: rgb[0], G: rgb[1], B: rgb[2]}
 }
@@ -153,8 +153,8 @@ func init() {
 	}
 }
 
-// LerpColor blends between two colours. t=0 returns a, t=1 returns b.
-func LerpColor(a, b Color, t float64) Color {
+// Lerp blends between two colours. t=0 returns a, t=1 returns b.
+func Lerp(a, b Color, t float64) Color {
 	// Clamp t to 0-1
 	if t < 0 {
 		t = 0
@@ -170,45 +170,45 @@ func LerpColor(a, b Color, t float64) Color {
 
 // Standard basic colours for convenience.
 var (
-	Black   = BasicColor(0)
-	Red     = BasicColor(1)
-	Green   = BasicColor(2)
-	Yellow  = BasicColor(3)
-	Blue    = BasicColor(4)
-	Magenta = BasicColor(5)
-	Cyan    = BasicColor(6)
-	White   = BasicColor(7)
+	Black   = Ansi16(0)
+	Red     = Ansi16(1)
+	Green   = Ansi16(2)
+	Yellow  = Ansi16(3)
+	Blue    = Ansi16(4)
+	Magenta = Ansi16(5)
+	Cyan    = Ansi16(6)
+	White   = Ansi16(7)
 
 	// Bright variants
-	BrightBlack   = BasicColor(8)
-	BrightRed     = BasicColor(9)
-	BrightGreen   = BasicColor(10)
-	BrightYellow  = BasicColor(11)
-	BrightBlue    = BasicColor(12)
-	BrightMagenta = BasicColor(13)
-	BrightCyan    = BasicColor(14)
-	BrightWhite   = BasicColor(15)
+	BrightBlack   = Ansi16(8)
+	BrightRed     = Ansi16(9)
+	BrightGreen   = Ansi16(10)
+	BrightYellow  = Ansi16(11)
+	BrightBlue    = Ansi16(12)
+	BrightMagenta = Ansi16(13)
+	BrightCyan    = Ansi16(14)
+	BrightWhite   = Ansi16(15)
 )
 
 // refreshBasic16Vars rebuilds the package-level colour vars from basic16RGB.
 // called after OSC 4 detection updates the table with the terminal's actual palette.
 func refreshBasic16Vars() {
-	Black = BasicColor(0)
-	Red = BasicColor(1)
-	Green = BasicColor(2)
-	Yellow = BasicColor(3)
-	Blue = BasicColor(4)
-	Magenta = BasicColor(5)
-	Cyan = BasicColor(6)
-	White = BasicColor(7)
-	BrightBlack = BasicColor(8)
-	BrightRed = BasicColor(9)
-	BrightGreen = BasicColor(10)
-	BrightYellow = BasicColor(11)
-	BrightBlue = BasicColor(12)
-	BrightMagenta = BasicColor(13)
-	BrightCyan = BasicColor(14)
-	BrightWhite = BasicColor(15)
+	Black = Ansi16(0)
+	Red = Ansi16(1)
+	Green = Ansi16(2)
+	Yellow = Ansi16(3)
+	Blue = Ansi16(4)
+	Magenta = Ansi16(5)
+	Cyan = Ansi16(6)
+	White = Ansi16(7)
+	BrightBlack = Ansi16(8)
+	BrightRed = Ansi16(9)
+	BrightGreen = Ansi16(10)
+	BrightYellow = Ansi16(11)
+	BrightBlue = Ansi16(12)
+	BrightMagenta = Ansi16(13)
+	BrightCyan = Ansi16(14)
+	BrightWhite = Ansi16(15)
 }
 
 // Equal returns true if two colours are equal.
@@ -421,9 +421,11 @@ type TreeView struct {
 
 // Custom allows user-defined components without modifying the framework.
 // Use this for specialized widgets that aren't covered by built-in primitives.
-// Note: Custom components use function calls (not inlined like built-ins),
+// customC is the internal compile-form for user-defined components.
+// Constructed via Custom(measure, render).
+// Note: custom components use function calls (not inlined like built-ins),
 // but with viewport culling this overhead is negligible.
-type Custom struct {
+type customC struct {
 	// Measure returns natural (width, height) given available width.
 	// Called during the measure phase of rendering.
 	Measure func(availW int16) (w, h int16)

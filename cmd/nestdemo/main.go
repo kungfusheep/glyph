@@ -60,8 +60,8 @@ func main() {
 	menuList := List(&menuItems).
 		Selection(&menuSel).
 		MaxVisible(10).
-		Style(Style{BG: PaletteColor(235)}).
-		SelectedStyle(Style{BG: PaletteColor(240)}).
+		Style(Style{BG: Ansi256(235)}).
+		SelectedStyle(Style{BG: Ansi256(240)}).
 		MarkerStyle(Style{FG: Cyan}).
 		Render(func(item *MenuItem) Component {
 			return HBox.Gap(1)(
@@ -75,8 +75,8 @@ func main() {
 	kvList := List(&kvPairs).
 		Selection(&kvSel).
 		MaxVisible(4).
-		Style(Style{BG: PaletteColor(234)}).
-		SelectedStyle(Style{BG: PaletteColor(238)}).
+		Style(Style{BG: Ansi256(234)}).
+		SelectedStyle(Style{BG: Ansi256(238)}).
 		Render(func(kv *KeyValue) Component {
 			return HBox(
 				Text(&kv.Key).FG(Cyan),
@@ -108,8 +108,8 @@ func main() {
 
 	sidebarList := List(&sidebarItems).
 		MaxVisible(10).
-		Style(Style{BG: PaletteColor(235)}).
-		SelectedStyle(Style{BG: PaletteColor(238)}).
+		Style(Style{BG: Ansi256(235)}).
+		SelectedStyle(Style{BG: Ansi256(238)}).
 		Render(func(item *FileItem) Component {
 			style := Style{FG: White}
 			if item.IsDir {
@@ -319,7 +319,7 @@ func main() {
 						VBox.Border(BorderRounded).Grow(1)(
 							Text("Editor").FG(Cyan).Bold(),
 							HRule(),
-							LayerView(editorLayer).ViewHeight(10),
+							LayerView(editorLayer).Height(10),
 						),
 					),
 					SpaceH(1),

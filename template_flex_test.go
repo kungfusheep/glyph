@@ -552,7 +552,7 @@ func TestScrollbarComponent(t *testing.T) {
 		pos := 0
 		tmpl := Build(HBox(
 			Text("Content"),
-			Scroll(100, 10, &pos).Length(10),
+			Scrollbar(100, 10, &pos).Length(10),
 		))
 
 		buf := NewBuffer(20, 10)
@@ -571,7 +571,7 @@ func TestScrollbarComponent(t *testing.T) {
 
 	t.Run("Vertical scrollbar at bottom", func(t *testing.T) {
 		pos := 90 // scrolled to bottom
-		tmpl := Build(Scroll(100, 10, &pos).Length(10))
+		tmpl := Build(Scrollbar(100, 10, &pos).Length(10))
 
 		buf := NewBuffer(5, 10)
 		tmpl.Execute(buf, 5, 10)
@@ -589,7 +589,7 @@ func TestScrollbarComponent(t *testing.T) {
 
 	t.Run("Horizontal scrollbar", func(t *testing.T) {
 		pos := 0
-		tmpl := Build(Scroll(100, 10, &pos).Length(10).Horizontal())
+		tmpl := Build(Scrollbar(100, 10, &pos).Length(10).Horizontal())
 
 		buf := NewBuffer(10, 3)
 		tmpl.Execute(buf, 10, 3)
@@ -606,7 +606,7 @@ func TestScrollbarComponent(t *testing.T) {
 
 	t.Run("Scrollbar thumb moves with position", func(t *testing.T) {
 		pos := 0
-		tmpl := Build(Scroll(100, 10, &pos).Length(10))
+		tmpl := Build(Scrollbar(100, 10, &pos).Length(10))
 
 		buf := NewBuffer(5, 10)
 
@@ -639,7 +639,7 @@ func TestScrollbarComponent(t *testing.T) {
 
 	t.Run("Custom scrollbar characters", func(t *testing.T) {
 		pos := 0
-		tmpl := Build(Scroll(20, 5, &pos).Length(4).TrackChar('░').ThumbChar('▓'))
+		tmpl := Build(Scrollbar(20, 5, &pos).Length(4).TrackChar('░').ThumbChar('▓'))
 
 		buf := NewBuffer(5, 4)
 		tmpl.Execute(buf, 5, 4)

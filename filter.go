@@ -249,11 +249,11 @@ func (t *fzfTerm) score(candidate string) (int, bool) {
 //
 // usage:
 //
-//	f := NewFilter(&items, func(item *Item) string { return item.Name })
+//	f := Filter(&items, func(item *Item) string { return item.Name })
 //	f.Update("query")           // re-filter when query changes
 //	f.Items                     // filtered+ranked subset, point a ListC at &f.Items
 //	f.Original(selectedIndex)   // map filtered index back to source item
-type Filter[T any] struct {
+type FilterC[T any] struct {
 	Items []*T // filtered+ranked subset — pointers into source for live reads
 
 	source    *[]T
@@ -270,10 +270,10 @@ type scored struct {
 	score int
 }
 
-// NewFilter creates a filter over a source slice.
+// Filter creates a filter over a source slice.
 // extract returns the searchable text for each item.
-func NewFilter[T any](source *[]T, extract func(*T) string) *Filter[T] {
-	f := &Filter[T]{
+func Filter[T any](source *[]T, extract func(*T) string) *FilterC[T] {
+	f := &FilterC[T]{
 		source:  source,
 		extract: extract,
 	}
@@ -283,7 +283,7 @@ func NewFilter[T any](source *[]T, extract func(*T) string) *Filter[T] {
 
 // Update re-filters the source slice with a new query string.
 // No-op if the query hasn't changed.
-func (f *Filter[T]) Update(query string) {
+func (f *FilterC[T]) Update(query string) {
 	if query == f.lastQuery {
 		return
 	}
@@ -331,7 +331,7 @@ func (f *Filter[T]) Update(query string) {
 }
 
 // Reset clears the filter, restoring all source items in original order.
-func (f *Filter[T]) Reset() {
+func (f *FilterC[T]) Reset() {
 	f.lastQuery = ""
 	f.query = FzfQuery{}
 
@@ -352,7 +352,7 @@ func (f *Filter[T]) Reset() {
 
 // Original maps a filtered index back to a pointer into the source slice.
 // Returns nil if the index is out of bounds.
-func (f *Filter[T]) Original(filteredIndex int) *T {
+func (f *FilterC[T]) Original(filteredIndex int) *T {
 	if filteredIndex < 0 || filteredIndex >= len(f.indices) {
 		return nil
 	}
@@ -366,7 +366,7 @@ func (f *Filter[T]) Original(filteredIndex int) *T {
 
 // OriginalIndex maps a filtered index back to the index in the source slice.
 // Returns -1 if the index is out of bounds.
-func (f *Filter[T]) OriginalIndex(filteredIndex int) int {
+func (f *FilterC[T]) OriginalIndex(filteredIndex int) int {
 	if filteredIndex < 0 || filteredIndex >= len(f.indices) {
 		return -1
 	}
@@ -374,18 +374,18 @@ func (f *Filter[T]) OriginalIndex(filteredIndex int) int {
 }
 
 // Active reports whether a filter query is currently applied.
-func (f *Filter[T]) Active() bool {
+func (f *FilterC[T]) Active() bool {
 	return !f.query.Empty()
 }
 
 // Query returns the current raw query string.
-func (f *Filter[T]) Query() string {
+func (f *FilterC[T]) Query() string {
 	return f.lastQuery
 }
 
 // appended processes only newly appended source items since the last
 // sync. O(k) where k = items added, regardless of total list size.
-func (f *Filter[T]) appended() {
+func (f *FilterC[T]) appended() {
 	src := *f.source
 	if f.scored >= len(src) {
 		return
@@ -410,7 +410,7 @@ func (f *Filter[T]) appended() {
 
 // refresh forces a full re-evaluation of the current query against the
 // source slice. Used after replacing the source data entirely.
-func (f *Filter[T]) refresh() {
+func (f *FilterC[T]) refresh() {
 	if f.query.Empty() {
 		f.Reset()
 		return
@@ -421,7 +421,7 @@ func (f *Filter[T]) refresh() {
 }
 
 // Len returns the number of currently visible (filtered) items.
-func (f *Filter[T]) Len() int {
+func (f *FilterC[T]) Len() int {
 	return len(f.Items)
 }
 

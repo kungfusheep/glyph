@@ -20,7 +20,7 @@ func (t TabsC) Build() Component             { return t }
 func (s ScrollbarC) Build() Component        { return s }
 func (a AutoTableC) Build() Component        { return a }
 func (t TextBlockC) Build() Component        { return t }
-func (c Custom) Build() Component            { return c }
+func (c customC) Build() Component           { return c }
 func (t TreeView) Build() Component          { return t }
 func (t textInput) Build() Component         { return t }
 func (s screenEffectNode) Build() Component  { return s }

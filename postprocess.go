@@ -169,12 +169,12 @@ const (
 	BlendOverlay              // multiply if dark, screen if light
 	BlendAdd                  // clipped addition
 	BlendSoftLight            // gentle contrast
-	BlendColorDodge           // dramatic brighten
-	BlendColorBurn            // dramatic darken
+	BlendDodge           // dramatic brighten
+	BlendBurn            // dramatic darken
 )
 
-// BlendColor combines two RGB colours using the specified blend mode.
-func BlendColor(base, top Color, mode BlendMode) Color {
+// Blend combines two RGB colours using the specified blend mode.
+func Blend(base, top Color, mode BlendMode) Color {
 	if base.Mode == ColorDefault || top.Mode == ColorDefault {
 		return top
 	}
@@ -207,13 +207,13 @@ func blendChannel(a, b uint8, mode BlendMode) uint8 {
 		} else {
 			r = fa + (2*fb-1)*(softLightG(fa)-fa)
 		}
-	case BlendColorDodge:
+	case BlendDodge:
 		if fb >= 1 {
 			r = 1
 		} else {
 			r = fa / (1 - fb)
 		}
-	case BlendColorBurn:
+	case BlendBurn:
 		if fb <= 0 {
 			r = 0
 		} else {
@@ -269,8 +269,8 @@ func (b blendEffect) Apply(buf *Buffer, ctx PostContext) {
 		for x := range w {
 			c := &buf.cells[bufBase+x]
 			orig := snap[snapBase+x]
-			c.Style.FG = BlendColor(orig.fg, c.Style.FG, b.mode)
-			c.Style.BG = BlendColor(orig.bg, c.Style.BG, b.mode)
+			c.Style.FG = Blend(orig.fg, c.Style.FG, b.mode)
+			c.Style.BG = Blend(orig.bg, c.Style.BG, b.mode)
 		}
 	}
 }

@@ -652,6 +652,8 @@ type OpDyn struct {
 	Gap          *int8
 	Fill         *Color
 	Opacity      *float64
+	OpacityOff   uintptr
+	OpacityIsOff bool
 	OpacityArmed *bool // set true by render to signal From tween activation
 }
 
@@ -2657,7 +2659,7 @@ type opTextInput struct {
 }
 
 type opOverlay struct {
-	centered     bool
+	placement    OverlayPlacement
 	x, y         int16
 	offsetX      *int16
 	offsetY      *int16
@@ -2913,7 +2915,7 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	case *FilterLogC:
 		t.collectFocusManager(v)
 		return t.compileFilterLogC(v, parent, depth)
-	case Custom:
+	case customC:
 		return t.compileCustom(v, parent, depth)
 	}
 
@@ -3000,7 +3002,7 @@ func (c *customWrapper) Render(buf *Buffer, x, y, w, h int) {
 	}
 }
 
-func (t *Template) compileCustom(v Custom, parent int16, depth int) int16 {
+func (t *Template) compileCustom(v customC, parent int16, depth int) int16 {
 	wrapper := &customWrapper{
 		measure: v.Measure,
 		render:  v.Render,
@@ -3708,12 +3710,17 @@ func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsaf
 		t.ops[idx].LocalStyle = v.localStyle
 	}
 	if v.opacity.dyn != nil {
-		v.opacity.compileArmed(t, elemBase, elemSize)
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Opacity = v.opacity.ptr
-		t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
+		if ptr, ok := v.opacity.dyn.(*float64); ok && elemBase != nil && isWithinRange(unsafe.Pointer(ptr), elemBase, elemSize) {
+			t.ops[idx].Dyn.OpacityOff = uintptr(unsafe.Pointer(ptr)) - uintptr(elemBase)
+			t.ops[idx].Dyn.OpacityIsOff = true
+		} else {
+			v.opacity.compileArmed(t, elemBase, elemSize)
+			t.ops[idx].Dyn.Opacity = v.opacity.ptr
+			t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
+		}
 	} else if v.opacity.isSet {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3791,12 +3798,17 @@ func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsaf
 		t.ops[idx].LocalStyle = v.localStyle
 	}
 	if v.opacity.dyn != nil {
-		v.opacity.compileArmed(t, elemBase, elemSize)
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Opacity = v.opacity.ptr
-		t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
+		if ptr, ok := v.opacity.dyn.(*float64); ok && elemBase != nil && isWithinRange(unsafe.Pointer(ptr), elemBase, elemSize) {
+			t.ops[idx].Dyn.OpacityOff = uintptr(unsafe.Pointer(ptr)) - uintptr(elemBase)
+			t.ops[idx].Dyn.OpacityIsOff = true
+		} else {
+			v.opacity.compileArmed(t, elemBase, elemSize)
+			t.ops[idx].Dyn.Opacity = v.opacity.ptr
+			t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
+		}
 	} else if v.opacity.isSet {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -3867,12 +3879,17 @@ func (t *Template) compileTextC(v TextC, parent int16, depth int, elemBase unsaf
 		t.ops[idx].Dyn.Width = v.widthPtr
 	}
 	if v.opacity.dyn != nil {
-		v.opacity.compileArmed(t, elemBase, elemSize)
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Opacity = v.opacity.ptr
-		t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
+		if ptr, ok := v.opacity.dyn.(*float64); ok && elemBase != nil && isWithinRange(unsafe.Pointer(ptr), elemBase, elemSize) {
+			t.ops[idx].Dyn.OpacityOff = uintptr(unsafe.Pointer(ptr)) - uintptr(elemBase)
+			t.ops[idx].Dyn.OpacityIsOff = true
+		} else {
+			v.opacity.compileArmed(t, elemBase, elemSize)
+			t.ops[idx].Dyn.Opacity = v.opacity.ptr
+			t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
+		}
 	} else if v.opacity.isSet {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -4223,7 +4240,10 @@ func (t *Template) compileOverlayC(v OverlayC, parent int16, depth int) int16 {
 		childTmpl = t.buildWithRoot(VBox(v.children...))
 	}
 
-	centered := v.centered || (v.x == 0 && v.y == 0 && v.anchor == nil)
+	placement := v.placement
+	if !v.placementSet && v.anchor == nil {
+		placement = OverlayPlacementCentered
+	}
 
 	backdropFG := v.backdropFG
 	if backdropFG.Mode == ColorDefault && v.backdrop {
@@ -4231,7 +4251,7 @@ func (t *Template) compileOverlayC(v OverlayC, parent int16, depth int) int16 {
 	}
 
 	ext := &opOverlay{
-		centered:    centered,
+		placement:   placement,
 		x:           int16(v.x),
 		y:           int16(v.y),
 		offsetX:     t.compileOverlayOffset(v.offsetX),
@@ -6633,8 +6653,15 @@ func refOpacity(ref *NodeRef) float64 {
 }
 
 func (t *Template) opacityForOp(op *Op) (float64, bool) {
-	if op.Dyn == nil || op.Dyn.Opacity == nil {
+	if op.Dyn == nil || (op.Dyn.Opacity == nil && !op.Dyn.OpacityIsOff) {
 		return 1, false
+	}
+	if op.Dyn.OpacityIsOff {
+		if t.elemBase == nil {
+			return 1, false
+		}
+		ptr := (*float64)(unsafe.Pointer(uintptr(t.elemBase) + op.Dyn.OpacityOff))
+		return clampOpacity(*ptr), true
 	}
 	if op.Dyn.OpacityArmed != nil {
 		*op.Dyn.OpacityArmed = true
@@ -6769,7 +6796,7 @@ func blendOpacityColor(back, src Color, opacity float64, fallback Color) Color {
 		}
 		back = fallback
 	}
-	return LerpColor(back, src, opacity)
+	return Lerp(back, src, opacity)
 }
 
 func blendSourceRuneFG(src, bg Color, opacity float64) Color {
@@ -6779,7 +6806,7 @@ func blendSourceRuneFG(src, bg Color, opacity float64) Color {
 	if bg.Mode == ColorDefault {
 		return src
 	}
-	return LerpColor(bg, src, opacity)
+	return Lerp(bg, src, opacity)
 }
 
 func blendBackingRuneFG(backFG, bg Color, opacity float64, defaultStyle Style) Color {
@@ -6792,7 +6819,7 @@ func blendBackingRuneFG(backFG, bg Color, opacity float64, defaultStyle Style) C
 	if backFG.Mode == ColorDefault {
 		return bg
 	}
-	return LerpColor(backFG, bg, opacity)
+	return Lerp(backFG, bg, opacity)
 }
 
 func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16) {
@@ -8444,12 +8471,39 @@ func (t *Template) renderOverlay(buf *Buffer, op *Op, screenW, screenH int16) {
 			posX = int16(ref.X) - overlayW
 			posY = int16(ref.Y)
 		}
-	} else if ext.centered {
-		posX = (screenW - overlayW) / 2
-		posY = (screenH - overlayH) / 2
 	} else {
-		posX = ext.x
-		posY = ext.y
+		switch ext.placement {
+		case OverlayPlacementCentered:
+			posX = (screenW - overlayW) / 2
+			posY = (screenH - overlayH) / 2
+		case OverlayPlacementTop:
+			posX = (screenW - overlayW) / 2
+			posY = 0
+		case OverlayPlacementBottom:
+			posX = (screenW - overlayW) / 2
+			posY = screenH - overlayH
+		case OverlayPlacementLeft:
+			posX = 0
+			posY = (screenH - overlayH) / 2
+		case OverlayPlacementRight:
+			posX = screenW - overlayW
+			posY = (screenH - overlayH) / 2
+		case OverlayPlacementTopLeft:
+			posX = 0
+			posY = 0
+		case OverlayPlacementTopRight:
+			posX = screenW - overlayW
+			posY = 0
+		case OverlayPlacementBottomLeft:
+			posX = 0
+			posY = screenH - overlayH
+		case OverlayPlacementBottomRight:
+			posX = screenW - overlayW
+			posY = screenH - overlayH
+		default:
+			posX = ext.x
+			posY = ext.y
+		}
 	}
 	if ext.offsetX != nil {
 		posX += *ext.offsetX

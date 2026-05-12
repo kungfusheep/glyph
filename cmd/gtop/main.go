@@ -60,7 +60,7 @@ func main() {
 		cwdMu.Unlock()
 	}
 
-	filter := NewFilter(&procs, func(p *Proc) string {
+	filter := Filter(&procs, func(p *Proc) string {
 		return fmt.Sprintf("%d %s %s", p.PID, p.Command, p.CWD)
 	})
 
@@ -125,8 +125,8 @@ func main() {
 			),
 			HBox(Text("> ").Bold(), input),
 			AutoTable(&filter.Items).
-				Column("CPU", Number(1)).
-				Column("Mem", Number(1)).
+				Column("CPU", FormatNumber(1)).
+				Column("Mem", FormatNumber(1)).
 				SortBy("CPU", false).
 				Scrollable(30).
 				BindNav("<C-n>", "<C-p>").

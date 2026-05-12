@@ -21,7 +21,7 @@ func main() {
 	}
 
 	rows := []easeRow{
-		{"Linear", Linear},
+		{"EaseLinear", EaseLinear},
 		{"EaseOutSine", EaseOutSine},
 		{"EaseOutQuad", EaseOutQuad},
 		{"EaseOutCubic", EaseOutCubic},

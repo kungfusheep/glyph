@@ -20,7 +20,7 @@ func TestLayerBlit(t *testing.T) {
 		// Build view with layer at position
 		view := VBox(
 			Text("Header"),
-			LayerView(layer).ViewHeight(3),
+			LayerView(layer).Height(3),
 			Text("Footer"),
 		)
 
@@ -78,11 +78,11 @@ func TestLayerBlit(t *testing.T) {
 
 		view := VBox(
 			Text("=TOP="),
-			LayerView(layer1).ViewHeight(2),
+			LayerView(layer1).Height(2),
 			Text("=MID1="),
-			LayerView(layer2).ViewHeight(2),
+			LayerView(layer2).Height(2),
 			Text("=MID2="),
-			LayerView(layer3).ViewHeight(2),
+			LayerView(layer3).Height(2),
 			Text("=BOT="),
 		)
 
@@ -131,9 +131,9 @@ func TestLayerBlit(t *testing.T) {
 		screen := NewBuffer(20, 10)
 
 		view := VBox(
-			LayerView(layer1).ViewHeight(3),
+			LayerView(layer1).Height(3),
 			Text("---"),
-			LayerView(layer2).ViewHeight(3),
+			LayerView(layer2).Height(3),
 		)
 
 		tmpl := Build(view)
@@ -188,7 +188,7 @@ func TestLayerBlit(t *testing.T) {
 
 		view := VBox(
 			Text("Before"),
-			LayerView(layer).ViewHeight(2),
+			LayerView(layer).Height(2),
 			Text("After"),
 		)
 
@@ -219,7 +219,7 @@ func TestLayerBlit(t *testing.T) {
 
 		view := VBox(
 			VBox.Border(BorderSingle).Title("Content")(
-				LayerView(layer).ViewHeight(3),
+				LayerView(layer).Height(3),
 			),
 		)
 
@@ -324,7 +324,7 @@ func BenchmarkLayerWithCursor(b *testing.B) {
 
 	screen := NewBuffer(80, 24)
 
-	view := VBox(LayerView(layer).ViewHeight(24))
+	view := VBox(LayerView(layer).Height(24))
 	tmpl := Build(view)
 
 	b.ReportAllocs()
@@ -351,7 +351,7 @@ func BenchmarkLayerScrollingWithCursor(b *testing.B) {
 
 	screen := NewBuffer(80, 24)
 
-	view := VBox(LayerView(layer).ViewHeight(24))
+	view := VBox(LayerView(layer).Height(24))
 	tmpl := Build(view)
 
 	b.ReportAllocs()

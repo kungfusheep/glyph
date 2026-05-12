@@ -41,7 +41,7 @@ func main() {
 		Selection(&selected).
 		Marker("> ").
 		MaxVisible(8).
-		SelectedStyle(Style{BG: PaletteColor(236)}).
+		SelectedStyle(Style{BG: Ansi256(236)}).
 		Render(func(cmd *Command) Component {
 			return HBox.Gap(2)(
 				Text(&cmd.Icon),

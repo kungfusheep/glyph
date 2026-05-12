@@ -30,7 +30,7 @@ import (
 type FilterListC[T any] struct {
 	input  *InputC
 	list   *ListC[*T]
-	filter *Filter[T]
+	filter *FilterC[T]
 
 	placeholder string
 	maxVisible  int
@@ -46,7 +46,7 @@ type FilterListC[T any] struct {
 
 // FilterList creates a filterable list backed by the caller's source slice.
 func FilterList[T any](source *[]T, extract func(*T) string) *FilterListC[T] {
-	f := NewFilter(source, extract)
+	f := Filter(source, extract)
 	fl := &FilterListC[T]{
 		input:  Input(),
 		list:   List(&f.Items),
@@ -366,7 +366,7 @@ func (fl *FilterListC[T]) Refresh() {
 }
 
 // Filter returns the underlying Filter for direct access.
-func (fl *FilterListC[T]) Filter() *Filter[T] {
+func (fl *FilterListC[T]) Filter() *FilterC[T] {
 	return fl.filter
 }
 

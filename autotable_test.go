@@ -42,10 +42,10 @@ func TestFormatNumber(t *testing.T) {
 
 	for _, tt := range tests {
 		cfg := &ColumnConfig{}
-		Number(tt.decimals)(cfg)
+		FormatNumber(tt.decimals)(cfg)
 		got := cfg.format(tt.val)
 		if got != tt.want {
-			t.Errorf("Number(%d)(%v) = %q, want %q", tt.decimals, tt.val, got, tt.want)
+			t.Errorf("FormatNumber(%d)(%v) = %q, want %q", tt.decimals, tt.val, got, tt.want)
 		}
 	}
 }
@@ -64,10 +64,10 @@ func TestCurrency(t *testing.T) {
 
 	for _, tt := range tests {
 		cfg := &ColumnConfig{}
-		Currency(tt.symbol, tt.decimals)(cfg)
+		FormatCurrency(tt.symbol, tt.decimals)(cfg)
 		got := cfg.format(tt.val)
 		if got != tt.want {
-			t.Errorf("Currency(%q, %d)(%v) = %q, want %q", tt.symbol, tt.decimals, tt.val, got, tt.want)
+			t.Errorf("FormatCurrency(%q, %d)(%v) = %q, want %q", tt.symbol, tt.decimals, tt.val, got, tt.want)
 		}
 		if cfg.align != AlignRight {
 			t.Error("Currency should set AlignRight")
@@ -77,17 +77,17 @@ func TestCurrency(t *testing.T) {
 
 func TestPercent(t *testing.T) {
 	cfg := &ColumnConfig{}
-	Percent(1)(cfg)
+	FormatPercent(1)(cfg)
 
 	got := cfg.format(12.34)
 	if got != "12.3%" {
-		t.Errorf("Percent(1)(12.34) = %q, want %q", got, "12.3%")
+		t.Errorf("FormatPercent(1)(12.34) = %q, want %q", got, "12.3%")
 	}
 }
 
 func TestPercentChange(t *testing.T) {
 	cfg := &ColumnConfig{}
-	PercentChange(1)(cfg)
+	FormatPercentChange(1)(cfg)
 
 	pos := cfg.format(5.67)
 	if pos != "+5.7%" {
@@ -126,19 +126,19 @@ func TestBytes(t *testing.T) {
 	}
 
 	cfg := &ColumnConfig{}
-	Bytes()(cfg)
+	FormatBytes()(cfg)
 
 	for _, tt := range tests {
 		got := cfg.format(tt.val)
 		if got != tt.want {
-			t.Errorf("Bytes()(%v) = %q, want %q", tt.val, got, tt.want)
+			t.Errorf("FormatBytes()(%v) = %q, want %q", tt.val, got, tt.want)
 		}
 	}
 }
 
 func TestBool(t *testing.T) {
 	cfg := &ColumnConfig{}
-	Bool("✓", "✗")(cfg)
+	FormatBool("✓", "✗")(cfg)
 
 	if cfg.format(true) != "✓" {
 		t.Errorf("Bool true = %q, want ✓", cfg.format(true))
