@@ -120,6 +120,11 @@ type Template struct {
 	// App reference for jump mode coordination
 	app *App
 
+	jumpOffsetX int
+	jumpOffsetY int
+	jumpMinY    int
+	jumpMaxY    int
+
 	// per-item index for ForEach/selectionList (reset per iteration, used by per-item tweens)
 	itemIndex int
 
@@ -551,6 +556,13 @@ type pendingOverlay struct {
 // SetApp links this template to an App for jump mode support.
 func (t *Template) SetApp(a *App) {
 	t.app = a
+}
+
+func (t *Template) setJumpViewport(offsetX, offsetY, minY, maxY int) {
+	t.jumpOffsetX = offsetX
+	t.jumpOffsetY = offsetY
+	t.jumpMinY = minY
+	t.jumpMaxY = maxY
 }
 
 func (t *Template) collectBindings(node any) {
@@ -2549,7 +2561,7 @@ func styleSpans(spans []Span, styleFor func(Style) Style) []Span {
 	}
 	styled := make([]Span, len(spans))
 	for i, span := range spans {
-		styled[i] = Span{Text: span.Text, Style: styleFor(span.Style)}
+		styled[i] = Span{Text: span.Text, Style: styleFor(span.Style), OnSelect: span.OnSelect}
 	}
 	return styled
 }
@@ -6907,7 +6919,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 			spans = styleSpans(spans, t.effectiveStyle)
 			maxLines := buf.Height() - int(absY)
 			if maxLines > 0 {
-				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap)
+				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap, t.richSpanJumpFunc(buf))
 			}
 		}
 
@@ -7127,7 +7139,11 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 			ext.ptr.screenX = int(absX)
 			ext.ptr.screenY = int(absY)
 			if t.app != nil {
+				ext.ptr.app = t.app
 				ext.ptr.defaultStyle = t.app.defaultStyle
+				if t.app.JumpModeActive() {
+					ext.ptr.Invalidate()
+				}
 			}
 			ext.ptr.prepare()
 			ext.ptr.blit(buf, int(absX), int(absY), layerW, int(contentH))
@@ -7384,6 +7400,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 func (t *Template) renderSubTemplate(buf *Buffer, sub *Template, globalX, globalY, maxW int16, elemBase unsafe.Pointer) {
 	sub.app = t.app
 	sub.clipMaxY = t.clipMaxY // propagate vertical clip
+	sub.setJumpViewport(t.jumpOffsetX, t.jumpOffsetY, t.jumpMinY, t.jumpMaxY)
 	if sub.rowBG.Mode != ColorDefault {
 		sub.inheritedFill = sub.rowBG
 	} else {
@@ -7402,6 +7419,7 @@ func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, glo
 	sub.inheritedStyle = t.inheritedStyle
 	sub.inheritedFill = t.inheritedFill
 	sub.clipMaxY = t.clipMaxY
+	sub.setJumpViewport(t.jumpOffsetX, t.jumpOffsetY, t.jumpMinY, t.jumpMaxY)
 	sub.elemBase = elemBase
 	sub.setExitRenderingFor(elemBase, exiting)
 	sub.pendingOverlays = sub.pendingOverlays[:0]
@@ -7422,9 +7440,9 @@ func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, glo
 }
 
 // renderSubOp renders a single op in a sub-template, recursing into children.
-func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW int16, elemBase unsafe.Pointer) {
-	op := &sub.ops[idx]
-	geom := &sub.geom[idx]
+func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW int16, elemBase unsafe.Pointer) {
+	op := &t.ops[idx]
+	geom := &t.geom[idx]
 
 	absX := globalX + geom.LocalX
 	absY := globalY + geom.LocalY
@@ -7442,14 +7460,14 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 
 	// merge row selection style with text style (also applies inherited style)
 	mergeStyle := func(s Style) Style {
-		s = sub.effectiveStyle(s)
-		if sub.rowBG.Mode != 0 && s.BG.Mode == 0 {
-			s.BG = sub.rowBG
+		s = t.effectiveStyle(s)
+		if t.rowBG.Mode != 0 && s.BG.Mode == 0 {
+			s.BG = t.rowBG
 		}
-		if sub.rowFG.Mode != 0 && s.FG.Mode == 0 {
-			s.FG = sub.rowFG
+		if t.rowFG.Mode != 0 && s.FG.Mode == 0 {
+			s.FG = t.rowFG
 		}
-		s.Attr = s.Attr | sub.rowAttr
+		s.Attr = s.Attr | t.rowAttr
 		return s
 	}
 
@@ -7475,14 +7493,14 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			}
 			x += alignOffset(text, int(alignW), style.Align)
 		}
-		opacity, hasOpacity := sub.opacityForOp(op)
+		opacity, hasOpacity := t.opacityForOp(op)
 		var backing []Cell
 		if hasOpacity && opacity < 1 {
-			backing = sub.snapshotRect(buf, x, int(absY), drawW, 1)
+			backing = t.snapshotRect(buf, x, int(absY), drawW, 1)
 		}
 		buf.WriteStringFast(x, int(absY), text, style, drawW)
 		if hasOpacity && opacity < 1 {
-			sub.composeOpacityRect(buf, x, int(absY), drawW, 1, backing, opacity, op.OpacityMode)
+			t.composeOpacityRect(buf, x, int(absY), drawW, 1, backing, opacity, op.OpacityMode)
 		}
 
 	case OpTextBlock:
@@ -7505,7 +7523,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		if ext.stylePtr != nil {
 			baseStyle = *ext.stylePtr
 		}
-		style := sub.effectiveStyle(baseStyle)
+		style := t.effectiveStyle(baseStyle)
 		buf.WriteProgressBar(int(absX), int(absY), int(op.width()), ratio, style)
 
 	case OpRichText:
@@ -7515,7 +7533,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			spans = styleSpans(spans, mergeStyle)
 			maxLines := buf.Height() - int(absY)
 			if maxLines > 0 {
-				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap)
+				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap, t.richSpanJumpFunc(buf))
 			}
 		}
 
@@ -7529,7 +7547,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		if ext.stylePtr != nil {
 			baseStyle = *ext.stylePtr
 		}
-		style := sub.effectiveStyle(baseStyle)
+		style := t.effectiveStyle(baseStyle)
 		label := applyTransform(ext.label, style.Transform)
 		var value string
 		switch ext.mode {
@@ -7550,7 +7568,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 
 	case OpCounter:
 		ext := op.Ext.(*opCounter)
-		style := sub.effectiveStyle(ext.style)
+		style := t.effectiveStyle(ext.style)
 		var scratch [48]byte
 		var b []byte
 		prefix := ext.prefix
@@ -7568,7 +7586,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		buf.WriteStringFast(int(absX), int(absY), text, style, int(maxW))
 
 	case OpSparkline:
-		op.Ext.(*opSparkline).render(sub, buf, absX, absY, contentW, geom.H)
+		op.Ext.(*opSparkline).render(t, buf, absX, absY, contentW, geom.H)
 
 	case OpHRule:
 		ext := op.Ext.(*opRule)
@@ -7580,7 +7598,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		if ext.stylePtr != nil {
 			hBaseStyle = *ext.stylePtr
 		}
-		ruleStyle := sub.effectiveStyle(hBaseStyle)
+		ruleStyle := t.effectiveStyle(hBaseStyle)
 		for i := 0; i < width; i++ {
 			buf.Set(int(absX)+i, int(absY), Cell{Rune: ext.char, Style: ruleStyle})
 		}
@@ -7591,7 +7609,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		if ext.stylePtr != nil {
 			vBaseStyle = *ext.stylePtr
 		}
-		ruleStyle := sub.effectiveStyle(vBaseStyle)
+		ruleStyle := t.effectiveStyle(vBaseStyle)
 		for i := 0; i < int(contentH); i++ {
 			buf.Set(int(absX), int(absY)+i, Cell{Rune: ext.char, Style: ruleStyle})
 		}
@@ -7607,7 +7625,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			for x := int16(0); x < contentW; x++ {
 				buf.Set(int(absX+x), int(absY), Cell{Rune: ext.char, Style: spacerStyle})
 			}
-		} else if sub.rowBG.Mode != 0 {
+		} else if t.rowBG.Mode != 0 {
 			for x := int16(0); x < contentW; x++ {
 				buf.Set(int(absX+x), int(absY), Cell{Rune: ' ', Style: spacerStyle})
 			}
@@ -7622,34 +7640,34 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			if ext.stylePtr != nil {
 				spinBaseStyle = *ext.stylePtr
 			}
-			style := sub.effectiveStyle(spinBaseStyle)
+			style := t.effectiveStyle(spinBaseStyle)
 			buf.WriteStringFast(int(absX), int(absY), frame, style, 1)
 		}
 
 	case OpScrollbar:
-		sub.renderScrollbar(buf, op, geom, absX, absY)
+		t.renderScrollbar(buf, op, geom, absX, absY)
 
 	case OpTabs:
-		sub.renderTabs(buf, op, geom, absX, absY)
+		t.renderTabs(buf, op, geom, absX, absY)
 
 	case OpTreeView:
-		sub.renderTreeView(buf, op, absX, absY)
+		t.renderTreeView(buf, op, absX, absY)
 
 	case OpSelectionList:
-		sub.renderSelectionList(buf, op, geom, absX, absY, maxW)
+		t.renderSelectionList(buf, op, geom, absX, absY, maxW)
 
 	case OpJump:
-		sub.renderJump(buf, op, geom, absX, absY, maxW, idx)
+		t.renderJump(buf, op, geom, absX, absY, maxW, idx)
 
 	case OpTextInput:
-		sub.renderTextInput(buf, op, geom, absX, absY)
+		t.renderTextInput(buf, op, geom, absX, absY)
 
 	case OpOverlay:
-		sub.pendingOverlays = append(sub.pendingOverlays, pendingOverlay{op: op})
+		t.pendingOverlays = append(t.pendingOverlays, pendingOverlay{op: op})
 
 	case OpScreenEffect:
 		ext := op.Ext.(*opScreenEffect)
-		sub.pendingScreenEffects = append(sub.pendingScreenEffects, ext.fns...)
+		t.pendingScreenEffects = append(t.pendingScreenEffects, ext.fns...)
 
 	case OpCustom:
 		crExt := op.Ext.(*opCustomRenderer)
@@ -7659,11 +7677,11 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 
 	case OpLayout:
 		for i := op.ChildStart; i < op.ChildEnd; i++ {
-			childOp := &sub.ops[i]
+			childOp := &t.ops[i]
 			if childOp.Parent != idx {
 				continue
 			}
-			sub.renderSubOp(buf, i, absX, absY, contentW, elemBase)
+			t.renderSubOp(buf, i, absX, absY, contentW, elemBase)
 		}
 
 	case OpLayer:
@@ -7676,14 +7694,18 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			ext.ptr.SetViewport(layerW, int(contentH))
 			ext.ptr.screenX = int(absX)
 			ext.ptr.screenY = int(absY)
-			if sub.app != nil {
-				ext.ptr.defaultStyle = sub.app.defaultStyle
+			if t.app != nil {
+				ext.ptr.app = t.app
+				ext.ptr.defaultStyle = t.app.defaultStyle
+				if t.app.JumpModeActive() {
+					ext.ptr.Invalidate()
+				}
 			}
 			ext.ptr.prepare()
 			ext.ptr.blit(buf, int(absX), int(absY), layerW, int(contentH))
 
-			if ext.ptr.cursor.Visible && sub.app != nil {
-				sub.app.activeLayer = ext.ptr
+			if ext.ptr.cursor.Visible && t.app != nil {
+				t.app.activeLayer = ext.ptr
 			}
 		}
 
@@ -7694,8 +7716,8 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		boxW := geom.W - op.marginH()
 		boxH := geom.H - op.marginV()
 
-		opacity, hasOpacity := sub.opacityForOp(op)
-		effectiveRefOpacity := sub.currentRefOpacity()
+		opacity, hasOpacity := t.opacityForOp(op)
+		effectiveRefOpacity := t.currentRefOpacity()
 		if hasOpacity {
 			effectiveRefOpacity *= opacity
 		}
@@ -7709,26 +7731,26 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		}
 		var backing []Cell
 		if hasOpacity && opacity < 1 {
-			backing = sub.snapshotRect(buf, int(boxX), int(boxY), int(boxW), int(boxH))
+			backing = t.snapshotRect(buf, int(boxX), int(boxY), int(boxW), int(boxH))
 		}
 
 		// Update inherited Fill - cascades through nested containers
-		oldInheritedFill := sub.inheritedFill
+		oldInheritedFill := t.inheritedFill
 		opFill := op.fill()
 		if op.CascadeStyle != nil && op.CascadeStyle.Fill.Mode != ColorDefault {
-			sub.inheritedFill = op.CascadeStyle.Fill
+			t.inheritedFill = op.CascadeStyle.Fill
 		} else if opFill.Mode != ColorDefault {
-			sub.inheritedFill = opFill
+			t.inheritedFill = opFill
 		}
 
 		// Update inherited style if this container sets one (before title rendering)
-		oldInheritedStyle := sub.inheritedStyle
+		oldInheritedStyle := t.inheritedStyle
 		if op.CascadeStyle != nil {
-			sub.inheritedStyle = op.CascadeStyle
+			t.inheritedStyle = op.CascadeStyle
 		}
 
 		// Fill container area - direct Fill takes precedence over inherited
-		fillColor := sub.inheritedFill
+		fillColor := t.inheritedFill
 		if opFill.Mode != ColorDefault {
 			fillColor = opFill
 		}
@@ -7762,8 +7784,8 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 
 			if op.Title != "" {
 				titleTransform := TransformNone
-				if sub.inheritedStyle != nil {
-					titleTransform = sub.inheritedStyle.Transform
+				if t.inheritedStyle != nil {
+					titleTransform = t.inheritedStyle.Transform
 				}
 				titleMaxW := int(boxW) - 2
 				titleX := int(boxX) + 1
@@ -7793,29 +7815,29 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			contentW -= op.Border.PadH()
 		}
 
-		oldRefOpacity := sub.refOpacity
-		oldRefOpacitySet := sub.refOpacitySet
-		sub.refOpacity = effectiveRefOpacity
-		sub.refOpacitySet = true
+		oldRefOpacity := t.refOpacity
+		oldRefOpacitySet := t.refOpacitySet
+		t.refOpacity = effectiveRefOpacity
+		t.refOpacitySet = true
 
 		// Recurse into children with this container's position as their origin
 		// children's LocalX/Y already include margin+border offsets
 		for i := op.ChildStart; i < op.ChildEnd; i++ {
-			childOp := &sub.ops[i]
+			childOp := &t.ops[i]
 			if childOp.Parent != idx {
 				continue
 			}
-			sub.renderSubOp(buf, i, absX, absY, contentW, elemBase)
+			t.renderSubOp(buf, i, absX, absY, contentW, elemBase)
 		}
 
 		// Restore inherited style and fill
-		sub.inheritedStyle = oldInheritedStyle
-		sub.inheritedFill = oldInheritedFill
-		sub.refOpacity = oldRefOpacity
-		sub.refOpacitySet = oldRefOpacitySet
+		t.inheritedStyle = oldInheritedStyle
+		t.inheritedFill = oldInheritedFill
+		t.refOpacity = oldRefOpacity
+		t.refOpacitySet = oldRefOpacitySet
 
 		if hasOpacity && opacity < 1 {
-			sub.composeOpacityRect(buf, int(boxX), int(boxY), int(boxW), int(boxH), backing, opacity, op.OpacityMode)
+			t.composeOpacityRect(buf, int(boxX), int(boxY), int(boxW), int(boxH), backing, opacity, op.OpacityMode)
 		}
 
 	case OpIf:
@@ -7825,7 +7847,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		selector := ifExt.selector(elemBase)
 		selected, exiting := selector.selectBranch(requested, branches)
 		if tmpl := branchAt(branches, selected); tmpl != nil {
-			sub.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
+			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
 			if exiting {
 				selector.markExitRendered()
 			}
@@ -7844,7 +7866,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 				if feExt.elemIsPtr {
 					nestedElemPtr = *(*unsafe.Pointer)(nestedElemPtr)
 				}
-				sub.renderSubTemplate(buf, feExt.iterTmpl, itemAbsX, itemAbsY, itemGeom.W, nestedElemPtr)
+				t.renderSubTemplate(buf, feExt.iterTmpl, itemAbsX, itemAbsY, itemGeom.W, nestedElemPtr)
 			}
 		}
 
@@ -7856,7 +7878,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		selected, exiting := selector.selectBranch(requested, branches)
 		tmpl := branchAt(branches, selected)
 		if tmpl != nil {
-			sub.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
+			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
 			if exiting {
 				selector.markExitRendered()
 			}
@@ -7870,7 +7892,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		selected, exiting := selector.selectBranch(requested, branches)
 		tmpl := branchAt(branches, selected)
 		if tmpl != nil {
-			sub.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
+			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
 			if exiting {
 				selector.markExitRendered()
 			}
@@ -8250,26 +8272,28 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 		}
 	}
 
-	// If jump mode is active, register this target and draw label
+	// If jump mode is active, register this target. Labels are painted by the
+	// app after the final visible frame is composed.
 	if t.app != nil && t.app.JumpModeActive() {
 		ext := op.Ext.(*opJump)
 		t.app.AddJumpTarget(absX, absY, ext.onSelect, ext.style)
+	}
+}
 
-		// Draw label if assigned
-		jm := t.app.JumpMode()
-		for i := len(jm.Targets) - 1; i >= 0; i-- {
-			target := &jm.Targets[i]
-			if target.X == absX && target.Y == absY && target.Label != "" {
-				style := t.app.JumpStyle().LabelStyle
-				if !target.Style.Equal(Style{}) {
-					style = target.Style
-				}
-				for j, r := range target.Label {
-					buf.Set(int(absX)+j, int(absY), Cell{Rune: r, Style: style})
-				}
-				break
-			}
+func (t *Template) richSpanJumpFunc(buf *Buffer) spanJumpFunc {
+	if t.app == nil || !t.app.JumpModeActive() {
+		return nil
+	}
+	return func(x, y int, span Span) {
+		if span.OnSelect == nil {
+			return
 		}
+		x += t.jumpOffsetX
+		y += t.jumpOffsetY
+		if t.jumpMaxY > t.jumpMinY && (y < t.jumpMinY || y >= t.jumpMaxY) {
+			return
+		}
+		t.app.AddJumpTarget(int16(x), int16(y), span.OnSelect, Style{})
 	}
 }
 

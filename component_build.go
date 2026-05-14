@@ -42,5 +42,5 @@ func (c *ConditionEval[T]) Build() Component { return c }
 func (c *OrdConditionEval[T]) Build() Component {
 	return c
 }
-func (s *SwitchNode[T]) Build() Component { return s }
-func (m *MatchNode[T]) Build() Component  { return m }
+func (s *SwitchC[T]) Build() Component { return s }
+func (m *MatchC[T]) Build() Component  { return m }

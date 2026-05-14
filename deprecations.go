@@ -1,5 +1,7 @@
 package glyph
 
+import "github.com/kungfusheep/riffkey"
+
 // Deprecation shims for renamed identifiers. Each shim carries a `//go:fix inline`
 // directive (Go 1.26+ tool support) so that `go fix` and gopls IDE refactorings
 // can auto-migrate call sites from the old name to the new name.
@@ -98,3 +100,23 @@ func (l LayerViewC) ViewWidth(w int16) LayerViewC { return l.Width(w) }
 //
 //go:fix inline
 func (l LayerViewC) ViewHeight(h int16) LayerViewC { return l.Height(h) }
+
+// Deprecated: use PushRouter instead.
+//
+//go:fix inline
+func (a *App) Push(r *riffkey.Router) { a.PushRouter(r) }
+
+// Deprecated: use PopRouter instead.
+//
+//go:fix inline
+func (a *App) Pop() { a.PopRouter() }
+
+// Deprecated: use MatchC instead.
+//
+//go:fix inline
+type MatchNode[T comparable] = MatchC[T]
+
+// Deprecated: use SwitchC instead.
+//
+//go:fix inline
+type SwitchNode[T comparable] = SwitchC[T]

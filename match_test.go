@@ -62,7 +62,7 @@ func TestMatchAllOperators(t *testing.T) {
 	tests := []struct {
 		name string
 		val  int
-		m    *MatchNode[int]
+		m    *MatchC[int]
 		want int
 	}{
 		{"Gt match", 10, Match(&[]int{10}[0], Gt(5, Text("yes"))), 0},

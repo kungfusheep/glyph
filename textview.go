@@ -161,24 +161,26 @@ func wrapTextLines(s string, width int, charWrap bool) int {
 
 // wrapSpansDraw wraps styled spans to width and writes them to buf.
 // It mirrors TextBlock wrapping while preserving each span's style.
-func wrapSpansDraw(spans []Span, buf *Buffer, x, y int, width, maxLines int, charWrap bool) int {
+type spanJumpFunc func(x, y int, span Span)
+
+func wrapSpansDraw(spans []Span, buf *Buffer, x, y int, width, maxLines int, charWrap bool, jump spanJumpFunc) int {
 	if width <= 0 {
 		return 0
 	}
 	if charWrap {
-		return wrapSpansChar(spans, buf, x, y, width, maxLines)
+		return wrapSpansChar(spans, buf, x, y, width, maxLines, jump)
 	}
-	return wrapSpansWord(spans, buf, x, y, width, maxLines)
+	return wrapSpansWord(spans, buf, x, y, width, maxLines, jump)
 }
 
 func wrapSpansLines(spans []Span, width int, charWrap bool) int {
 	if width <= 0 {
 		return 0
 	}
-	return wrapSpansDraw(spans, nil, 0, 0, width, 0, charWrap)
+	return wrapSpansDraw(spans, nil, 0, 0, width, 0, charWrap, nil)
 }
 
-func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
+func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int, jump spanJumpFunc) int {
 	row := 0
 	col := 0
 	var rw RowWriter
@@ -187,12 +189,16 @@ func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
 		rw = buf.Row(y, style)
 	}
 
-	write := func(r rune, s Style) {
+	write := func(r rune, span Span, jumped *bool, allowJump bool) {
 		if buf == nil || (maxLines > 0 && row >= maxLines) {
 			return
 		}
-		if !s.Equal(style) {
-			style = s
+		if allowJump && !*jumped && jump != nil && span.OnSelect != nil {
+			jump(x+col, y+row, span)
+			*jumped = true
+		}
+		if !span.Style.Equal(style) {
+			style = span.Style
 			rw = buf.Row(y+row, style)
 		}
 		rw.Put(x+col, r)
@@ -208,6 +214,7 @@ func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
 	pendingSpace := false
 	for _, span := range spans {
 		text := span.Text
+		jumped := false
 		for i := 0; i < len(text); {
 			if text[i] == '\n' {
 				flush()
@@ -243,7 +250,7 @@ func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
 			if col == 0 {
 				if wordRunes <= width {
 					for _, r := range word {
-						write(r, span.Style)
+						write(r, span, &jumped, true)
 						col++
 					}
 				} else {
@@ -251,27 +258,27 @@ func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
 						if col >= width {
 							flush()
 						}
-						write(r, span.Style)
+						write(r, span, &jumped, true)
 						col++
 					}
 				}
 			} else if spaceBefore && col+1+wordRunes <= width {
-				write(' ', span.Style)
+				write(' ', span, &jumped, false)
 				col++
 				for _, r := range word {
-					write(r, span.Style)
+					write(r, span, &jumped, true)
 					col++
 				}
 			} else if !spaceBefore && col+wordRunes <= width {
 				for _, r := range word {
-					write(r, span.Style)
+					write(r, span, &jumped, true)
 					col++
 				}
 			} else {
 				flush()
 				if wordRunes <= width {
 					for _, r := range word {
-						write(r, span.Style)
+						write(r, span, &jumped, true)
 						col++
 					}
 				} else {
@@ -279,7 +286,7 @@ func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
 						if col >= width {
 							flush()
 						}
-						write(r, span.Style)
+						write(r, span, &jumped, true)
 						col++
 					}
 				}
@@ -289,7 +296,7 @@ func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
 	return row + 1
 }
 
-func wrapSpansChar(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
+func wrapSpansChar(spans []Span, buf *Buffer, x, y, width, maxLines int, jump spanJumpFunc) int {
 	const tabWidth = 4
 	row := 0
 	col := 0
@@ -299,12 +306,16 @@ func wrapSpansChar(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
 		rw = buf.Row(y, style)
 	}
 
-	write := func(r rune, s Style) {
+	write := func(r rune, span Span, jumped *bool, allowJump bool) {
 		if buf == nil || (maxLines > 0 && row >= maxLines) {
 			return
 		}
-		if !s.Equal(style) {
-			style = s
+		if allowJump && !*jumped && jump != nil && span.OnSelect != nil {
+			jump(x+col, y+row, span)
+			*jumped = true
+		}
+		if !span.Style.Equal(style) {
+			style = span.Style
 			rw = buf.Row(y+row, style)
 		}
 		rw.Put(x+col, r)
@@ -318,6 +329,7 @@ func wrapSpansChar(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
 	}
 
 	for _, span := range spans {
+		jumped := false
 		for i := 0; i < len(span.Text); {
 			r, size := utf8.DecodeRuneInString(span.Text[i:])
 			i += size
@@ -332,7 +344,7 @@ func wrapSpansChar(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
 					if col >= width {
 						flush()
 					}
-					write(' ', span.Style)
+					write(' ', span, &jumped, false)
 					col++
 				}
 				continue
@@ -340,7 +352,7 @@ func wrapSpansChar(spans []Span, buf *Buffer, x, y, width, maxLines int) int {
 			if col >= width {
 				flush()
 			}
-			write(r, span.Style)
+			write(r, span, &jumped, true)
 			col++
 		}
 	}

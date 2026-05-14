@@ -312,8 +312,8 @@ func (a *App) wireComponentBindings(tmpl *Template, router *riffkey.Router) {
 
 		// build a sub-router per focusable item.
 		// each gets pushed on focus and popped on blur.
-		fm.push = func(r *riffkey.Router) { a.Push(r) }
-		fm.pop = func() { a.Pop() }
+		fm.push = func(r *riffkey.Router) { a.PushRouter(r) }
+		fm.pop = func() { a.PopRouter() }
 		fm.routers = make([]*riffkey.Router, len(fm.items))
 
 		for i, item := range fm.items {
@@ -721,13 +721,13 @@ func (a *App) UnbindField() *App {
 	return a
 }
 
-// Push pushes a new router onto the input stack (for modal input).
-func (a *App) Push(r *riffkey.Router) {
+// PushRouter pushes a new router onto the input stack (for modal input).
+func (a *App) PushRouter(r *riffkey.Router) {
 	a.input.Push(r)
 }
 
-// Pop pops the current router from the input stack.
-func (a *App) Pop() {
+// PopRouter pops the current router from the input stack.
+func (a *App) PopRouter() {
 	a.input.Pop()
 }
 
@@ -899,7 +899,13 @@ func (a *App) render() {
 			return // No view set
 		}
 	}
+	if a.JumpModeActive() {
+		a.jumpMode.ClearTargets()
+	}
 	activeTmpl.Execute(buf, int16(size.Width), renderHeight)
+	if a.JumpModeActive() {
+		a.jumpMode.AssignLabels()
+	}
 
 	// for inline auto-size, use content height instead of full terminal height
 	if a.inline && a.viewHeight == 0 {
@@ -988,6 +994,9 @@ func (a *App) render() {
 		if DebugTiming {
 			lastEffectTime = time.Since(tEffect)
 		}
+	}
+	if a.JumpModeActive() {
+		a.paintJumpLabels(buf, int(renderHeight))
 	}
 
 	// Copy to screen's back buffer for flush
@@ -1285,7 +1294,7 @@ func (a *App) JumpStyle() JumpStyle {
 
 // JumpModeActive returns true if jump mode is currently active.
 func (a *App) JumpModeActive() bool {
-	return a.jumpMode.Active
+	return a.jumpMode != nil && a.jumpMode.Active
 }
 
 // JumpMode returns the jump mode state for use during rendering.
@@ -1293,10 +1302,35 @@ func (a *App) JumpMode() *JumpMode {
 	return a.jumpMode
 }
 
+func (a *App) paintJumpLabels(buf *Buffer, height int) {
+	if a.jumpMode == nil {
+		return
+	}
+	for _, target := range a.jumpMode.Targets {
+		x, y := int(target.X), int(target.Y)
+		if y < 0 || y >= height || x >= buf.Width() {
+			continue
+		}
+		style := a.jumpStyle.LabelStyle
+		if !target.Style.Equal(Style{}) {
+			style = target.Style
+		}
+		for i, r := range target.Label {
+			if x+i < 0 || x+i >= buf.Width() {
+				continue
+			}
+			buf.Set(x+i, y, Cell{Rune: r, Style: style})
+		}
+	}
+}
+
 // EnterJumpMode activates jump label mode.
 // A render is triggered to collect jump targets, then a temporary router
 // is pushed to handle label input.
 func (a *App) EnterJumpMode() {
+	if a.jumpMode == nil {
+		a.jumpMode = &JumpMode{}
+	}
 	if a.jumpMode.Active {
 		return // Already in jump mode
 	}
@@ -1304,11 +1338,8 @@ func (a *App) EnterJumpMode() {
 	a.jumpMode.Active = true
 	a.jumpMode.ClearJumpTargets()
 
-	// Render to collect targets (they register during render)
+	// Render collects visible targets, assigns labels, and paints them.
 	a.render()
-
-	// Assign labels after collecting targets
-	a.jumpMode.AssignLabels()
 
 	if len(a.jumpMode.Targets) == 0 {
 		// No targets, exit immediately
@@ -1350,14 +1381,11 @@ func (a *App) EnterJumpMode() {
 	})
 
 	a.input.Push(jumpRouter)
-
-	// Re-render to show labels
-	a.RequestRender()
 }
 
 // ExitJumpMode deactivates jump label mode.
 func (a *App) ExitJumpMode() {
-	if !a.jumpMode.Active {
+	if !a.JumpModeActive() {
 		return
 	}
 
@@ -1370,7 +1398,7 @@ func (a *App) ExitJumpMode() {
 // AddJumpTarget registers a jump target during rendering.
 // Called by Jump components when jump mode is active.
 func (a *App) AddJumpTarget(x, y int16, onSelect func(), style Style) {
-	if a.jumpMode.Active {
+	if a.jumpMode != nil && a.jumpMode.Active {
 		a.jumpMode.AddTarget(x, y, onSelect, style)
 	}
 }

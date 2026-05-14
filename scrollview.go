@@ -232,6 +232,15 @@ func (sv *ScrollViewC) render() {
 	if sv.childTmpl == nil {
 		sv.childTmpl = Build(VBox(sv.children...))
 	}
+	if sv.layer.app != nil {
+		sv.childTmpl.SetApp(sv.layer.app)
+	}
+	sv.childTmpl.setJumpViewport(
+		sv.layer.screenX,
+		sv.layer.screenY-sv.layer.scrollY,
+		sv.layer.screenY,
+		sv.layer.screenY+sv.layer.viewHeight,
+	)
 
 	// use a generous height so content isn't clipped, then trim to actual
 	h := sv.layer.ViewportHeight()
@@ -253,5 +262,7 @@ func (sv *ScrollViewC) render() {
 		buf.Resize(w, contentH)
 	}
 
+	scrollY := sv.layer.ScrollY()
 	sv.layer.SetBuffer(buf)
+	sv.layer.ScrollTo(scrollY)
 }

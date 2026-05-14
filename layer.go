@@ -42,6 +42,7 @@ type Layer struct {
 
 	// defaultStyle inherited from the app for buffer creation
 	defaultStyle Style
+	app          *App
 }
 
 // NewLayer creates a new empty layer.

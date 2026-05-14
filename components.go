@@ -815,10 +815,10 @@ func Arrange(layout LayoutFunc) func(children ...Component) Box {
 }
 
 // ============================================================================
-// Widget - Fully custom component
+// Custom - Fully custom component
 // ============================================================================
 
-// Widget creates a fully custom component with explicit measure and render functions.
+// Custom creates a fully custom component with explicit measure and render functions.
 // Use this when you need complete control over sizing and drawing.
 //
 //	Custom(

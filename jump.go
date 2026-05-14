@@ -71,6 +71,10 @@ func (jm *JumpMode) ClearJumpTargets() {
 	jm.Input = ""
 }
 
+func (jm *JumpMode) ClearTargets() {
+	jm.Targets = jm.Targets[:0]
+}
+
 // AddTarget adds a jump target during render.
 func (jm *JumpMode) AddTarget(x, y int16, onSelect func(), style Style) {
 	jm.Targets = append(jm.Targets, JumpTarget{
