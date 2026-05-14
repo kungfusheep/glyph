@@ -830,6 +830,72 @@ func TestV2ForEach(t *testing.T) {
 	}
 }
 
+func TestForEachHBoxSpaceUsesPerItemLayout(t *testing.T) {
+	items := []testItem{
+		{Name: "short"},
+		{Name: "much longer notification"},
+	}
+
+	tmpl := Build(VBox.Width(49)(
+		ForEach(&items, func(item *testItem) Component {
+			return HBox.Width(49)(
+				Space(),
+				Text("* "),
+				Text(&item.Name),
+			)
+		}),
+	))
+
+	buf := NewBuffer(49, 2)
+	tmpl.Execute(buf, 49, 2)
+
+	shortEnd := lastRuneX(buf, 0, 't')
+	longEnd := lastRuneX(buf, 1, 'n')
+	if shortEnd != 48 || longEnd != 48 {
+		t.Fatalf("line ends = short:%d long:%d\n%s", shortEnd, longEnd, buf.String())
+	}
+}
+
+func TestForEachMatchDynamicFGUsesPerItemValue(t *testing.T) {
+	type row struct {
+		Kind string
+	}
+	items := []row{
+		{Kind: "info"},
+		{Kind: "error"},
+	}
+
+	tmpl := Build(VBox(
+		ForEach(&items, func(item *row) Component {
+			return Text("*").FG(
+				Match(&item.Kind,
+					Eq("error", Red),
+				).Default(Blue),
+			)
+		}),
+	))
+
+	buf := NewBuffer(4, 2)
+	tmpl.Execute(buf, 4, 2)
+
+	if got := buf.Get(0, 0).Style.FG; got != Blue {
+		t.Fatalf("first row FG = %v, want Blue", got)
+	}
+	if got := buf.Get(0, 1).Style.FG; got != Red {
+		t.Fatalf("second row FG = %v, want Red", got)
+	}
+}
+
+func lastRuneX(buf *Buffer, y int, r rune) int {
+	last := -1
+	for x := 0; x < buf.Width(); x++ {
+		if buf.Get(x, y).Rune == r {
+			last = x
+		}
+	}
+	return last
+}
+
 func TestV2ForEachEmpty(t *testing.T) {
 	items := []testItem{}
 

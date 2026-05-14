@@ -982,7 +982,7 @@ func (t *Template) compileDynColor(v any, elemBase unsafe.Pointer, elemSize uint
 	case conditionNode:
 		return t.compileCondColor(c, elemBase, elemSize)
 	case valueBranchNode:
-		return t.compileBranchColor(c)
+		return t.compileBranchColor(c, elemBase, elemSize)
 	case tweenNode:
 		return t.compileTweenColor(c, elemBase, elemSize)
 	}
@@ -996,7 +996,7 @@ func (t *Template) compileDynStyle(v any, elemBase unsafe.Pointer, elemSize uint
 	case conditionNode:
 		return t.compileCondStyle(c, elemBase, elemSize)
 	case valueBranchNode:
-		return t.compileBranchStyle(c)
+		return t.compileBranchStyle(c, elemBase, elemSize)
 	case tweenNode:
 		return t.compileTweenStyle(c, elemBase, elemSize)
 	}
@@ -1199,31 +1199,38 @@ func (t *Template) compileCondStyle(cond conditionNode, elemBase unsafe.Pointer,
 	return storage
 }
 
-func (t *Template) compileBranchColor(branch valueBranchNode) *Color {
-	root := t.evalRoot()
+func (t *Template) compileBranchColor(branch valueBranchNode, elemBase unsafe.Pointer, elemSize uintptr) *Color {
 	storage := new(Color)
 	cases := branch.getCaseNodes()
 	def := branch.getDefaultNode()
+	inForEach := elemBase != nil && elemSize > 0
+	t.prepareValueBranchForBase(branch, elemBase, elemSize)
 	eval := func() {
-		idx := branch.getMatchIndex()
+		idx := t.valueBranchIndex(branch, inForEach)
 		if idx >= 0 && idx < len(cases) {
 			*storage = anyToColor(cases[idx])
-		} else {
-			*storage = anyToColor(def)
+			return
 		}
+		*storage = anyToColor(def)
 	}
 	eval()
-	root.evals = append(root.evals, eval)
+	if inForEach {
+		t.itemEvals = append(t.itemEvals, eval)
+	} else {
+		root := t.evalRoot()
+		root.evals = append(root.evals, eval)
+	}
 	return storage
 }
 
-func (t *Template) compileBranchStyle(branch valueBranchNode) *Style {
-	root := t.evalRoot()
+func (t *Template) compileBranchStyle(branch valueBranchNode, elemBase unsafe.Pointer, elemSize uintptr) *Style {
 	storage := new(Style)
 	cases := branch.getCaseNodes()
 	def := branch.getDefaultNode()
+	inForEach := elemBase != nil && elemSize > 0
+	t.prepareValueBranchForBase(branch, elemBase, elemSize)
 	eval := func() {
-		idx := branch.getMatchIndex()
+		idx := t.valueBranchIndex(branch, inForEach)
 		if idx >= 0 && idx < len(cases) {
 			*storage = anyToStyle(cases[idx])
 			return
@@ -1231,8 +1238,40 @@ func (t *Template) compileBranchStyle(branch valueBranchNode) *Style {
 		*storage = anyToStyle(def)
 	}
 	eval()
-	root.evals = append(root.evals, eval)
+	if inForEach {
+		t.itemEvals = append(t.itemEvals, eval)
+	} else {
+		root := t.evalRoot()
+		root.evals = append(root.evals, eval)
+	}
 	return storage
+}
+
+func (t *Template) prepareValueBranchForBase(branch valueBranchNode, elemBase unsafe.Pointer, elemSize uintptr) {
+	if elemBase == nil || elemSize == 0 {
+		return
+	}
+	base, ok := branch.(interface {
+		getPtrAddr() uintptr
+		setPtrOffset(uintptr)
+	})
+	if !ok {
+		return
+	}
+	ptrAddr := base.getPtrAddr()
+	baseAddr := uintptr(elemBase)
+	if ptrAddr >= baseAddr && ptrAddr < baseAddr+elemSize {
+		base.setPtrOffset(ptrAddr - baseAddr)
+	}
+}
+
+func (t *Template) valueBranchIndex(branch valueBranchNode, inForEach bool) int {
+	if inForEach {
+		if base, ok := branch.(interface{ getMatchIndexWithBase(unsafe.Pointer) int }); ok {
+			return base.getMatchIndexWithBase(t.elemBase)
+		}
+	}
+	return branch.getMatchIndex()
 }
 
 func anyToColor(v any) Color {
@@ -7347,6 +7386,9 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 			for _, eval := range feExt.iterTmpl.itemEvals {
 				eval()
 			}
+			feExt.iterTmpl.itemIndex = i
+			feExt.iterTmpl.distributeWidths(itemGeom.W, elemPtr)
+			feExt.iterTmpl.layout(0)
 
 			// apply dynamic fills on root container before rendering
 			if len(feExt.iterTmpl.ops) > 0 {
@@ -7866,6 +7908,13 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 				if feExt.elemIsPtr {
 					nestedElemPtr = *(*unsafe.Pointer)(nestedElemPtr)
 				}
+				feExt.iterTmpl.elemBase = nestedElemPtr
+				feExt.iterTmpl.itemIndex = j
+				for _, eval := range feExt.iterTmpl.itemEvals {
+					eval()
+				}
+				feExt.iterTmpl.distributeWidths(itemGeom.W, nestedElemPtr)
+				feExt.iterTmpl.layout(0)
 				t.renderSubTemplate(buf, feExt.iterTmpl, itemAbsX, itemAbsY, itemGeom.W, nestedElemPtr)
 			}
 		}
