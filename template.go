@@ -38,7 +38,7 @@ type Renderer interface {
 
 // forEachCompiler is implemented by generic ForEach types to compile themselves
 type forEachCompiler interface {
-	compileTo(t *Template, parent int16, depth int) int16
+	compileTo(t *Template, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16
 }
 
 // listCompiler is implemented by generic List types to compile themselves
@@ -2409,10 +2409,45 @@ func (c *opIf) selector(elemBase unsafe.Pointer) *branchSelector {
 
 type opForEach struct {
 	iterTmpl  *Template
-	slicePtr  unsafe.Pointer
+	slice     sliceBinding
 	elemSize  uintptr
 	elemIsPtr bool   // true when slice elements are pointers (e.g. []*T)
 	geoms     []Geom // per-item geometry, reused across frames
+}
+
+type sliceBinding struct {
+	ptr    unsafe.Pointer
+	off    uintptr
+	inItem bool
+}
+
+func newSliceBinding(ptr, elemBase unsafe.Pointer, elemSize uintptr) sliceBinding {
+	b := sliceBinding{ptr: ptr}
+	if ptr == nil || elemBase == nil || elemSize == 0 {
+		return b
+	}
+	ptrAddr := uintptr(ptr)
+	baseAddr := uintptr(elemBase)
+	if ptrAddr >= baseAddr && ptrAddr < baseAddr+elemSize {
+		b.off = ptrAddr - baseAddr
+		b.inItem = true
+	}
+	return b
+}
+
+func (b sliceBinding) ptrFor(elemBase unsafe.Pointer) unsafe.Pointer {
+	if b.inItem && elemBase != nil {
+		return unsafe.Pointer(uintptr(elemBase) + b.off)
+	}
+	return b.ptr
+}
+
+func (f *opForEach) sliceHeaderFor(elemBase unsafe.Pointer) (sliceHeader, bool) {
+	ptr := f.slice.ptrFor(elemBase)
+	if ptr == nil {
+		return sliceHeader{}, false
+	}
+	return *(*sliceHeader)(ptr), true
 }
 
 type opSwitch struct {
@@ -2989,7 +3024,7 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 
 	// Check for ForEachC[T] via interface
 	if fe, ok := node.(forEachCompiler); ok {
-		return fe.compileTo(t, parent, depth)
+		return fe.compileTo(t, parent, depth, elemBase, elemSize)
 	}
 
 	// Check for compound components that produce a template subtree
@@ -3243,7 +3278,7 @@ func (t *Template) compileSelectionList(v *selectionList, parent int16, depth in
 
 	ext.opForEach = opForEach{
 		iterTmpl:  iterTmpl,
-		slicePtr:  slicePtr,
+		slice:     newSliceBinding(slicePtr, elemBase, elemSize),
 		elemSize:  sliceElemSize,
 		elemIsPtr: elemIsPtr,
 	}
@@ -3543,7 +3578,7 @@ func (t *Template) compileMatch(mn matchNodeInterface, parent int16, depth int, 
 	}, depth)
 }
 
-func (t *Template) compileForEach(items any, render any, parent int16, depth int) int16 {
+func (t *Template) compileForEach(items any, render any, parent int16, depth int, elemBase unsafe.Pointer, parentElemSize uintptr) int16 {
 	// Analyze slice
 	sliceRV := reflect.ValueOf(items)
 	if sliceRV.Kind() != reflect.Ptr {
@@ -3596,7 +3631,7 @@ func (t *Template) compileForEach(items any, render any, parent int16, depth int
 		Parent: parent,
 		Ext: &opForEach{
 			iterTmpl:  iterTmpl,
-			slicePtr:  slicePtr,
+			slice:     newSliceBinding(slicePtr, elemBase, parentElemSize),
 			elemSize:  elemSize,
 			elemIsPtr: elemIsPtr,
 		},
@@ -5595,7 +5630,11 @@ func (t *Template) layout(_ int16) {
 
 			case OpSelectionList:
 				ext := op.Ext.(*opSelectionList)
-				sliceHdr := *(*sliceHeader)(ext.slicePtr)
+				sliceHdr, ok := ext.sliceHeaderFor(t.elemBase)
+				if !ok {
+					geom.H = 0
+					break
+				}
 				if ext.listPtr != nil {
 					ext.listPtr.len = sliceHdr.Len
 					ext.listPtr.ensureVisible()
@@ -6421,11 +6460,14 @@ func (t *Template) layoutCustom(idx int16, op *Op, geom *Geom) {
 // layoutForEach iterates items, layouts each, returns total height and max width.
 func (t *Template) layoutForEach(_ int16, op *Op, availW int16) (totalH, maxW int16) {
 	feExt := op.Ext.(*opForEach)
-	if feExt.iterTmpl == nil || feExt.slicePtr == nil {
+	if feExt.iterTmpl == nil {
 		return 0, 0
 	}
 
-	sliceHdr := *(*sliceHeader)(feExt.slicePtr)
+	sliceHdr, ok := feExt.sliceHeaderFor(t.elemBase)
+	if !ok {
+		return 0, 0
+	}
 	if sliceHdr.Len == 0 {
 		return 0, 0
 	}
@@ -7138,10 +7180,13 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpForEach:
 		// Render each item using iterGeoms for positioning
 		feExt := op.Ext.(*opForEach)
-		if feExt.iterTmpl == nil || feExt.slicePtr == nil {
+		if feExt.iterTmpl == nil {
 			return
 		}
-		sliceHdr := *(*sliceHeader)(feExt.slicePtr)
+		sliceHdr, ok := feExt.sliceHeaderFor(t.elemBase)
+		if !ok {
+			return
+		}
 		if sliceHdr.Len == 0 {
 			return
 		}
@@ -7695,8 +7740,11 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 	case OpForEach:
 		// Nested ForEach - render with nested element base
 		feExt := op.Ext.(*opForEach)
-		if feExt.iterTmpl != nil && feExt.slicePtr != nil {
-			sliceHdr := *(*sliceHeader)(feExt.slicePtr)
+		if feExt.iterTmpl != nil {
+			sliceHdr, ok := feExt.sliceHeaderFor(elemBase)
+			if !ok {
+				return
+			}
 			for j := 0; j < sliceHdr.Len && j < len(feExt.geoms); j++ {
 				itemGeom := &feExt.geoms[j]
 				itemAbsX := absX + itemGeom.LocalX
@@ -7731,7 +7779,10 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 // renderSelectionList renders a selection list with marker and windowing.
 func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW int16) {
 	ext := op.Ext.(*opSelectionList)
-	sliceHdr := *(*sliceHeader)(ext.slicePtr)
+	sliceHdr, ok := ext.sliceHeaderFor(t.elemBase)
+	if !ok {
+		return
+	}
 	if sliceHdr.Len == 0 || len(ext.geoms) == 0 {
 		return
 	}

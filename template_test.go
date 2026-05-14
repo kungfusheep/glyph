@@ -830,6 +830,74 @@ func TestV2ForEach(t *testing.T) {
 	}
 }
 
+func TestNestedForEachOverItemSliceField(t *testing.T) {
+	type child struct {
+		Name string
+	}
+	type parent struct {
+		Name     string
+		Children []child
+	}
+	parents := []parent{
+		{Name: "one", Children: []child{{Name: "a"}, {Name: "b"}}},
+		{Name: "two", Children: []child{{Name: "c"}}},
+	}
+
+	tmpl := Build(VBox(
+		ForEach(&parents, func(item *parent) Component {
+			return VBox(
+				Text(&item.Name),
+				ForEach(&item.Children, func(child *child) Component {
+					return Text(&child.Name)
+				}),
+			)
+		}),
+	))
+
+	buf := NewBuffer(20, 10)
+	tmpl.Execute(buf, 20, 10)
+
+	for y, want := range []string{"one", "a", "b", "two", "c"} {
+		if got := buf.GetLine(y); got != want {
+			t.Fatalf("line %d = %q, want %q\n%s", y, got, want, buf.String())
+		}
+	}
+}
+
+func TestNestedListOverItemSliceField(t *testing.T) {
+	type child struct {
+		Name string
+	}
+	type parent struct {
+		Name     string
+		Children []child
+	}
+	parents := []parent{
+		{Name: "one", Children: []child{{Name: "a"}, {Name: "b"}}},
+		{Name: "two", Children: []child{{Name: "c"}}},
+	}
+
+	tmpl := Build(VBox(
+		ForEach(&parents, func(item *parent) Component {
+			return VBox(
+				Text(&item.Name),
+				List(&item.Children).Render(func(child *child) Component {
+					return Text(&child.Name)
+				}),
+			)
+		}),
+	))
+
+	buf := NewBuffer(20, 10)
+	tmpl.Execute(buf, 20, 10)
+
+	for y, want := range []string{"one", "> a", "  b", "two", "> c"} {
+		if got := buf.GetLine(y); got != want {
+			t.Fatalf("line %d = %q, want %q\n%s", y, got, want, buf.String())
+		}
+	}
+}
+
 func TestForEachHBoxSpaceUsesPerItemLayout(t *testing.T) {
 	items := []testItem{
 		{Name: "short"},

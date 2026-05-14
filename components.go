@@ -2,6 +2,7 @@ package glyph
 
 import (
 	"reflect"
+	"unsafe"
 )
 
 // binding represents a declared key binding on a component.
@@ -2203,9 +2204,9 @@ func ForEach[T any](items *[]T, template func(item *T) Component) ForEachC[T] {
 	return ForEachC[T]{items: items, template: template}
 }
 
-// compileTo implements forEachCompiler for template compilation
-func (f ForEachC[T]) compileTo(t *Template, parent int16, depth int) int16 {
-	return t.compileForEach(f.items, f.template, parent, depth)
+// compileTo implements forEachCompiler for template compilation.
+func (f ForEachC[T]) compileTo(t *Template, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+	return t.compileForEach(f.items, f.template, parent, depth, elemBase, elemSize)
 }
 
 // ============================================================================
