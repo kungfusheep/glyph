@@ -21,7 +21,7 @@ func main() {
 	}
 
 	rows := []easeRow{
-		{"Linear", Linear},
+		{"EaseLinear", EaseLinear},
 		{"EaseOutSine", EaseOutSine},
 		{"EaseOutQuad", EaseOutQuad},
 		{"EaseOutCubic", EaseOutCubic},
@@ -33,7 +33,7 @@ func main() {
 		{"EaseOutBounce", EaseOutBounce},
 	}
 
-	const dur = 600 * time.Millisecond
+	const dur = 300 * time.Millisecond
 	const fillW = int16(28)
 	const slideTrack = int16(28)
 

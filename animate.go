@@ -43,9 +43,9 @@ var Animate AnimateFn = func(target any) *tween {
 	}
 }
 
-// Linear is an identity easing function. Pass it to Ease to opt out of the
+// EaseLinear is an identity easing function. Pass it to Ease to opt out of the
 // default ease and run an animation at constant speed.
-func Linear(t float64) float64 { return t }
+func EaseLinear(t float64) float64 { return t }
 
 // Duration sets the animation duration. Returns a new AnimateFn.
 func (f AnimateFn) Duration(d any) AnimateFn {
@@ -106,13 +106,6 @@ func In(v any) *presence { return &presence{in: v} }
 func (p *presence) Out(out *tween) *presence {
 	p.out = out
 	return p
-}
-
-// Out attaches an exit tween. When the surrounding conditional branch becomes
-// inactive, Glyph keeps that branch rendered until this tween finishes.
-func (tw *tween) Out(out *tween) *tween {
-	tw.out = out
-	return tw
 }
 
 // tweenNode interface for the compiler to detect tween nodes

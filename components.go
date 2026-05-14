@@ -11,6 +11,51 @@ type binding struct {
 	handler any
 }
 
+type onDecl interface {
+	routeBindings() []binding
+}
+
+// KeyC declares a key pattern and handler for an On scope.
+type KeyC struct {
+	declaredBindings []binding
+}
+
+// Key declares a key handler for an On scope.
+func Key(pattern string, handler any) KeyC {
+	return KeyC{declaredBindings: []binding{{pattern: pattern, handler: handler}}}
+}
+
+func (k KeyC) routeBindings() []binding { return k.declaredBindings }
+
+// OnC declares a zero-size event routing scope inside the view tree.
+type OnC struct {
+	declaredBindings []binding
+	modal            bool
+}
+
+type OnFn func(decls ...onDecl) OnC
+
+// On declares event handlers as part of the view tree. It renders no cells.
+var On OnFn = func(decls ...onDecl) OnC {
+	var bindings []binding
+	for _, decl := range decls {
+		if decl == nil {
+			continue
+		}
+		bindings = append(bindings, decl.routeBindings()...)
+	}
+	return OnC{declaredBindings: bindings}
+}
+
+// Modal declares event handlers that push a modal routing scope while active.
+func (f OnFn) Modal(decls ...onDecl) OnC {
+	on := f(decls...)
+	on.modal = true
+	return on
+}
+
+func (o OnC) routeBindings() []binding { return o.declaredBindings }
+
 // textInputBinding represents an InputC that wants unmatched keys routed to it.
 type textInputBinding struct {
 	value    *string
@@ -770,23 +815,23 @@ func Arrange(layout LayoutFunc) func(children ...Component) Box {
 }
 
 // ============================================================================
-// Widget - Fully custom component
+// Custom - Fully custom component
 // ============================================================================
 
-// Widget creates a fully custom component with explicit measure and render functions.
+// Custom creates a fully custom component with explicit measure and render functions.
 // Use this when you need complete control over sizing and drawing.
 //
-//	Widget(
+//	Custom(
 //	    func(availW int16) (w, h int16) { return 20, 3 },
 //	    func(buf *Buffer, x, y, w, h int16) {
 //	        buf.WriteString(int(x), int(y), "Custom!", Style{})
 //	    },
 //	)
-func Widget(
+func Custom(
 	measure func(availW int16) (w, h int16),
 	render func(buf *Buffer, x, y, w, h int16),
-) Custom {
-	return Custom{Measure: measure, Render: render}
+) Component {
+	return customC{Measure: measure, Render: render}
 }
 
 // ============================================================================
@@ -950,7 +995,7 @@ func (t TextC) MarginTRBL(a, b, c, d int16) TextC { t.style.margin = [4]int16{a,
 //
 //	Textf("Hello ", Bold("world"), "!")
 //	Textf("Name: ", Bold(&it.Name), " Status: ", &it.Status)  // ForEach compatible
-func Textf(parts ...any) RichTextNode {
+func Textf(parts ...any) Component {
 	spans := make([]Span, 0, len(parts))
 	ptrs := make([]*string, 0, len(parts))
 	hasPtrs := false
@@ -985,7 +1030,7 @@ func Textf(parts ...any) RichTextNode {
 		}
 	}
 
-	node := RichTextNode{Spans: spans}
+	node := richTextNode{Spans: spans}
 	if hasPtrs {
 		node.spanPtrs = ptrs
 	}
@@ -1803,13 +1848,13 @@ func LayerView(layer *Layer) LayerViewC {
 }
 
 // Height sets a fixed height.
-func (l LayerViewC) ViewHeight(h int16) LayerViewC {
+func (l LayerViewC) Height(h int16) LayerViewC {
 	l.viewHeight = h
 	return l
 }
 
 // Width sets a fixed width.
-func (l LayerViewC) ViewWidth(w int16) LayerViewC {
+func (l LayerViewC) Width(w int16) LayerViewC {
 	l.viewWidth = w
 	return l
 }
@@ -1864,6 +1909,22 @@ func (l LayerViewC) PaddingTRBL(a, b, c, d int16) LayerViewC {
 // Overlay - Modal/popup overlay
 // ============================================================================
 
+// OverlayPlacement defines how an overlay is positioned within its parent.
+type OverlayPlacement int
+
+const (
+	OverlayPlacementAt OverlayPlacement = iota
+	OverlayPlacementCentered
+	OverlayPlacementTop
+	OverlayPlacementBottom
+	OverlayPlacementLeft
+	OverlayPlacementRight
+	OverlayPlacementTopLeft
+	OverlayPlacementTopRight
+	OverlayPlacementBottomLeft
+	OverlayPlacementBottomRight
+)
+
 // AnchorPosition defines how an overlay is positioned relative to a NodeRef
 type AnchorPosition int
 
@@ -1877,20 +1938,21 @@ const (
 )
 
 type OverlayC struct {
-	centered    bool
-	backdrop    bool
-	x, y        int
-	offsetX     any
-	offsetY     any
-	width       int
-	height      int
-	backdropFG  Color
-	bg          Color
-	opacity     dynFloat64
-	opacityMode OpacityMode
-	anchor      *NodeRef
-	anchorPos   AnchorPosition
-	children    []Component
+	placement    OverlayPlacement
+	placementSet bool
+	backdrop     bool
+	x, y         int
+	offsetX      any
+	offsetY      any
+	width        int
+	height       int
+	backdropFG   Color
+	bg           Color
+	opacity      dynFloat64
+	opacityMode  OpacityMode
+	anchor       *NodeRef
+	anchorPos    AnchorPosition
+	children     []Component
 }
 
 type OverlayFn func(children ...Component) OverlayC
@@ -1899,7 +1961,88 @@ type OverlayFn func(children ...Component) OverlayC
 func (f OverlayFn) Centered() OverlayFn {
 	return func(children ...Component) OverlayC {
 		o := f(children...)
-		o.centered = true
+		o.placement = OverlayPlacementCentered
+		o.placementSet = true
+		return o
+	}
+}
+
+// Top centers the overlay on the top edge of the parent bounds.
+func (f OverlayFn) Top() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementTop
+		o.placementSet = true
+		return o
+	}
+}
+
+// Bottom centers the overlay on the bottom edge of the parent bounds.
+func (f OverlayFn) Bottom() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementBottom
+		o.placementSet = true
+		return o
+	}
+}
+
+// Left centers the overlay on the left edge of the parent bounds.
+func (f OverlayFn) Left() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementLeft
+		o.placementSet = true
+		return o
+	}
+}
+
+// Right centers the overlay on the right edge of the parent bounds.
+func (f OverlayFn) Right() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementRight
+		o.placementSet = true
+		return o
+	}
+}
+
+// TopLeft positions the overlay at the top-left corner of the parent bounds.
+func (f OverlayFn) TopLeft() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementTopLeft
+		o.placementSet = true
+		return o
+	}
+}
+
+// TopRight positions the overlay at the top-right corner of the parent bounds.
+func (f OverlayFn) TopRight() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementTopRight
+		o.placementSet = true
+		return o
+	}
+}
+
+// BottomLeft positions the overlay at the bottom-left corner of the parent bounds.
+func (f OverlayFn) BottomLeft() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementBottomLeft
+		o.placementSet = true
+		return o
+	}
+}
+
+// BottomRight positions the overlay at the bottom-right corner of the parent bounds.
+func (f OverlayFn) BottomRight() OverlayFn {
+	return func(children ...Component) OverlayC {
+		o := f(children...)
+		o.placement = OverlayPlacementBottomRight
+		o.placementSet = true
 		return o
 	}
 }
@@ -1917,6 +2060,8 @@ func (f OverlayFn) Backdrop() OverlayFn {
 func (f OverlayFn) At(x, y int) OverlayFn {
 	return func(children ...Component) OverlayC {
 		o := f(children...)
+		o.placement = OverlayPlacementAt
+		o.placementSet = true
 		o.x = x
 		o.y = y
 		return o
@@ -2064,7 +2209,7 @@ func (f ForEachC[T]) compileTo(t *Template, parent int16, depth int) int16 {
 }
 
 // ============================================================================
-// SelectionList - Navigable list with selection
+// selectionList - Navigable list with selection
 // ============================================================================
 
 type ListC[T any] struct {
@@ -2081,7 +2226,7 @@ type ListC[T any] struct {
 	styleDyn         any
 	selectedStyleDyn any
 	selectedRef      *NodeRef
-	cached           *SelectionList // cached instance for consistent reference
+	cached           *selectionList // cached instance for consistent reference
 	declaredBindings []binding
 }
 
@@ -2239,11 +2384,11 @@ func (l *ListC[T]) MarginTRBL(t, r, b, li int16) *ListC[T] {
 	return l
 }
 
-// toSelectionList returns the internal SelectionList (creates on first call).
+// toSelectionList returns the internal selectionList (creates on first call).
 // Same instance is returned for both template compilation and method calls.
-func (l *ListC[T]) toSelectionList() *SelectionList {
+func (l *ListC[T]) toSelectionList() *selectionList {
 	if l.cached == nil {
-		sl := &SelectionList{
+		sl := &selectionList{
 			Items:         l.items,
 			Selected:      l.selected,
 			Marker:        l.marker,
@@ -2431,7 +2576,7 @@ type ScrollbarC struct {
 }
 
 // Scroll creates a scrollbar for tracking position in scrollable content.
-func Scroll(contentSize, viewSize int, position *int) ScrollbarC {
+func Scrollbar(contentSize, viewSize int, position *int) ScrollbarC {
 	return ScrollbarC{
 		contentSize: contentSize,
 		viewSize:    viewSize,
@@ -2515,23 +2660,20 @@ type CheckboxC struct {
 }
 
 // Checkbox creates a checkbox bound to a bool pointer.
-func Checkbox(checked *bool, label string) *CheckboxC {
-	return &CheckboxC{
+// label accepts string (static) or *string (dynamic).
+func Checkbox(checked *bool, label any) *CheckboxC {
+	c := &CheckboxC{
 		checked:     checked,
-		label:       label,
 		checkedMark: "☑",
 		unchecked:   "☐",
 	}
-}
-
-// CheckboxPtr creates a checkbox with a dynamic label.
-func CheckboxPtr(checked *bool, label *string) *CheckboxC {
-	return &CheckboxC{
-		checked:     checked,
-		labelPtr:    label,
-		checkedMark: "☑",
-		unchecked:   "☐",
+	switch v := label.(type) {
+	case string:
+		c.label = v
+	case *string:
+		c.labelPtr = v
 	}
+	return c
 }
 
 // Ref provides access to the component for external references.
@@ -2643,7 +2785,6 @@ func (c *CheckboxC) Checked() bool {
 type RadioC struct {
 	selected         *int
 	options          []string
-	optionsPtr       *[]string
 	selectedMark     string
 	unselected       string
 	style            Style
@@ -2663,16 +2804,6 @@ func Radio(selected *int, options ...string) *RadioC {
 	return &RadioC{
 		selected:     selected,
 		options:      options,
-		selectedMark: "◉",
-		unselected:   "○",
-	}
-}
-
-// RadioPtr creates a radio group with dynamic options.
-func RadioPtr(selected *int, options *[]string) *RadioC {
-	return &RadioC{
-		selected:     selected,
-		optionsPtr:   options,
 		selectedMark: "◉",
 		unselected:   "○",
 	}
@@ -2736,10 +2867,10 @@ func (r *RadioC) Horizontal() *RadioC {
 }
 
 // BindNav registers key bindings for cycling selection.
-func (r *RadioC) BindNav(next, prev string) *RadioC {
+func (r *RadioC) BindNav(down, up string) *RadioC {
 	r.declaredBindings = append(r.declaredBindings,
-		binding{pattern: next, handler: func() { r.Next() }},
-		binding{pattern: prev, handler: func() { r.Prev() }},
+		binding{pattern: down, handler: func() { r.Next() }},
+		binding{pattern: up, handler: func() { r.Prev() }},
 	)
 	return r
 }
@@ -2793,9 +2924,6 @@ func (r *RadioC) Index() int {
 }
 
 func (r *RadioC) getOptions() []string {
-	if r.optionsPtr != nil {
-		return *r.optionsPtr
-	}
 	return r.options
 }
 
@@ -2814,7 +2942,7 @@ type CheckListC[T any] struct {
 	selectedStyle    Style
 	gap              int8
 	declaredBindings []binding
-	cached           *SelectionList
+	cached           *selectionList
 	gapPtr           *int8
 	gapCond          any
 }
@@ -3037,7 +3165,7 @@ func (c *CheckListC[T]) First(m any) { c.toSelectionList().First(m) }
 // Last moves selection to last item.
 func (c *CheckListC[T]) Last(m any) { c.toSelectionList().Last(m) }
 
-func (c *CheckListC[T]) toSelectionList() *SelectionList {
+func (c *CheckListC[T]) toSelectionList() *selectionList {
 	if c.cached == nil {
 		// Start with explicit functions (may be nil)
 		checkedFn := c.checked
@@ -3075,7 +3203,7 @@ func (c *CheckListC[T]) toSelectionList() *SelectionList {
 		c.checked = checkedFn
 		c.render = renderFn
 
-		c.cached = &SelectionList{
+		c.cached = &selectionList{
 			Items:         c.items,
 			Selected:      c.selected,
 			Marker:        c.marker,
@@ -3105,14 +3233,20 @@ func (c *CheckListC[T]) toSelectionList() *SelectionList {
 
 // InputC is a text input with internal state management.
 type InputC struct {
-	field       InputState
-	placeholder string
-	width       int
-	mask        rune
-	style       Style
-	declaredTIB *textInputBinding
-	widthPtr    *int16
-	widthCond   any
+	field            InputState
+	placeholder      string
+	width            int
+	mask             rune
+	style            Style
+	placeholderStyle Style
+	cursorStyle      Style
+	declaredTIB      *textInputBinding
+	widthPtr         *int16
+	widthCond        any
+
+	externalField *InputState
+	focusGroup    *FocusGroup
+	focusIndex    int
 
 	// value binding
 	boundValue *string
@@ -3178,6 +3312,31 @@ func (i *InputC) Placeholder(p string) *InputC {
 	return i
 }
 
+// Field binds this input to an external InputState.
+func (i *InputC) Field(f *InputState) *InputC {
+	i.externalField = f
+	return i
+}
+
+// FocusGroup controls cursor visibility for a group of externally-managed inputs.
+func (i *InputC) FocusGroup(group *FocusGroup, index int) *InputC {
+	i.focusGroup = group
+	i.focusIndex = index
+	return i
+}
+
+// PlaceholderStyle sets the style used when rendering placeholder text.
+func (i *InputC) PlaceholderStyle(s Style) *InputC {
+	i.placeholderStyle = s
+	return i
+}
+
+// CursorStyle sets the style used for the rendered cursor cell.
+func (i *InputC) CursorStyle(s Style) *InputC {
+	i.cursorStyle = s
+	return i
+}
+
 // Width sets the input width. Accepts int16, int, or *int16 for dynamic values.
 func (i *InputC) Width(w any) *InputC {
 	switch val := w.(type) {
@@ -3227,9 +3386,13 @@ func (i *InputC) MarginTRBL(t, r, b, l int16) *InputC {
 
 // Bind routes unmatched key input to this text field.
 func (i *InputC) Bind() *InputC {
+	field := &i.field
+	if i.externalField != nil {
+		field = i.externalField
+	}
 	i.declaredTIB = &textInputBinding{
-		value:    &i.field.Value,
-		cursor:   &i.field.Cursor,
+		value:    &field.Value,
+		cursor:   &field.Cursor,
 		onChange: i.handleChange,
 	}
 	return i
@@ -3290,33 +3453,45 @@ func (i *InputC) Focused() bool {
 
 // Value returns the current text value.
 func (i *InputC) Value() string {
-	return i.field.Value
+	return i.State().Value
 }
 
 // SetValue sets the text value.
 func (i *InputC) SetValue(v string) {
-	i.field.Value = v
-	i.field.Cursor = len(v)
+	state := i.State()
+	state.Value = v
+	state.Cursor = len(v)
 }
 
 // Clear resets the input.
 func (i *InputC) Clear() {
-	i.field.Clear()
+	i.State().Clear()
 }
 
-// State returns a pointer to the internal input state (for TextInput compatibility).
+// State returns a pointer to the internal input state.
 func (i *InputC) State() *InputState {
+	if i.externalField != nil {
+		return i.externalField
+	}
 	return &i.field
 }
 
-// toTextInput converts to the underlying TextInput for rendering.
-func (i *InputC) toTextInput() TextInput {
-	ti := TextInput{
-		Field:       &i.field,
-		Placeholder: i.placeholder,
-		Width:       i.width,
-		Mask:        i.mask,
-		Style:       i.style,
+// toTextInput converts to the underlying compiled form for rendering.
+func (i *InputC) toTextInput() textInput {
+	field := &i.field
+	if i.externalField != nil {
+		field = i.externalField
+	}
+	ti := textInput{
+		Field:            field,
+		FocusGroup:       i.focusGroup,
+		FocusIndex:       i.focusIndex,
+		Placeholder:      i.placeholder,
+		Width:            i.width,
+		Mask:             i.mask,
+		Style:            i.style,
+		PlaceholderStyle: i.placeholderStyle,
+		CursorStyle:      i.cursorStyle,
 	}
 	// if managed by focus manager, use focused state for cursor visibility
 	if i.manager != nil {

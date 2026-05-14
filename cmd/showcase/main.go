@@ -97,18 +97,11 @@ func main() {
 				// middle column - table
 				VBox.WidthPct(0.35)(
 					Text("Table:").Bold(),
-					Table{
-						Columns: []TableColumn{
-							{Header: "Component", Width: 12, Align: AlignLeft},
-							{Header: "Description", Width: 16, Align: AlignLeft},
-							{Header: "Status", Width: 8, Align: AlignCenter},
-						},
-						Rows:        &tableRows,
-						ShowHeader:  true,
-						HeaderStyle: Style{FG: Yellow, Attr: AttrBold},
-						RowStyle:    Style{FG: White},
-						AltRowStyle: Style{FG: BrightBlack},
-					},
+					AutoTable(&tableRows).
+						Headers("Component", "Description", "Status").
+						HeaderStyle(Style{FG: Yellow, Attr: AttrBold}).
+						RowStyle(Style{FG: White}).
+						AltRowStyle(Style{FG: BrightBlack}),
 				),
 
 				VRule().Style(Style{FG: BrightBlack}),
@@ -133,28 +126,22 @@ func main() {
 			HBox.Gap(4)(
 				VBox(
 					Text("Tabs (Underline):").Bold(),
-					TabsNode{
-						Labels:        []string{"Home", "Settings", "Help"},
-						Selected:      &selectedTab,
-						ActiveStyle:   Style{FG: Cyan},
-						InactiveStyle: Style{FG: White},
-					},
+					Tabs([]string{"Home", "Settings", "Help"}, &selectedTab).
+						ActiveStyle(Style{FG: Cyan}).
+						InactiveStyle(Style{FG: White}),
 				),
 				VBox(
 					Text("Tabs (Bracket):").Bold(),
-					TabsNode{
-						Labels:        []string{"Files", "Edit", "View"},
-						Selected:      &selectedTab,
-						Style:         TabsStyleBracket,
-						ActiveStyle:   Style{FG: Green},
-						InactiveStyle: Style{FG: White},
-					},
+					Tabs([]string{"Files", "Edit", "View"}, &selectedTab).
+						Kind(TabsStyleBracket).
+						ActiveStyle(Style{FG: Green}).
+						InactiveStyle(Style{FG: White}),
 				),
 				VBox(
 					Text("Scrollbar:").Bold(),
 					HBox(
 						Text("Pos: "),
-						Scroll(100, 20, &scrollPos).Length(10).ThumbStyle(Style{FG: Cyan}),
+						Scrollbar(100, 20, &scrollPos).Length(10).ThumbStyle(Style{FG: Cyan}),
 					),
 				),
 			),
@@ -163,13 +150,10 @@ func main() {
 
 			// box style tabs
 			Text("Tabs (Box style):").Bold(),
-			TabsNode{
-				Labels:        []string{"Dashboard", "Analytics", "Reports"},
-				Selected:      &selectedTab,
-				Style:         TabsStyleBox,
-				ActiveStyle:   Style{FG: Magenta},
-				InactiveStyle: Style{FG: BrightBlack},
-			},
+			Tabs([]string{"Dashboard", "Analytics", "Reports"}, &selectedTab).
+				Kind(TabsStyleBox).
+				ActiveStyle(Style{FG: Magenta}).
+				InactiveStyle(Style{FG: BrightBlack}),
 
 			SpaceH(1),
 			HRule(),

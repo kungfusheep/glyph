@@ -10,6 +10,8 @@ import (
 	"time"
 	"unicode"
 	"unsafe"
+
+	"github.com/kungfusheep/riffkey"
 )
 
 // Component is the extension interface for custom components.
@@ -41,12 +43,18 @@ type forEachCompiler interface {
 
 // listCompiler is implemented by generic List types to compile themselves
 type listCompiler interface {
-	toSelectionList() *SelectionList
+	toSelectionList() *selectionList
 }
 
 // bindable is implemented by components that declare key bindings as data.
 type bindable interface {
 	bindings() []binding
+}
+
+// routeBindable is implemented by zero-size routing nodes that declare
+// handlers directly in the view tree.
+type routeBindable interface {
+	routeBindings() []binding
 }
 
 // textInputBindable is implemented by InputC for text input routing.
@@ -112,10 +120,15 @@ type Template struct {
 	// App reference for jump mode coordination
 	app *App
 
-	// per-item index for ForEach/SelectionList (reset per iteration, used by per-item tweens)
+	jumpOffsetX int
+	jumpOffsetY int
+	jumpMinY    int
+	jumpMaxY    int
+
+	// per-item index for ForEach/selectionList (reset per iteration, used by per-item tweens)
 	itemIndex int
 
-	// row styling for SelectionList selected rows (merged with cell styles)
+	// row styling for selectionList selected rows (merged with cell styles)
 	rowBG   Color
 	rowFG   Color
 	rowAttr Attribute
@@ -154,13 +167,24 @@ type Template struct {
 	// ext pools — contiguous allocations for cache-friendly render access.
 
 	// Declarative bindings collected during compile, wired during setup
-	pendingBindings     []binding
-	pendingTIB          *textInputBinding
-	pendingLogs         []*LogC       // Logs that need app.RequestRender wiring
-	pendingFocusManager *FocusManager // Focus manager for multi-input routing
+	pendingBindings           []binding
+	pendingRouteBindings      []binding
+	pendingModalRouteBindings []binding
+	pendingTIB                *textInputBinding
+	pendingLogs               []*LogC       // Logs that need app.RequestRender wiring
+	pendingFocusManager       *FocusManager // Focus manager for multi-input routing
+	routeRouter               *riffkey.Router
+	routeAttached             bool
+	routeModalRouter          *riffkey.Router
+	routeModalPushed          bool
 
 	// per-frame evaluators — conditions, animations, etc. run at start of Execute
 	evals []func()
+
+	// exit evaluators — non-item Animate.Out evaluators owned by this template.
+	// These can be primed when a retained branch first renders as exiting, so
+	// NodeRefs see the correct opacity before effects sample them.
+	exitEvals []func()
 
 	// per-item evaluators — run once per ForEach item with elemBase set
 	itemEvals []func()
@@ -316,6 +340,34 @@ func (t *Template) runItemEvals(elemBase unsafe.Pointer) {
 	}
 }
 
+func (t *Template) runExitEvals() {
+	if t == nil {
+		return
+	}
+	for _, eval := range t.exitEvals {
+		eval()
+	}
+	for i := range t.ops {
+		switch ext := t.ops[i].Ext.(type) {
+		case *opOverlay:
+			ext.childTmpl.runExitEvals()
+		case *opIf:
+			ext.thenTmpl.runExitEvals()
+			ext.elseTmpl.runExitEvals()
+		case *opSwitch:
+			for _, tmpl := range ext.cases {
+				tmpl.runExitEvals()
+			}
+			ext.def.runExitEvals()
+		case *opMatch:
+			for _, tmpl := range ext.cases {
+				tmpl.runExitEvals()
+			}
+			ext.def.runExitEvals()
+		}
+	}
+}
+
 type branchSelector struct {
 	selected     int
 	initialized  bool
@@ -376,6 +428,82 @@ func branchAt(branches []*Template, idx int) *Template {
 	return branches[idx]
 }
 
+func routeChildTemplates(t *Template) []*Template {
+	if t == nil {
+		return nil
+	}
+	var children []*Template
+	for i := range t.ops {
+		switch ext := t.ops[i].Ext.(type) {
+		case *opIf:
+			if ext.thenTmpl != nil {
+				children = append(children, ext.thenTmpl)
+			}
+			if ext.elseTmpl != nil {
+				children = append(children, ext.elseTmpl)
+			}
+		case *opSwitch:
+			children = append(children, ext.cases...)
+			if ext.def != nil {
+				children = append(children, ext.def)
+			}
+		case *opMatch:
+			children = append(children, ext.cases...)
+			if ext.def != nil {
+				children = append(children, ext.def)
+			}
+		case *opOverlay:
+			if ext.childTmpl != nil {
+				children = append(children, ext.childTmpl)
+			}
+		}
+	}
+	return children
+}
+
+func setRouteBranchActive(branches []*Template, activeIdx int) {
+	for idx, tmpl := range branches {
+		if tmpl == nil {
+			continue
+		}
+		tmpl.setRouteActive(idx == activeIdx)
+	}
+}
+
+func (t *Template) setRouteActive(active bool) {
+	if t == nil {
+		return
+	}
+	if !active {
+		for _, child := range routeChildTemplates(t) {
+			child.setRouteActive(false)
+		}
+	}
+	if t.routeRouter != nil {
+		if active {
+			t.routeRouter.Enable()
+		} else {
+			t.routeRouter.Disable()
+		}
+	}
+	if t.routeModalRouter != nil {
+		app := t.evalRoot().app
+		if active && !t.routeModalPushed {
+			t.routeModalRouter.Enable()
+			if app != nil && app.input != nil {
+				app.input.Push(t.routeModalRouter)
+				t.routeModalPushed = true
+			}
+		} else if !active && t.routeModalPushed {
+			if app != nil && app.input != nil {
+				app.input.Pop()
+			}
+			t.routeModalRouter.Disable()
+			t.routeModalPushed = false
+		}
+	}
+}
+
 func ifBranches(ifExt *opIf, elemBase unsafe.Pointer) ([]*Template, int) {
 	branches := []*Template{ifExt.thenTmpl, ifExt.elseTmpl}
 	if ifExt.eval(elemBase) {
@@ -430,9 +558,29 @@ func (t *Template) SetApp(a *App) {
 	t.app = a
 }
 
+func (t *Template) setJumpViewport(offsetX, offsetY, minY, maxY int) {
+	t.jumpOffsetX = offsetX
+	t.jumpOffsetY = offsetY
+	t.jumpMinY = minY
+	t.jumpMaxY = maxY
+}
+
 func (t *Template) collectBindings(node any) {
 	if b, ok := node.(bindable); ok {
 		t.pendingBindings = append(t.pendingBindings, b.bindings()...)
+	}
+}
+
+func (t *Template) collectRouteBindings(node any) {
+	switch b := node.(type) {
+	case OnC:
+		if b.modal {
+			t.pendingModalRouteBindings = append(t.pendingModalRouteBindings, b.routeBindings()...)
+		} else {
+			t.pendingRouteBindings = append(t.pendingRouteBindings, b.routeBindings()...)
+		}
+	case routeBindable:
+		t.pendingRouteBindings = append(t.pendingRouteBindings, b.routeBindings()...)
 	}
 }
 
@@ -516,6 +664,8 @@ type OpDyn struct {
 	Gap          *int8
 	Fill         *Color
 	Opacity      *float64
+	OpacityOff   uintptr
+	OpacityIsOff bool
 	OpacityArmed *bool // set true by render to signal From tween activation
 }
 
@@ -832,7 +982,7 @@ func (t *Template) compileDynColor(v any, elemBase unsafe.Pointer, elemSize uint
 	case conditionNode:
 		return t.compileCondColor(c, elemBase, elemSize)
 	case valueBranchNode:
-		return t.compileBranchColor(c)
+		return t.compileBranchColor(c, elemBase, elemSize)
 	case tweenNode:
 		return t.compileTweenColor(c, elemBase, elemSize)
 	}
@@ -846,7 +996,7 @@ func (t *Template) compileDynStyle(v any, elemBase unsafe.Pointer, elemSize uint
 	case conditionNode:
 		return t.compileCondStyle(c, elemBase, elemSize)
 	case valueBranchNode:
-		return t.compileBranchStyle(c)
+		return t.compileBranchStyle(c, elemBase, elemSize)
 	case tweenNode:
 		return t.compileTweenStyle(c, elemBase, elemSize)
 	}
@@ -1049,31 +1199,38 @@ func (t *Template) compileCondStyle(cond conditionNode, elemBase unsafe.Pointer,
 	return storage
 }
 
-func (t *Template) compileBranchColor(branch valueBranchNode) *Color {
-	root := t.evalRoot()
+func (t *Template) compileBranchColor(branch valueBranchNode, elemBase unsafe.Pointer, elemSize uintptr) *Color {
 	storage := new(Color)
 	cases := branch.getCaseNodes()
 	def := branch.getDefaultNode()
+	inForEach := elemBase != nil && elemSize > 0
+	t.prepareValueBranchForBase(branch, elemBase, elemSize)
 	eval := func() {
-		idx := branch.getMatchIndex()
+		idx := t.valueBranchIndex(branch, inForEach)
 		if idx >= 0 && idx < len(cases) {
 			*storage = anyToColor(cases[idx])
-		} else {
-			*storage = anyToColor(def)
+			return
 		}
+		*storage = anyToColor(def)
 	}
 	eval()
-	root.evals = append(root.evals, eval)
+	if inForEach {
+		t.itemEvals = append(t.itemEvals, eval)
+	} else {
+		root := t.evalRoot()
+		root.evals = append(root.evals, eval)
+	}
 	return storage
 }
 
-func (t *Template) compileBranchStyle(branch valueBranchNode) *Style {
-	root := t.evalRoot()
+func (t *Template) compileBranchStyle(branch valueBranchNode, elemBase unsafe.Pointer, elemSize uintptr) *Style {
 	storage := new(Style)
 	cases := branch.getCaseNodes()
 	def := branch.getDefaultNode()
+	inForEach := elemBase != nil && elemSize > 0
+	t.prepareValueBranchForBase(branch, elemBase, elemSize)
 	eval := func() {
-		idx := branch.getMatchIndex()
+		idx := t.valueBranchIndex(branch, inForEach)
 		if idx >= 0 && idx < len(cases) {
 			*storage = anyToStyle(cases[idx])
 			return
@@ -1081,8 +1238,40 @@ func (t *Template) compileBranchStyle(branch valueBranchNode) *Style {
 		*storage = anyToStyle(def)
 	}
 	eval()
-	root.evals = append(root.evals, eval)
+	if inForEach {
+		t.itemEvals = append(t.itemEvals, eval)
+	} else {
+		root := t.evalRoot()
+		root.evals = append(root.evals, eval)
+	}
 	return storage
+}
+
+func (t *Template) prepareValueBranchForBase(branch valueBranchNode, elemBase unsafe.Pointer, elemSize uintptr) {
+	if elemBase == nil || elemSize == 0 {
+		return
+	}
+	base, ok := branch.(interface {
+		getPtrAddr() uintptr
+		setPtrOffset(uintptr)
+	})
+	if !ok {
+		return
+	}
+	ptrAddr := base.getPtrAddr()
+	baseAddr := uintptr(elemBase)
+	if ptrAddr >= baseAddr && ptrAddr < baseAddr+elemSize {
+		base.setPtrOffset(ptrAddr - baseAddr)
+	}
+}
+
+func (t *Template) valueBranchIndex(branch valueBranchNode, inForEach bool) int {
+	if inForEach {
+		if base, ok := branch.(interface{ getMatchIndexWithBase(unsafe.Pointer) int }); ok {
+			return base.getMatchIndexWithBase(t.elemBase)
+		}
+	}
+	return branch.getMatchIndex()
 }
 
 func anyToColor(v any) Color {
@@ -1278,9 +1467,13 @@ func (t *Template) compileTweenScalar(tw tweenNode, elemBase unsafe.Pointer, ele
 		state.startVal = fromVal
 		state.current = fromVal
 	}
-	root.evals = append(root.evals, func() {
+	eval := func() {
 		run(state, t.exit.rendering, nil)
-	})
+	}
+	root.evals = append(root.evals, eval)
+	if outTw != nil {
+		t.exitEvals = append(t.exitEvals, eval)
+	}
 }
 
 func (t *Template) compileTweenInt16(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr) *int16 {
@@ -1512,7 +1705,7 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 	// tracks whether resolve() was called last frame (effect was active)
 	wasActive := armed == nil // nil armed = always active (non-effect tweens)
 
-	root.evals = append(root.evals, func() {
+	eval := func() {
 		dur := durVal
 		if durPtr != nil {
 			dur = *durPtr
@@ -1627,7 +1820,11 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 		}
 		*storage = startVal + progress*(target-startVal)
 		root.animating = true
-	})
+	}
+	root.evals = append(root.evals, eval)
+	if outTw != nil {
+		t.exitEvals = append(t.exitEvals, eval)
+	}
 	return storage
 }
 
@@ -1922,9 +2119,13 @@ func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer,
 			state.startVal = fromVal
 			state.current = fromVal
 		}
-		root.evals = append(root.evals, func() {
+		eval := func() {
 			run(state, t.exit.rendering)
-		})
+		}
+		root.evals = append(root.evals, eval)
+		if outTw != nil {
+			t.exitEvals = append(t.exitEvals, eval)
+		}
 	}
 	return storage
 }
@@ -2085,9 +2286,13 @@ func (t *Template) compileTweenStyle(tw tweenNode, elemBase unsafe.Pointer, elem
 			state.startVal = fromVal
 			state.current = fromVal
 		}
-		root.evals = append(root.evals, func() {
+		eval := func() {
 			run(state, t.exit.rendering)
-		})
+		}
+		root.evals = append(root.evals, eval)
+		if outTw != nil {
+			t.exitEvals = append(t.exitEvals, eval)
+		}
 	}
 
 	return storage
@@ -2367,6 +2572,7 @@ type opRichText struct {
 	spansPtr    *[]Span
 	off         uintptr
 	spanStrOffs []uintptr
+	charWrap    bool
 }
 
 func (rt *opRichText) resolve(elemBase unsafe.Pointer) []Span {
@@ -2386,6 +2592,17 @@ func (rt *opRichText) resolve(elemBase unsafe.Pointer) []Span {
 		return resolveSpanStrs(spans, rt.spanStrOffs, elemBase)
 	}
 	return spans
+}
+
+func styleSpans(spans []Span, styleFor func(Style) Style) []Span {
+	if len(spans) == 0 {
+		return spans
+	}
+	styled := make([]Span, len(spans))
+	for i, span := range spans {
+		styled[i] = Span{Text: span.Text, Style: styleFor(span.Style), OnSelect: span.OnSelect}
+	}
+	return styled
 }
 
 // leader variant modes
@@ -2470,7 +2687,7 @@ type opTreeView struct {
 
 type opSelectionList struct {
 	opForEach
-	listPtr      *SelectionList
+	listPtr      *selectionList
 	selectedPtr  *int
 	selectedRef  *NodeRef
 	marker       string
@@ -2493,7 +2710,7 @@ type opTextInput struct {
 }
 
 type opOverlay struct {
-	centered     bool
+	placement    OverlayPlacement
 	x, y         int16
 	offsetX      *int16
 	offsetY      *int16
@@ -2506,15 +2723,6 @@ type opOverlay struct {
 	childTmpl    *Template
 	anchor       *NodeRef
 	anchorPos    AnchorPosition
-}
-
-type opTable struct {
-	columns     []TableColumn
-	rowsPtr     *[][]string
-	showHeader  bool
-	headerStyle Style
-	rowStyle    Style
-	altStyle    Style
 }
 
 type opAutoTable struct {
@@ -2573,9 +2781,8 @@ const (
 	OpLayout // Custom layout
 	OpLayer  // LayerView (data in Ext)
 
-	OpSelectionList // SelectionList (data in Ext)
+	OpSelectionList // selectionList (data in Ext)
 
-	OpTable     // Table (data in Ext)
 	OpAutoTable // AutoTable (data in Ext)
 
 	OpSparkline // Sparkline (data in Ext)
@@ -2696,23 +2903,17 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		return t.compileBox(v, parent, depth, elemBase, elemSize)
 	case conditionNode:
 		return t.compileCondition(v, parent, depth, elemBase, elemSize)
-	case RichTextNode:
+	case richTextNode:
 		return t.compileRichText(v, parent, depth, elemBase, elemSize)
-	case SelectionList:
+	case selectionList:
 		return t.compileSelectionList(&v, parent, depth, elemBase, elemSize)
-	case *SelectionList:
+	case *selectionList:
 		return t.compileSelectionList(v, parent, depth, elemBase, elemSize)
-	case Table:
-		return t.compileTable(v, parent, depth)
-	case TabsNode:
-		return t.compileTabs(v, parent, depth)
 	case TreeView:
 		return t.compileTreeView(v, parent, depth)
-	case TextInput:
+	case textInput:
 		return t.compileTextInput(v, parent, depth)
-	case OverlayNode:
-		return t.compileOverlay(v, parent, depth)
-	case ScreenEffectNode:
+	case screenEffectNode:
 		for i, eff := range v.Effects {
 			if ec, ok := eff.(effectCompilable); ok {
 				v.Effects[i] = ec.compileEffect(t)
@@ -2720,6 +2921,9 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		}
 		ext := &opScreenEffect{fns: v.Effects}
 		return t.addOp(Op{Kind: OpScreenEffect, Parent: parent, Ext: ext}, depth)
+	case OnC:
+		t.collectRouteBindings(v)
+		return -1
 
 	case VBoxC:
 		return t.compileVBoxC(v, parent, depth, elemBase, elemSize)
@@ -2779,7 +2983,7 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	case *FilterLogC:
 		t.collectFocusManager(v)
 		return t.compileFilterLogC(v, parent, depth)
-	case Custom:
+	case customC:
 		return t.compileCustom(v, parent, depth)
 	}
 
@@ -2866,7 +3070,7 @@ func (c *customWrapper) Render(buf *Buffer, x, y, w, h int) {
 	}
 }
 
-func (t *Template) compileCustom(v Custom, parent int16, depth int) int16 {
+func (t *Template) compileCustom(v customC, parent int16, depth int) int16 {
 	wrapper := &customWrapper{
 		measure: v.Measure,
 		render:  v.Render,
@@ -2898,8 +3102,8 @@ func (t *Template) compileBox(box Box, parent int16, depth int, elemBase unsafe.
 	return idx
 }
 
-func (t *Template) compileRichText(v RichTextNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
-	ext := &opRichText{}
+func (t *Template) compileRichText(v richTextNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+	ext := &opRichText{charWrap: v.charWrap}
 
 	switch spans := v.Spans.(type) {
 	case []Span:
@@ -2973,15 +3177,15 @@ func resolveSpanStrs(spans []Span, offs []uintptr, elemBase unsafe.Pointer) []Sp
 	return resolved
 }
 
-func (t *Template) compileSelectionList(v *SelectionList, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *Template) compileSelectionList(v *selectionList, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	// Analyze slice using reflection
 	sliceRV := reflect.ValueOf(v.Items)
 	if sliceRV.Kind() != reflect.Ptr {
-		panic("SelectionList Items must be pointer to slice")
+		panic("selectionList Items must be pointer to slice")
 	}
 	sliceType := sliceRV.Type().Elem()
 	if sliceType.Kind() != reflect.Slice {
-		panic("SelectionList Items must be pointer to slice")
+		panic("selectionList Items must be pointer to slice")
 	}
 	elemType := sliceType.Elem()
 	sliceElemSize := elemType.Size()
@@ -3067,51 +3271,6 @@ func (t *Template) compileSelectionList(v *SelectionList, parent int16, depth in
 	return idx
 }
 
-func (t *Template) compileTable(v Table, parent int16, depth int) int16 {
-	var rowsPtr *[][]string
-	switch rows := v.Rows.(type) {
-	case *[][]string:
-		rowsPtr = rows
-	case [][]string:
-		rowsPtr = &rows
-	}
-
-	ext := &opTable{
-		columns:     v.Columns,
-		rowsPtr:     rowsPtr,
-		showHeader:  v.ShowHeader,
-		headerStyle: v.HeaderStyle,
-		rowStyle:    v.RowStyle,
-		altStyle:    v.AltRowStyle,
-	}
-
-	return t.addOp(Op{
-		Kind:   OpTable,
-		Parent: parent,
-		Ext:    ext,
-	}, depth)
-}
-
-func (t *Template) compileTabs(v TabsNode, parent int16, depth int) int16 {
-	gap := v.Gap
-	if gap == 0 {
-		gap = 2
-	}
-	ext := &opTabs{
-		labels:        v.Labels,
-		selectedPtr:   v.Selected,
-		styleType:     v.Style,
-		gap:           gap,
-		activeStyle:   v.ActiveStyle,
-		inactiveStyle: v.InactiveStyle,
-	}
-	return t.addOp(Op{
-		Kind:   OpTabs,
-		Parent: parent,
-		Ext:    ext,
-	}, depth)
-}
-
 func (t *Template) compileTreeView(v TreeView, parent int16, depth int) int16 {
 	indent := v.Indent
 	if indent == 0 {
@@ -3146,7 +3305,7 @@ func (t *Template) compileTreeView(v TreeView, parent int16, depth int) int16 {
 	}, depth)
 }
 
-func (t *Template) compileTextInput(v TextInput, parent int16, depth int) int16 {
+func (t *Template) compileTextInput(v textInput, parent int16, depth int) int16 {
 	ext := &opTextInput{
 		fieldPtr:       v.Field,
 		focusGroupPtr:  v.FocusGroup,
@@ -3173,38 +3332,6 @@ func (t *Template) compileTextInput(v TextInput, parent int16, depth int) int16 
 		Parent: parent,
 		Width:  int16(v.Width),
 		Margin: v.Style.margin,
-		Ext:    ext,
-	}, depth)
-}
-
-func (t *Template) compileOverlay(v OverlayNode, parent int16, depth int) int16 {
-	var childTmpl *Template
-	if v.Child != nil {
-		childTmpl = t.buildWithRoot(v.Child)
-	}
-
-	centered := v.Centered || (v.X == 0 && v.Y == 0)
-
-	backdropFG := v.BackdropFG
-	if backdropFG.Mode == ColorDefault && v.Backdrop {
-		backdropFG = BrightBlack
-	}
-
-	ext := &opOverlay{
-		centered:   centered,
-		x:          int16(v.X),
-		y:          int16(v.Y),
-		backdrop:   v.Backdrop,
-		backdropFG: backdropFG,
-		bg:         v.BG,
-		childTmpl:  childTmpl,
-	}
-
-	return t.addOp(Op{
-		Kind:   OpOverlay,
-		Parent: parent,
-		Width:  int16(v.Width),
-		Height: int16(v.Height),
 		Ext:    ext,
 	}, depth)
 }
@@ -3540,10 +3667,15 @@ func (t *Template) applyContainerDynamics(idx int16, nodeRef *NodeRef, opacityMo
 		t.ops[idx].LocalStyle = localStyle
 	}
 	if opacity.dyn != nil {
-		opacity.compileArmed(t, elemBase, elemSize)
 		dyn := t.ensureOpDyn(idx)
-		dyn.Opacity = opacity.ptr
-		dyn.OpacityArmed = opacity.armed
+		if ptr, ok := opacity.dyn.(*float64); ok && elemBase != nil && isWithinRange(unsafe.Pointer(ptr), elemBase, elemSize) {
+			dyn.OpacityOff = uintptr(unsafe.Pointer(ptr)) - uintptr(elemBase)
+			dyn.OpacityIsOff = true
+		} else {
+			opacity.compileArmed(t, elemBase, elemSize)
+			dyn.Opacity = opacity.ptr
+			dyn.OpacityArmed = opacity.armed
+		}
 	} else if opacity.isSet {
 		val := opacity.val
 		t.ensureOpDyn(idx).Opacity = &val
@@ -3662,12 +3794,17 @@ func (t *Template) compileTextC(v TextC, parent int16, depth int, elemBase unsaf
 		t.ops[idx].Dyn.Width = v.widthPtr
 	}
 	if v.opacity.dyn != nil {
-		v.opacity.compileArmed(t, elemBase, elemSize)
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Opacity = v.opacity.ptr
-		t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
+		if ptr, ok := v.opacity.dyn.(*float64); ok && elemBase != nil && isWithinRange(unsafe.Pointer(ptr), elemBase, elemSize) {
+			t.ops[idx].Dyn.OpacityOff = uintptr(unsafe.Pointer(ptr)) - uintptr(elemBase)
+			t.ops[idx].Dyn.OpacityIsOff = true
+		} else {
+			v.opacity.compileArmed(t, elemBase, elemSize)
+			t.ops[idx].Dyn.Opacity = v.opacity.ptr
+			t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
+		}
 	} else if v.opacity.isSet {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -4018,7 +4155,10 @@ func (t *Template) compileOverlayC(v OverlayC, parent int16, depth int) int16 {
 		childTmpl = t.buildWithRoot(VBox(v.children...))
 	}
 
-	centered := v.centered || (v.x == 0 && v.y == 0 && v.anchor == nil)
+	placement := v.placement
+	if !v.placementSet && v.anchor == nil {
+		placement = OverlayPlacementCentered
+	}
 
 	backdropFG := v.backdropFG
 	if backdropFG.Mode == ColorDefault && v.backdrop {
@@ -4026,7 +4166,7 @@ func (t *Template) compileOverlayC(v OverlayC, parent int16, depth int) int16 {
 	}
 
 	ext := &opOverlay{
-		centered:    centered,
+		placement:   placement,
 		x:           int16(v.x),
 		y:           int16(v.y),
 		offsetX:     t.compileOverlayOffset(v.offsetX),
@@ -4702,6 +4842,13 @@ func (t *Template) computeIntrinsicWidth(idx int16) int16 {
 	return op.marginH()
 }
 
+func templateIntrinsicWidth(tmpl *Template) int16 {
+	if tmpl == nil || len(tmpl.ops) == 0 {
+		return 0
+	}
+	return tmpl.computeIntrinsicWidth(0)
+}
+
 // setOpWidth sets a single op's width based on available space.
 func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemBase unsafe.Pointer) {
 	switch op.Kind {
@@ -4735,18 +4882,6 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 
 	case OpAutoTable:
 		geom.W = availW
-
-	case OpTable:
-		ext := op.Ext.(*opTable)
-		totalW := 0
-		for _, col := range ext.columns {
-			if col.Width > 0 {
-				totalW += col.Width
-			} else {
-				totalW += 10
-			}
-		}
-		geom.W = int16(totalW)
 
 	case OpSparkline:
 		geom.W = op.width()
@@ -4867,7 +5002,7 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 			// computeIntrinsicWidth handles both ContentSized containers and
 			// leaf nodes (OpText, etc.) that have a computable fixed width.
 			// Falls back to 0 for truly flexible content (Space, unsized containers).
-			intrinsicW := subTmpl.computeIntrinsicWidth(0)
+			intrinsicW := templateIntrinsicWidth(subTmpl)
 			if intrinsicW > 0 {
 				subTmpl.distributeWidths(intrinsicW, elemBase)
 				geom.W = intrinsicW
@@ -4882,23 +5017,54 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 			geom.W = 0
 		}
 
-	case OpMatch:
-		mExt := op.Ext.(*opMatch)
+	case OpSwitch:
+		swExt := op.Ext.(*opSwitch)
 		var maxW int16
-		allTmpls := append(mExt.cases, mExt.def)
+		hasVisualBranch := false
+		allTmpls := append(swExt.cases, swExt.def)
 		for _, ct := range allTmpls {
 			if ct == nil {
 				continue
 			}
-			w := ct.computeIntrinsicWidth(0)
+			if len(ct.ops) > 0 {
+				hasVisualBranch = true
+			}
+			w := templateIntrinsicWidth(ct)
 			if w > maxW {
 				maxW = w
 			}
 		}
 		if maxW > 0 {
 			geom.W = maxW
-		} else {
+		} else if hasVisualBranch {
 			geom.W = availW
+		} else {
+			geom.W = 0
+		}
+
+	case OpMatch:
+		mExt := op.Ext.(*opMatch)
+		var maxW int16
+		hasVisualBranch := false
+		allTmpls := append(mExt.cases, mExt.def)
+		for _, ct := range allTmpls {
+			if ct == nil {
+				continue
+			}
+			if len(ct.ops) > 0 {
+				hasVisualBranch = true
+			}
+			w := templateIntrinsicWidth(ct)
+			if w > maxW {
+				maxW = w
+			}
+		}
+		if maxW > 0 {
+			geom.W = maxW
+		} else if hasVisualBranch {
+			geom.W = availW
+		} else {
+			geom.W = 0
 		}
 
 	case OpContainer:
@@ -5331,8 +5497,22 @@ func (t *Template) layout(_ int16) {
 			geom := &t.geom[idx]
 
 			switch op.Kind {
-			case OpText, OpProgress, OpRichText, OpLeader, OpCounter:
+			case OpText, OpProgress, OpLeader, OpCounter:
 				geom.H = 1
+
+			case OpRichText:
+				ext := op.Ext.(*opRichText)
+				spans := ext.resolve(t.elemBase)
+				w := int(geom.W)
+				if w <= 0 {
+					w = 72
+				}
+				n := wrapSpansLines(spans, w, ext.charWrap)
+				if n == 0 {
+					geom.H = 1
+				} else {
+					geom.H = int16(n)
+				}
 
 			case OpTextBlock:
 				ext := op.Ext.(*opText)
@@ -5359,20 +5539,6 @@ func (t *Template) layout(_ int16) {
 					visibleRows = sc.maxVisible
 				}
 				geom.H = int16(visibleRows + 1)
-				if geom.H == 0 {
-					geom.H = 1
-				}
-
-			case OpTable:
-				ext := op.Ext.(*opTable)
-				rowCount := 0
-				if ext.rowsPtr != nil {
-					rowCount = len(*ext.rowsPtr)
-				}
-				if ext.showHeader {
-					rowCount++
-				}
-				geom.H = int16(rowCount)
 				if geom.H == 0 {
 					geom.H = 1
 				}
@@ -5447,7 +5613,7 @@ func (t *Template) layout(_ int16) {
 					itemH := int16(1) // default for simple text items
 					if ext.iterTmpl != nil && len(ext.iterTmpl.ops) > 0 {
 						firstOp := &ext.iterTmpl.ops[0]
-						if firstOp.Kind == OpContainer || firstOp.Kind == OpLayout || firstOp.Kind == OpJump {
+						if firstOp.Kind == OpContainer || firstOp.Kind == OpLayout || firstOp.Kind == OpJump || firstOp.Kind == OpRichText || firstOp.Kind == OpTextBlock {
 							elemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(li)*ext.elemSize)
 							if ext.elemIsPtr {
 								elemPtr = *(*unsafe.Pointer)(elemPtr)
@@ -6402,8 +6568,15 @@ func refOpacity(ref *NodeRef) float64 {
 }
 
 func (t *Template) opacityForOp(op *Op) (float64, bool) {
-	if op.Dyn == nil || op.Dyn.Opacity == nil {
+	if op.Dyn == nil || (op.Dyn.Opacity == nil && !op.Dyn.OpacityIsOff) {
 		return 1, false
+	}
+	if op.Dyn.OpacityIsOff {
+		if t.elemBase == nil {
+			return 1, false
+		}
+		ptr := (*float64)(unsafe.Pointer(uintptr(t.elemBase) + op.Dyn.OpacityOff))
+		return clampOpacity(*ptr), true
 	}
 	if op.Dyn.OpacityArmed != nil {
 		*op.Dyn.OpacityArmed = true
@@ -6538,7 +6711,7 @@ func blendOpacityColor(back, src Color, opacity float64, fallback Color) Color {
 		}
 		back = fallback
 	}
-	return LerpColor(back, src, opacity)
+	return Lerp(back, src, opacity)
 }
 
 func blendSourceRuneFG(src, bg Color, opacity float64) Color {
@@ -6548,7 +6721,7 @@ func blendSourceRuneFG(src, bg Color, opacity float64) Color {
 	if bg.Mode == ColorDefault {
 		return src
 	}
-	return LerpColor(bg, src, opacity)
+	return Lerp(bg, src, opacity)
 }
 
 func blendBackingRuneFG(backFG, bg Color, opacity float64, defaultStyle Style) Color {
@@ -6561,7 +6734,7 @@ func blendBackingRuneFG(backFG, bg Color, opacity float64, defaultStyle Style) C
 	if backFG.Mode == ColorDefault {
 		return bg
 	}
-	return LerpColor(backFG, bg, opacity)
+	return Lerp(backFG, bg, opacity)
 }
 
 func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16) {
@@ -6646,7 +6819,11 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		ext := op.Ext.(*opRichText)
 		spans := ext.resolve(t.elemBase)
 		if spans != nil {
-			buf.WriteSpans(int(absX), int(absY), spans, int(maxW))
+			spans = styleSpans(spans, t.effectiveStyle)
+			maxLines := buf.Height() - int(absY)
+			if maxLines > 0 {
+				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap, t.richSpanJumpFunc(buf))
+			}
 		}
 
 	case OpLeader:
@@ -6657,9 +6834,6 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 
 	case OpAutoTable:
 		t.renderAutoTable(buf, op, absX, absY, maxW)
-
-	case OpTable:
-		t.renderTable(buf, op, absX, absY, maxW)
 
 	case OpSparkline:
 		op.Ext.(*opSparkline).render(t, buf, absX, absY, contentW, geom.H)
@@ -6988,6 +7162,9 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 			for _, eval := range feExt.iterTmpl.itemEvals {
 				eval()
 			}
+			feExt.iterTmpl.itemIndex = i
+			feExt.iterTmpl.distributeWidths(itemGeom.W, elemPtr)
+			feExt.iterTmpl.layout(0)
 
 			// apply dynamic fills on root container before rendering
 			if len(feExt.iterTmpl.ops) > 0 {
@@ -7022,9 +7199,14 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 // renderSubTemplate renders a sub-template (for ForEach) with element-bound data.
 func (t *Template) renderSubTemplate(buf *Buffer, sub *Template, globalX, globalY, maxW int16, elemBase unsafe.Pointer) {
 	sub.app = t.app
-	sub.clipMaxY = t.clipMaxY           // propagate vertical clip
-	sub.inheritedFill = t.inheritedFill // propagate fill so blank cells use parent bg
-	sub.elemBase = elemBase             // ensure renderOp paths (e.g. via renderJump) see the correct element
+	sub.clipMaxY = t.clipMaxY // propagate vertical clip
+	sub.setJumpViewport(t.jumpOffsetX, t.jumpOffsetY, t.jumpMinY, t.jumpMaxY)
+	if sub.rowBG.Mode != ColorDefault {
+		sub.inheritedFill = sub.rowBG
+	} else {
+		sub.inheritedFill = t.inheritedFill // propagate fill so blank cells use parent bg
+	}
+	sub.elemBase = elemBase // ensure renderOp paths (e.g. via renderJump) see the correct element
 	sub.pendingOverlays = sub.pendingOverlays[:0]
 	sub.pendingScreenEffects = sub.pendingScreenEffects[:0]
 	for i := range sub.ops {
@@ -7041,10 +7223,14 @@ func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, glo
 	sub.inheritedStyle = t.inheritedStyle
 	sub.inheritedFill = t.inheritedFill
 	sub.clipMaxY = t.clipMaxY
+	sub.setJumpViewport(t.jumpOffsetX, t.jumpOffsetY, t.jumpMinY, t.jumpMaxY)
 	sub.elemBase = elemBase
 	sub.setExitRenderingFor(elemBase, exiting)
 	sub.pendingOverlays = sub.pendingOverlays[:0]
 	sub.pendingScreenEffects = sub.pendingScreenEffects[:0]
+	if exiting && !sub.hasActiveExitLeases() {
+		sub.runExitEvals()
+	}
 	sub.runItemEvals(elemBase)
 	oldRefOpacity := sub.refOpacity
 	oldRefOpacitySet := sub.refOpacitySet
@@ -7058,6 +7244,7 @@ func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, glo
 }
 
 func (t *Template) renderSelectedBranch(buf *Buffer, branches []*Template, requested int, selector *branchSelector, globalX, globalY, maxW int16, elemBase unsafe.Pointer) {
+	setRouteBranchActive(branches, requested)
 	selected, exiting := selector.selectBranch(requested, branches)
 	tmpl := branchAt(branches, selected)
 	if tmpl == nil {
@@ -7140,7 +7327,11 @@ func (t *Template) renderLayer(buf *Buffer, op *Op, absX, absY, contentW, conten
 	ext.ptr.screenX = int(absX)
 	ext.ptr.screenY = int(absY)
 	if t.app != nil {
+		ext.ptr.app = t.app
 		ext.ptr.defaultStyle = t.app.defaultStyle
+		if t.app.JumpModeActive() {
+			ext.ptr.Invalidate()
+		}
 	}
 	ext.ptr.prepare()
 	ext.ptr.blit(buf, int(absX), int(absY), layerW, int(contentH))
@@ -7163,9 +7354,9 @@ func (t *Template) renderLayer(buf *Buffer, op *Op, absX, absY, contentW, conten
 }
 
 // renderSubOp renders a single op in a sub-template, recursing into children.
-func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW int16, elemBase unsafe.Pointer) {
-	op := &sub.ops[idx]
-	geom := &sub.geom[idx]
+func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW int16, elemBase unsafe.Pointer) {
+	op := &t.ops[idx]
+	geom := &t.geom[idx]
 
 	absX := globalX + geom.LocalX
 	absY := globalY + geom.LocalY
@@ -7183,14 +7374,14 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 
 	// merge row selection style with text style (also applies inherited style)
 	mergeStyle := func(s Style) Style {
-		s = sub.effectiveStyle(s)
-		if sub.rowBG.Mode != 0 && s.BG.Mode == 0 {
-			s.BG = sub.rowBG
+		s = t.effectiveStyle(s)
+		if t.rowBG.Mode != 0 && s.BG.Mode == 0 {
+			s.BG = t.rowBG
 		}
-		if sub.rowFG.Mode != 0 && s.FG.Mode == 0 {
-			s.FG = sub.rowFG
+		if t.rowFG.Mode != 0 && s.FG.Mode == 0 {
+			s.FG = t.rowFG
 		}
-		s.Attr = s.Attr | sub.rowAttr
+		s.Attr = s.Attr | t.rowAttr
 		return s
 	}
 
@@ -7216,14 +7407,14 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			}
 			x += alignOffset(text, int(alignW), style.Align)
 		}
-		opacity, hasOpacity := sub.opacityForOp(op)
+		opacity, hasOpacity := t.opacityForOp(op)
 		var backing []Cell
 		if hasOpacity && opacity < 1 {
-			backing = sub.snapshotRect(buf, x, int(absY), drawW, 1)
+			backing = t.snapshotRect(buf, x, int(absY), drawW, 1)
 		}
 		buf.WriteStringFast(x, int(absY), text, style, drawW)
 		if hasOpacity && opacity < 1 {
-			sub.composeOpacityRect(buf, x, int(absY), drawW, 1, backing, opacity, op.OpacityMode)
+			t.composeOpacityRect(buf, x, int(absY), drawW, 1, backing, opacity, op.OpacityMode)
 		}
 
 	case OpTextBlock:
@@ -7246,27 +7437,28 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		if ext.stylePtr != nil {
 			baseStyle = *ext.stylePtr
 		}
-		style := sub.effectiveStyle(baseStyle)
+		style := t.effectiveStyle(baseStyle)
 		buf.WriteProgressBar(int(absX), int(absY), int(op.width()), ratio, style)
 
 	case OpRichText:
 		ext := op.Ext.(*opRichText)
 		spans := ext.resolve(elemBase)
 		if spans != nil {
-			buf.WriteSpans(int(absX), int(absY), spans, int(maxW))
+			spans = styleSpans(spans, mergeStyle)
+			maxLines := buf.Height() - int(absY)
+			if maxLines > 0 {
+				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap, t.richSpanJumpFunc(buf))
+			}
 		}
 
 	case OpLeader:
-		sub.renderLeader(buf, op, absX, absY, maxW)
+		t.renderLeader(buf, op, absX, absY, maxW)
 
 	case OpCounter:
-		sub.renderCounter(buf, op, absX, absY, maxW)
-
-	case OpTable:
-		sub.renderTable(buf, op, absX, absY, maxW)
+		t.renderCounter(buf, op, absX, absY, maxW)
 
 	case OpSparkline:
-		op.Ext.(*opSparkline).render(sub, buf, absX, absY, contentW, geom.H)
+		op.Ext.(*opSparkline).render(t, buf, absX, absY, contentW, geom.H)
 
 	case OpHRule:
 		ext := op.Ext.(*opRule)
@@ -7278,7 +7470,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		if ext.stylePtr != nil {
 			hBaseStyle = *ext.stylePtr
 		}
-		ruleStyle := sub.effectiveStyle(hBaseStyle)
+		ruleStyle := t.effectiveStyle(hBaseStyle)
 		for i := 0; i < width; i++ {
 			buf.Set(int(absX)+i, int(absY), Cell{Rune: ext.char, Style: ruleStyle})
 		}
@@ -7289,7 +7481,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		if ext.stylePtr != nil {
 			vBaseStyle = *ext.stylePtr
 		}
-		ruleStyle := sub.effectiveStyle(vBaseStyle)
+		ruleStyle := t.effectiveStyle(vBaseStyle)
 		for i := 0; i < int(contentH); i++ {
 			buf.Set(int(absX), int(absY)+i, Cell{Rune: ext.char, Style: ruleStyle})
 		}
@@ -7305,7 +7497,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			for x := int16(0); x < contentW; x++ {
 				buf.Set(int(absX+x), int(absY), Cell{Rune: ext.char, Style: spacerStyle})
 			}
-		} else if sub.rowBG.Mode != 0 {
+		} else if t.rowBG.Mode != 0 {
 			for x := int16(0); x < contentW; x++ {
 				buf.Set(int(absX+x), int(absY), Cell{Rune: ' ', Style: spacerStyle})
 			}
@@ -7320,49 +7512,49 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			if ext.stylePtr != nil {
 				spinBaseStyle = *ext.stylePtr
 			}
-			style := sub.effectiveStyle(spinBaseStyle)
+			style := t.effectiveStyle(spinBaseStyle)
 			buf.WriteStringFast(int(absX), int(absY), frame, style, 1)
 		}
 
 	case OpScrollbar:
-		sub.renderScrollbar(buf, op, geom, absX, absY)
+		t.renderScrollbar(buf, op, geom, absX, absY)
 
 	case OpTabs:
-		sub.renderTabs(buf, op, geom, absX, absY)
+		t.renderTabs(buf, op, geom, absX, absY)
 
 	case OpTreeView:
-		sub.renderTreeView(buf, op, absX, absY)
+		t.renderTreeView(buf, op, absX, absY)
 
 	case OpSelectionList:
-		sub.renderSelectionList(buf, op, geom, absX, absY, maxW)
+		t.renderSelectionList(buf, op, geom, absX, absY, maxW)
 
 	case OpJump:
-		sub.renderJump(buf, op, geom, absX, absY, maxW, idx)
+		t.renderJump(buf, op, geom, absX, absY, maxW, idx)
 
 	case OpTextInput:
-		sub.renderTextInput(buf, op, geom, absX, absY)
+		t.renderTextInput(buf, op, geom, absX, absY)
 
 	case OpOverlay:
-		sub.pendingOverlays = append(sub.pendingOverlays, pendingOverlay{op: op})
+		t.pendingOverlays = append(t.pendingOverlays, pendingOverlay{op: op})
 
 	case OpScreenEffect:
 		ext := op.Ext.(*opScreenEffect)
-		sub.pendingScreenEffects = append(sub.pendingScreenEffects, ext.fns...)
+		t.pendingScreenEffects = append(t.pendingScreenEffects, ext.fns...)
 
 	case OpCustom:
-		sub.renderCustomRenderer(buf, op, absX, absY, contentW, contentH)
+		t.renderCustomRenderer(buf, op, absX, absY, contentW, contentH)
 
 	case OpLayout:
 		for i := op.ChildStart; i < op.ChildEnd; i++ {
-			childOp := &sub.ops[i]
+			childOp := &t.ops[i]
 			if childOp.Parent != idx {
 				continue
 			}
-			sub.renderSubOp(buf, i, absX, absY, contentW, elemBase)
+			t.renderSubOp(buf, i, absX, absY, contentW, elemBase)
 		}
 
 	case OpLayer:
-		sub.renderLayer(buf, op, absX, absY, contentW, contentH)
+		t.renderLayer(buf, op, absX, absY, contentW, contentH)
 
 	case OpContainer:
 		// Margin inset: visible box starts inside the margin
@@ -7371,8 +7563,8 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		boxW := geom.W - op.marginH()
 		boxH := geom.H - op.marginV()
 
-		opacity, hasOpacity := sub.opacityForOp(op)
-		effectiveRefOpacity := sub.currentRefOpacity()
+		opacity, hasOpacity := t.opacityForOp(op)
+		effectiveRefOpacity := t.currentRefOpacity()
 		if hasOpacity {
 			effectiveRefOpacity *= opacity
 		}
@@ -7386,26 +7578,26 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		}
 		var backing []Cell
 		if hasOpacity && opacity < 1 {
-			backing = sub.snapshotRect(buf, int(boxX), int(boxY), int(boxW), int(boxH))
+			backing = t.snapshotRect(buf, int(boxX), int(boxY), int(boxW), int(boxH))
 		}
 
 		// Update inherited Fill - cascades through nested containers
-		oldInheritedFill := sub.inheritedFill
+		oldInheritedFill := t.inheritedFill
 		opFill := op.fill()
 		if op.CascadeStyle != nil && op.CascadeStyle.Fill.Mode != ColorDefault {
-			sub.inheritedFill = op.CascadeStyle.Fill
+			t.inheritedFill = op.CascadeStyle.Fill
 		} else if opFill.Mode != ColorDefault {
-			sub.inheritedFill = opFill
+			t.inheritedFill = opFill
 		}
 
 		// Update inherited style if this container sets one (before title rendering)
-		oldInheritedStyle := sub.inheritedStyle
+		oldInheritedStyle := t.inheritedStyle
 		if op.CascadeStyle != nil {
-			sub.inheritedStyle = op.CascadeStyle
+			t.inheritedStyle = op.CascadeStyle
 		}
 
 		// Fill container area - direct Fill takes precedence over inherited
-		fillColor := sub.inheritedFill
+		fillColor := t.inheritedFill
 		if opFill.Mode != ColorDefault {
 			fillColor = opFill
 		}
@@ -7439,8 +7631,8 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 
 			if op.Title != "" {
 				titleTransform := TransformNone
-				if sub.inheritedStyle != nil {
-					titleTransform = sub.inheritedStyle.Transform
+				if t.inheritedStyle != nil {
+					titleTransform = t.inheritedStyle.Transform
 				}
 				titleMaxW := int(boxW) - 2
 				titleX := int(boxX) + 1
@@ -7470,35 +7662,35 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 			contentW -= op.Border.PadH()
 		}
 
-		oldRefOpacity := sub.refOpacity
-		oldRefOpacitySet := sub.refOpacitySet
-		sub.refOpacity = effectiveRefOpacity
-		sub.refOpacitySet = true
+		oldRefOpacity := t.refOpacity
+		oldRefOpacitySet := t.refOpacitySet
+		t.refOpacity = effectiveRefOpacity
+		t.refOpacitySet = true
 
 		// Recurse into children with this container's position as their origin
 		// children's LocalX/Y already include margin+border offsets
 		for i := op.ChildStart; i < op.ChildEnd; i++ {
-			childOp := &sub.ops[i]
+			childOp := &t.ops[i]
 			if childOp.Parent != idx {
 				continue
 			}
-			sub.renderSubOp(buf, i, absX, absY, contentW, elemBase)
+			t.renderSubOp(buf, i, absX, absY, contentW, elemBase)
 		}
 
 		// Restore inherited style and fill
-		sub.inheritedStyle = oldInheritedStyle
-		sub.inheritedFill = oldInheritedFill
-		sub.refOpacity = oldRefOpacity
-		sub.refOpacitySet = oldRefOpacitySet
+		t.inheritedStyle = oldInheritedStyle
+		t.inheritedFill = oldInheritedFill
+		t.refOpacity = oldRefOpacity
+		t.refOpacitySet = oldRefOpacitySet
 
 		if hasOpacity && opacity < 1 {
-			sub.composeOpacityRect(buf, int(boxX), int(boxY), int(boxW), int(boxH), backing, opacity, op.OpacityMode)
+			t.composeOpacityRect(buf, int(boxX), int(boxY), int(boxW), int(boxH), backing, opacity, op.OpacityMode)
 		}
 
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
 		branches, requested := ifBranches(ifExt, elemBase)
-		sub.renderSelectedBranch(buf, branches, requested, ifExt.selector(elemBase), absX, absY, geom.W, elemBase)
+		t.renderSelectedBranch(buf, branches, requested, ifExt.selector(elemBase), absX, absY, geom.W, elemBase)
 
 	case OpForEach:
 		// Nested ForEach - render with nested element base
@@ -7513,19 +7705,26 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 				if feExt.elemIsPtr {
 					nestedElemPtr = *(*unsafe.Pointer)(nestedElemPtr)
 				}
-				sub.renderSubTemplate(buf, feExt.iterTmpl, itemAbsX, itemAbsY, itemGeom.W, nestedElemPtr)
+				feExt.iterTmpl.elemBase = nestedElemPtr
+				feExt.iterTmpl.itemIndex = j
+				for _, eval := range feExt.iterTmpl.itemEvals {
+					eval()
+				}
+				feExt.iterTmpl.distributeWidths(itemGeom.W, nestedElemPtr)
+				feExt.iterTmpl.layout(0)
+				t.renderSubTemplate(buf, feExt.iterTmpl, itemAbsX, itemAbsY, itemGeom.W, nestedElemPtr)
 			}
 		}
 
 	case OpSwitch:
 		swExt := op.Ext.(*opSwitch)
 		branches, requested := switchBranches(swExt, elemBase)
-		sub.renderSelectedBranch(buf, branches, requested, swExt.selector(elemBase), absX, absY, geom.W, elemBase)
+		t.renderSelectedBranch(buf, branches, requested, swExt.selector(elemBase), absX, absY, geom.W, elemBase)
 
 	case OpMatch:
 		mExt := op.Ext.(*opMatch)
 		branches, requested := matchBranches(mExt, elemBase)
-		sub.renderSelectedBranch(buf, branches, requested, mExt.selector(elemBase), absX, absY, geom.W, elemBase)
+		t.renderSelectedBranch(buf, branches, requested, mExt.selector(elemBase), absX, absY, geom.W, elemBase)
 	}
 }
 
@@ -7536,26 +7735,39 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 	if sliceHdr.Len == 0 || len(ext.geoms) == 0 {
 		return
 	}
+	visibleLen := sliceHdr.Len
+	if visibleLen > len(ext.geoms) {
+		visibleLen = len(ext.geoms)
+	}
+	if visibleLen == 0 {
+		return
+	}
 
 	selectedIdx := -1
 	if ext.selectedPtr != nil {
 		selectedIdx = *ext.selectedPtr
+		if selectedIdx < 0 {
+			selectedIdx = 0
+		}
+		if selectedIdx >= visibleLen {
+			selectedIdx = visibleLen - 1
+		}
 	}
 
 	// height-aware windowing: determine visible item range using per-item heights
 	startIdx := 0
-	endIdx := sliceHdr.Len
-	if endIdx > len(ext.geoms) {
-		endIdx = len(ext.geoms)
-	}
+	endIdx := visibleLen
 	if ext.listPtr != nil && ext.listPtr.MaxVisible > 0 {
 		startIdx = ext.listPtr.offset
-		endIdx = startIdx + ext.listPtr.MaxVisible
-		if endIdx > sliceHdr.Len {
-			endIdx = sliceHdr.Len
+		if startIdx < 0 {
+			startIdx = 0
 		}
-		if endIdx > len(ext.geoms) {
-			endIdx = len(ext.geoms)
+		if startIdx >= visibleLen {
+			startIdx = visibleLen - 1
+		}
+		endIdx = startIdx + ext.listPtr.MaxVisible
+		if endIdx > visibleLen {
+			endIdx = visibleLen
 		}
 	}
 
@@ -7584,8 +7796,8 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 				startIdx = selectedIdx
 				// recalculate endIdx forward from new startIdx
 				rowsUsed = 0
-				endIdx = sliceHdr.Len
-				for ci := startIdx; ci < sliceHdr.Len; ci++ {
+				endIdx = visibleLen
+				for ci := startIdx; ci < visibleLen; ci++ {
 					ih := int(ext.geoms[ci].H)
 					if rowsUsed+ih > availableRows {
 						endIdx = ci
@@ -7614,13 +7826,20 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 
 	spaces := ext.markerSpaces
 
-	contentW := int16(maxW) - ext.markerWidth
+	rowW := geom.W
+	if maxW > 0 && maxW < rowW {
+		rowW = maxW
+	}
+	contentW := rowW - ext.markerWidth
+	if contentW < 0 {
+		contentW = 0
+	}
 	contentX := absX + ext.markerWidth
 
 	needsFullPipeline := false
 	if ext.iterTmpl != nil && len(ext.iterTmpl.ops) > 0 {
 		firstOp := &ext.iterTmpl.ops[0]
-		needsFullPipeline = firstOp.Kind == OpContainer || firstOp.Kind == OpLayout || firstOp.Kind == OpJump
+		needsFullPipeline = firstOp.Kind == OpContainer || firstOp.Kind == OpLayout || firstOp.Kind == OpJump || firstOp.Kind == OpRichText || firstOp.Kind == OpTextBlock
 	}
 
 	var defaultStyle, selectedStyle, markerBaseStyle Style
@@ -7644,7 +7863,7 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 			rowStyle.BG = defaultStyle.BG
 		}
 		if rowStyle.BG.Mode != 0 || rowStyle.Attr != 0 {
-			buf.FillRect(int(absX), y, int(maxW), itemH, Cell{Rune: ' ', Style: rowStyle})
+			buf.FillRect(int(absX), y, int(rowW), itemH, Cell{Rune: ' ', Style: rowStyle})
 		}
 
 		// Determine marker text and style
@@ -7881,26 +8100,28 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 		}
 	}
 
-	// If jump mode is active, register this target and draw label
+	// If jump mode is active, register this target. Labels are painted by the
+	// app after the final visible frame is composed.
 	if t.app != nil && t.app.JumpModeActive() {
 		ext := op.Ext.(*opJump)
 		t.app.AddJumpTarget(absX, absY, ext.onSelect, ext.style)
+	}
+}
 
-		// Draw label if assigned
-		jm := t.app.JumpMode()
-		for i := len(jm.Targets) - 1; i >= 0; i-- {
-			target := &jm.Targets[i]
-			if target.X == absX && target.Y == absY && target.Label != "" {
-				style := t.app.JumpStyle().LabelStyle
-				if !target.Style.Equal(Style{}) {
-					style = target.Style
-				}
-				for j, r := range target.Label {
-					buf.Set(int(absX)+j, int(absY), Cell{Rune: r, Style: style})
-				}
-				break
-			}
+func (t *Template) richSpanJumpFunc(buf *Buffer) spanJumpFunc {
+	if t.app == nil || !t.app.JumpModeActive() {
+		return nil
+	}
+	return func(x, y int, span Span) {
+		if span.OnSelect == nil {
+			return
 		}
+		x += t.jumpOffsetX
+		y += t.jumpOffsetY
+		if t.jumpMaxY > t.jumpMinY && (y < t.jumpMinY || y >= t.jumpMaxY) {
+			return
+		}
+		t.app.AddJumpTarget(int16(x), int16(y), span.OnSelect, Style{})
 	}
 }
 
@@ -8102,12 +8323,39 @@ func (t *Template) renderOverlay(buf *Buffer, op *Op, screenW, screenH int16) {
 			posX = int16(ref.X) - overlayW
 			posY = int16(ref.Y)
 		}
-	} else if ext.centered {
-		posX = (screenW - overlayW) / 2
-		posY = (screenH - overlayH) / 2
 	} else {
-		posX = ext.x
-		posY = ext.y
+		switch ext.placement {
+		case OverlayPlacementCentered:
+			posX = (screenW - overlayW) / 2
+			posY = (screenH - overlayH) / 2
+		case OverlayPlacementTop:
+			posX = (screenW - overlayW) / 2
+			posY = 0
+		case OverlayPlacementBottom:
+			posX = (screenW - overlayW) / 2
+			posY = screenH - overlayH
+		case OverlayPlacementLeft:
+			posX = 0
+			posY = (screenH - overlayH) / 2
+		case OverlayPlacementRight:
+			posX = screenW - overlayW
+			posY = (screenH - overlayH) / 2
+		case OverlayPlacementTopLeft:
+			posX = 0
+			posY = 0
+		case OverlayPlacementTopRight:
+			posX = screenW - overlayW
+			posY = 0
+		case OverlayPlacementBottomLeft:
+			posX = 0
+			posY = screenH - overlayH
+		case OverlayPlacementBottomRight:
+			posX = screenW - overlayW
+			posY = screenH - overlayH
+		default:
+			posX = ext.x
+			posY = ext.y
+		}
 	}
 	if ext.offsetX != nil {
 		posX += *ext.offsetX
@@ -8163,6 +8411,7 @@ func (t *Template) renderOverlay(buf *Buffer, op *Op, screenW, screenH int16) {
 	// Render the overlay content
 	// Re-layout with actual available space
 	childTmpl.pendingScreenEffects = childTmpl.pendingScreenEffects[:0]
+	childTmpl.setRouteActive(true)
 	childTmpl.distributeWidths(overlayW, nil)
 	childTmpl.layout(overlayH)
 	childTmpl.distributeFlexGrow(overlayH)
@@ -8333,59 +8582,9 @@ func (t *Template) renderScrollbar(buf *Buffer, op *Op, geom *Geom, absX, absY i
 	}
 }
 
-func (t *Template) renderTable(buf *Buffer, op *Op, absX, absY, maxW int16) {
-	ext := op.Ext.(*opTable)
-	if ext.rowsPtr == nil {
-		return
-	}
-	rows := *ext.rowsPtr
-	y := int(absY)
-
-	// Render header if enabled
-	if ext.showHeader {
-		x := int(absX)
-		for _, col := range ext.columns {
-			width := col.Width
-			if width == 0 {
-				width = 10
-			}
-			t.writeTableCell(buf, x, y, col.Header, width, col.Align, ext.headerStyle)
-			x += width
-		}
-		y++
-	}
-
-	// Render data rows
-	for rowIdx, row := range rows {
-		x := int(absX)
-		style := ext.rowStyle
-		// Alternating row style (check if AltStyle has any non-default values)
-		if rowIdx%2 == 1 && ext.altStyle != (Style{}) {
-			style = ext.altStyle
-		}
-
-		for colIdx, col := range ext.columns {
-			width := col.Width
-			if width == 0 {
-				width = 10
-			}
-			cellText := ""
-			if colIdx < len(row) {
-				cellText = row[colIdx]
-			}
-			t.writeTableCell(buf, x, y, cellText, width, col.Align, style)
-			x += width
-		}
-		y++
-	}
-}
-
 func (t *Template) writeTableCell(buf *Buffer, x, y int, text string, width int, align Align, style Style) {
 	textLen := StringWidth(text)
 	if textLen > width {
-		// Truncate (rune-wise; width-correct truncation for wide chars is a
-		// follow-up — this may still over-trim by 1 cell for emoji-heavy
-		// cells but won't cause row overflow).
 		runes := []rune(text)
 		text = string(runes[:width])
 		textLen = StringWidth(text)
@@ -8393,18 +8592,16 @@ func (t *Template) writeTableCell(buf *Buffer, x, y int, text string, width int,
 
 	padding := width - textLen
 	var leftPad, rightPad int
-
 	switch align {
 	case AlignRight:
 		leftPad = padding
 	case AlignCenter:
 		leftPad = padding / 2
 		rightPad = padding - leftPad
-	default: // AlignLeft
+	default:
 		rightPad = padding
 	}
 
-	// Write padding and text
 	pos := x
 	for i := 0; i < leftPad; i++ {
 		buf.Set(pos, y, Cell{Rune: ' ', Style: style})
@@ -8713,8 +8910,8 @@ func opKindName(k OpKind) string {
 		OpLeader: "Leader", OpCounter: "Counter",
 		OpContainer: "Container", OpIf: "If", OpForEach: "ForEach", OpSwitch: "Switch", OpMatch: "Match",
 		OpCustom: "Custom", OpLayout: "Layout", OpLayer: "Layer",
-		OpSelectionList: "SelectionList",
-		OpTable:         "Table", OpAutoTable: "AutoTable", OpSparkline: "Sparkline",
+		OpSelectionList: "selectionList",
+		OpAutoTable:     "AutoTable", OpSparkline: "Sparkline",
 		OpHRule: "HRule", OpVRule: "VRule", OpSpacer: "Spacer",
 		OpSpinner: "Spinner", OpScrollbar: "Scrollbar", OpTabs: "Tabs", OpTreeView: "TreeView",
 		OpJump: "Jump", OpTextInput: "TextInput", OpOverlay: "Overlay", OpScreenEffect: "ScreenEffect",

@@ -260,10 +260,10 @@ func (s *SwitchBuilder[T]) Case(val T, node any) *SwitchBuilder[T] {
 }
 
 // Default sets the fallback when no case matches.
-// Returns SwitchNode which implements the compiler interface.
-func (s *SwitchBuilder[T]) Default(node any) *SwitchNode[T] {
+// Returns SwitchC which implements the compiler interface.
+func (s *SwitchBuilder[T]) Default(node any) *SwitchC[T] {
 	s.def = node
-	return &SwitchNode[T]{
+	return &SwitchC[T]{
 		ptr:   s.ptr,
 		cases: s.cases,
 		def:   s.def,
@@ -271,16 +271,16 @@ func (s *SwitchBuilder[T]) Default(node any) *SwitchNode[T] {
 }
 
 // End finalizes without a default (renders nothing if no match)
-func (s *SwitchBuilder[T]) End() *SwitchNode[T] {
-	return &SwitchNode[T]{
+func (s *SwitchBuilder[T]) End() *SwitchC[T] {
+	return &SwitchC[T]{
 		ptr:   s.ptr,
 		cases: s.cases,
 		def:   nil,
 	}
 }
 
-// SwitchNode is the compiled form of a Switch, ready for template evaluation.
-type SwitchNode[T comparable] struct {
+// SwitchC is the compiled form of a Switch, ready for template evaluation.
+type SwitchC[T comparable] struct {
 	ptr    *T
 	offset uintptr // offset from ForEach element base; 0 = use ptr directly
 	cases  []switchCase[T]
@@ -298,7 +298,7 @@ type switchNodeInterface interface {
 	setPtrOffset(uintptr)                     // compile-time: record offset from element base
 }
 
-func (s *SwitchNode[T]) evaluateSwitch() any {
+func (s *SwitchC[T]) evaluateSwitch() any {
 	v := *s.ptr
 	for _, c := range s.cases {
 		if v == c.val {
@@ -308,7 +308,7 @@ func (s *SwitchNode[T]) evaluateSwitch() any {
 	return s.def
 }
 
-func (s *SwitchNode[T]) getCaseNodes() []any {
+func (s *SwitchC[T]) getCaseNodes() []any {
 	nodes := make([]any, len(s.cases))
 	for i, c := range s.cases {
 		nodes[i] = c.node
@@ -316,15 +316,15 @@ func (s *SwitchNode[T]) getCaseNodes() []any {
 	return nodes
 }
 
-func (s *SwitchNode[T]) getDefaultNode() any {
+func (s *SwitchC[T]) getDefaultNode() any {
 	return s.def
 }
 
-func (s *SwitchNode[T]) getMatchIndex() int {
+func (s *SwitchC[T]) getMatchIndex() int {
 	return s.getMatchIndexWithBase(nil)
 }
 
-func (s *SwitchNode[T]) getMatchIndexWithBase(elemBase unsafe.Pointer) int {
+func (s *SwitchC[T]) getMatchIndexWithBase(elemBase unsafe.Pointer) int {
 	var ptr *T
 	if elemBase != nil && s.offset != 0 {
 		ptr = (*T)(unsafe.Pointer(uintptr(elemBase) + s.offset))
@@ -340,12 +340,12 @@ func (s *SwitchNode[T]) getMatchIndexWithBase(elemBase unsafe.Pointer) int {
 	return -1
 }
 
-func (s *SwitchNode[T]) getPtrAddr() uintptr {
+func (s *SwitchC[T]) getPtrAddr() uintptr {
 	return uintptr(unsafe.Pointer(s.ptr))
 }
 
-func (s *SwitchNode[T]) setPtrOffset(off uintptr) {
+func (s *SwitchC[T]) setPtrOffset(off uintptr) {
 	s.offset = off
 }
 
-var _ switchNodeInterface = (*SwitchNode[int])(nil)
+var _ switchNodeInterface = (*SwitchC[int])(nil)

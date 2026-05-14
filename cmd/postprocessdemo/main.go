@@ -104,7 +104,7 @@ func (d dropShadowEffect) Apply(buf *Buffer, ctx PostContext) {
 			if bg.Mode == ColorDefault && ctx.DefaultBG.Mode != ColorDefault {
 				bg = ctx.DefaultBG
 			}
-			c.Style.BG = LerpColor(bg, shadow, d.strength)
+			c.Style.BG = Lerp(bg, shadow, d.strength)
 			buf.Set(x, y, c)
 		}
 	}
@@ -143,8 +143,8 @@ func main() {
 		{"Tnt×Ovrlay", false, false, WithBlend(BlendOverlay, SETint(Hex(0xFF6600)).Strength(0.5))},
 		{"Tnt×Add", false, false, WithBlend(BlendAdd, SETint(Hex(0xFF6600)).Strength(0.5))},
 		{"Tnt×Soft", false, false, WithBlend(BlendSoftLight, SETint(Hex(0xFF6600)).Strength(0.5))},
-		{"Tnt×Dodge", false, false, WithBlend(BlendColorDodge, SETint(Hex(0xFF6600)).Strength(0.5))},
-		{"Tnt×Burn", false, false, WithBlend(BlendColorBurn, SETint(Hex(0xFF6600)).Strength(0.5))},
+		{"Tnt×Dodge", false, false, WithBlend(BlendDodge, SETint(Hex(0xFF6600)).Strength(0.5))},
+		{"Tnt×Burn", false, false, WithBlend(BlendBurn, SETint(Hex(0xFF6600)).Strength(0.5))},
 		// custom effects — local implementations showing how to build your own
 		{"Matrix", false, true, matrixEffect{density: 2}},
 		{"Drop Shadow", false, false, dropShadowEffect{offsetX: 1, offsetY: 1, strength: 0.6}},

@@ -44,15 +44,15 @@ func TestColor(t *testing.T) {
 		}
 	})
 
-	t.Run("BasicColor", func(t *testing.T) {
-		c := BasicColor(5)
+	t.Run("Ansi16", func(t *testing.T) {
+		c := Ansi16(5)
 		if c.Mode != Color16 || c.Index != 5 {
 			t.Errorf("expected Color16 with index 5, got %v/%d", c.Mode, c.Index)
 		}
 	})
 
-	t.Run("PaletteColor", func(t *testing.T) {
-		c := PaletteColor(200)
+	t.Run("Ansi256", func(t *testing.T) {
+		c := Ansi256(200)
 		if c.Mode != Color256 || c.Index != 200 {
 			t.Errorf("expected Color256 with index 200, got %v/%d", c.Mode, c.Index)
 		}
@@ -85,34 +85,34 @@ func TestColor(t *testing.T) {
 		}
 	})
 
-	t.Run("LerpColor", func(t *testing.T) {
+	t.Run("Lerp", func(t *testing.T) {
 		black := RGB(0, 0, 0)
 		white := RGB(255, 255, 255)
 
 		// t=0 should return first color
-		c := LerpColor(black, white, 0)
+		c := Lerp(black, white, 0)
 		if c.R != 0 || c.G != 0 || c.B != 0 {
 			t.Errorf("t=0: expected black, got %+v", c)
 		}
 
 		// t=1 should return second color
-		c = LerpColor(black, white, 1)
+		c = Lerp(black, white, 1)
 		if c.R != 255 || c.G != 255 || c.B != 255 {
 			t.Errorf("t=1: expected white, got %+v", c)
 		}
 
 		// t=0.5 should return midpoint
-		c = LerpColor(black, white, 0.5)
-		if c.R != 127 || c.G != 127 || c.B != 127 {
-			t.Errorf("t=0.5: expected gray(127), got %+v", c)
+		c = Lerp(black, white, 0.5)
+		if c.R != 128 || c.G != 128 || c.B != 128 {
+			t.Errorf("t=0.5: expected gray(128), got %+v", c)
 		}
 
 		// test clamping
-		c = LerpColor(black, white, -1)
+		c = Lerp(black, white, -1)
 		if c.R != 0 {
 			t.Errorf("t=-1: should clamp to 0, got %+v", c)
 		}
-		c = LerpColor(black, white, 2)
+		c = Lerp(black, white, 2)
 		if c.R != 255 {
 			t.Errorf("t=2: should clamp to 1, got %+v", c)
 		}

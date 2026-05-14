@@ -463,7 +463,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "One"}, {Name: "Two"}, {Name: "Three"}}
 		selected := 1
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Render: func(item *Item) Component {
@@ -498,7 +498,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "A"}, {Name: "B"}}
 		selected := 0
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Render: func(item *Item) Component {
@@ -539,7 +539,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "X"}}
 		selected := 0
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "→ ",
@@ -565,7 +565,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "A"}, {Name: "B"}, {Name: "C"}}
 		selected := 0
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Render: func(item *Item) Component {
@@ -627,7 +627,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}, {Name: "E"}}
 		selected := 0
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:      &items,
 			Selected:   &selected,
 			MaxVisible: 3, // Only show 3 items at a time
@@ -665,7 +665,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}, {Name: "E"}}
 		selected := 0
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:      &items,
 			Selected:   &selected,
 			MaxVisible: 3,
@@ -707,7 +707,7 @@ func TestSelectionList(t *testing.T) {
 		items := []Item{{Name: "A"}, {Name: "B"}, {Name: "C"}, {Name: "D"}, {Name: "E"}}
 		selected := 4 // Start at end
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:      &items,
 			Selected:   &selected,
 			MaxVisible: 3,
@@ -944,7 +944,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 			ForEach(&lines, func(dl *DisplayLine) Component {
 				return HBox(
 					Text(&dl.LineNum),
-					RichTextNode{Spans: &dl.Spans},
+					richTextNode{Spans: &dl.Spans},
 				)
 			}),
 		)
@@ -980,7 +980,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 
 		view := VBox(
 			ForEach(&lines, func(l *Line) Component {
-				return RichTextNode{Spans: &l.Spans}
+				return richTextNode{Spans: &l.Spans}
 			}),
 		)
 
@@ -1027,7 +1027,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 
 		view := VBox(
 			ForEach(&lines, func(dl *DisplayLine) Component {
-				return RichTextNode{Spans: &dl.Spans}
+				return richTextNode{Spans: &dl.Spans}
 			}),
 		)
 
@@ -1039,6 +1039,85 @@ func TestRichTextInsideForEach(t *testing.T) {
 		line0 := extractLine(buf, 0, 16)
 		if line0 != "normalselected  " {
 			t.Errorf("row 0: expected 'normalselected  ', got %q", line0)
+		}
+	})
+}
+
+func TestRichTextWrapsAcrossLines(t *testing.T) {
+	t.Run("word wraps static spans", func(t *testing.T) {
+		view := VBox.Width(12)(
+			richTextNode{Spans: []Span{
+				{Text: "hello", Style: Style{Attr: AttrBold}},
+				{Text: " world again", Style: Style{Attr: AttrDim}},
+			}},
+			Text("after"),
+		)
+
+		tmpl := Build(view)
+		buf := NewBuffer(20, 5)
+		tmpl.Execute(buf, 20, 5)
+
+		if line := extractLine(buf, 0, 12); line != "hello world " {
+			t.Errorf("row 0 expected wrapped prefix, got %q", line)
+		}
+		if line := extractLine(buf, 1, 12); line != "again       " {
+			t.Errorf("row 1 expected wrapped suffix, got %q", line)
+		}
+		if line := extractLine(buf, 2, 12); line != "after       " {
+			t.Errorf("row 2 expected following content after rich text height, got %q", line)
+		}
+	})
+
+	t.Run("preserves span styles after wrapping", func(t *testing.T) {
+		view := VBox.Width(10)(
+			richTextNode{Spans: []Span{
+				{Text: "plain ", Style: Style{}},
+				{Text: "selected", Style: Style{Attr: AttrInverse}},
+			}},
+		)
+
+		tmpl := Build(view)
+		buf := NewBuffer(20, 5)
+		tmpl.Execute(buf, 20, 5)
+
+		if line := extractLine(buf, 0, 10); line != "plain     " {
+			t.Errorf("row 0 expected first wrapped line, got %q", line)
+		}
+		if line := extractLine(buf, 1, 10); line != "selected  " {
+			t.Errorf("row 1 expected second wrapped line, got %q", line)
+		}
+		if !buf.cells[1*buf.width+0].Style.Attr.Has(AttrInverse) {
+			t.Errorf("expected wrapped styled span to keep inverse style")
+		}
+	})
+
+	t.Run("dynamic spans inside ForEach wrap to natural height", func(t *testing.T) {
+		type Line struct {
+			Spans []Span
+		}
+		lines := []Line{
+			{Spans: []Span{{Text: "one two three"}}},
+			{Spans: []Span{{Text: "four"}}},
+		}
+
+		view := VBox.Width(8)(
+			ForEach(&lines, func(line *Line) Component {
+				return richTextNode{Spans: &line.Spans}
+			}),
+		)
+
+		tmpl := Build(view)
+		buf := NewBuffer(20, 5)
+		tmpl.Execute(buf, 20, 5)
+
+		if line := extractLine(buf, 0, 8); line != "one two " {
+			t.Errorf("row 0 expected first wrapped line, got %q", line)
+		}
+		if line := extractLine(buf, 1, 8); line != "three   " {
+			t.Errorf("row 1 expected second wrapped line, got %q", line)
+		}
+		if line := extractLine(buf, 2, 8); line != "four    " {
+			t.Errorf("row 2 expected next ForEach item after wrapped height, got %q", line)
 		}
 	})
 }

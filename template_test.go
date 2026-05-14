@@ -1,6 +1,7 @@
 package glyph
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"strings"
@@ -827,6 +828,72 @@ func TestV2ForEach(t *testing.T) {
 	if got := buf.GetLine(4); got != "End" {
 		t.Errorf("line 4: got %q, want %q", got, "End")
 	}
+}
+
+func TestForEachHBoxSpaceUsesPerItemLayout(t *testing.T) {
+	items := []testItem{
+		{Name: "short"},
+		{Name: "much longer notification"},
+	}
+
+	tmpl := Build(VBox.Width(49)(
+		ForEach(&items, func(item *testItem) Component {
+			return HBox.Width(49)(
+				Space(),
+				Text("* "),
+				Text(&item.Name),
+			)
+		}),
+	))
+
+	buf := NewBuffer(49, 2)
+	tmpl.Execute(buf, 49, 2)
+
+	shortEnd := lastRuneX(buf, 0, 't')
+	longEnd := lastRuneX(buf, 1, 'n')
+	if shortEnd != 48 || longEnd != 48 {
+		t.Fatalf("line ends = short:%d long:%d\n%s", shortEnd, longEnd, buf.String())
+	}
+}
+
+func TestForEachMatchDynamicFGUsesPerItemValue(t *testing.T) {
+	type row struct {
+		Kind string
+	}
+	items := []row{
+		{Kind: "info"},
+		{Kind: "error"},
+	}
+
+	tmpl := Build(VBox(
+		ForEach(&items, func(item *row) Component {
+			return Text("*").FG(
+				Match(&item.Kind,
+					Eq("error", Red),
+				).Default(Blue),
+			)
+		}),
+	))
+
+	buf := NewBuffer(4, 2)
+	tmpl.Execute(buf, 4, 2)
+
+	if got := buf.Get(0, 0).Style.FG; got != Blue {
+		t.Fatalf("first row FG = %v, want Blue", got)
+	}
+	if got := buf.Get(0, 1).Style.FG; got != Red {
+		t.Fatalf("second row FG = %v, want Red", got)
+	}
+}
+
+func lastRuneX(buf *Buffer, y int, r rune) int {
+	last := -1
+	for x := 0; x < buf.Width(); x++ {
+		if buf.Get(x, y).Rune == r {
+			last = x
+		}
+	}
+	return last
 }
 
 func TestV2ForEachEmpty(t *testing.T) {
@@ -1683,8 +1750,8 @@ func TestForEachMultipleStringFields(t *testing.T) {
 	}
 }
 
-// TestSelectionListMultipleFields tests SelectionList with complex HBox render
-// SelectionList now supports complex layouts (HBox/VBox) in the Render function
+// TestSelectionListMultipleFields tests selectionList with complex HBox render
+// selectionList now supports complex layouts (HBox/VBox) in the Render function
 func TestSelectionListMultipleFields(t *testing.T) {
 	type Item struct {
 		Icon        string
@@ -1700,7 +1767,7 @@ func TestSelectionListMultipleFields(t *testing.T) {
 
 	selected := 0
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:      &items,
 		Selected:   &selected,
 		Marker:     "> ",
@@ -1722,9 +1789,9 @@ func TestSelectionListMultipleFields(t *testing.T) {
 	line1 := buf.GetLine(1)
 	line2 := buf.GetLine(2)
 
-	t.Logf("SelectionList Line 0: %q", line0)
-	t.Logf("SelectionList Line 1: %q", line1)
-	t.Logf("SelectionList Line 2: %q", line2)
+	t.Logf("selectionList Line 0: %q", line0)
+	t.Logf("selectionList Line 1: %q", line1)
+	t.Logf("selectionList Line 2: %q", line2)
 
 	// Verify that each line contains the expected content
 	// Line 0 is selected, should have "> " marker
@@ -1757,10 +1824,10 @@ func TestSelectionListDefaultStyle(t *testing.T) {
 	items := []string{"Apple", "Banana", "Cherry"}
 	selected := 1 // Banana selected
 
-	bgColor := PaletteColor(236)    // Default background
-	selectedBG := PaletteColor(240) // Selected background
+	bgColor := Ansi256(236)    // Default background
+	selectedBG := Ansi256(240) // Selected background
 
-	list := &SelectionList{
+	list := &selectionList{
 		Items:         &items,
 		Selected:      &selected,
 		Marker:        "> ",
@@ -2060,7 +2127,7 @@ func TestComplexNestedLayouts(t *testing.T) {
 		}
 	})
 
-	t.Run("SelectionList with deeply nested Render", func(t *testing.T) {
+	t.Run("selectionList with deeply nested Render", func(t *testing.T) {
 		type MenuItem struct {
 			Icon     string
 			Label    string
@@ -2074,7 +2141,7 @@ func TestComplexNestedLayouts(t *testing.T) {
 		}
 		selected := 1
 
-		list := &SelectionList{
+		list := &selectionList{
 			Items:      &items,
 			Selected:   &selected,
 			Marker:     "> ",
@@ -2282,7 +2349,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 			VBox.Width(10)(
 				Text("Sidebar"),
 			),
-			LayerView(layer).ViewWidth(30).ViewHeight(5),
+			LayerView(layer).Width(30).Height(5),
 		))
 
 		buf := NewBuffer(50, 6)
@@ -2319,7 +2386,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 			VBox.Border(BorderRounded).Grow(1)(
 				Text("Editor").FG(Cyan),
 				HRule(),
-				LayerView(layer).ViewHeight(8),
+				LayerView(layer).Height(8),
 			),
 		))
 
@@ -2357,7 +2424,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 		}
 	})
 
-	t.Run("LayerView with SelectionList sidebar", func(t *testing.T) {
+	t.Run("LayerView with selectionList sidebar", func(t *testing.T) {
 		// This is the exact pattern that was causing issues
 		layer := NewLayer()
 		layer.EnsureSize(50, 10)
@@ -2378,7 +2445,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 		tmpl := Build(HBox(
 			VBox.Border(BorderSingle).Width(20)(
 				Text("Browser"),
-				&SelectionList{
+				&selectionList{
 					Items:    &items,
 					Selected: &selected,
 					Marker:   "> ",
@@ -2387,7 +2454,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 					},
 				},
 			),
-			LayerView(layer).ViewWidth(40).ViewHeight(6).Grow(1),
+			LayerView(layer).Width(40).Height(6).Grow(1),
 		))
 
 		buf := NewBuffer(70, 10)
@@ -2425,7 +2492,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 				),
 			),
 			// Editor always visible
-			LayerView(layer).ViewWidth(40).ViewHeight(5).Grow(1),
+			LayerView(layer).Width(40).Height(5).Grow(1),
 		))
 
 		buf := NewBuffer(60, 6)
@@ -2489,7 +2556,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 		}
 		selected := 0
 
-		sidebarList := &SelectionList{
+		sidebarList := &selectionList{
 			Items:    &items,
 			Selected: &selected,
 			Marker:   "> ",
@@ -2514,7 +2581,7 @@ func TestHBoxWithLayerView(t *testing.T) {
 				VBox.Border(BorderRounded).Grow(1)(
 					Text("Editor"),
 					HRule(),
-					LayerView(layer).ViewHeight(10),
+					LayerView(layer).Height(10),
 				),
 			),
 		))
@@ -3606,7 +3673,7 @@ func TestWidgetReceivesAvailWidth(t *testing.T) {
 		// Track what width the measure function receives
 		var receivedWidth int16
 
-		widget := Widget(
+		widget := Custom(
 			func(availW int16) (w, h int16) {
 				receivedWidth = availW
 				return availW, 1 // fill width, 1 line tall
@@ -3648,7 +3715,7 @@ func TestWidgetReceivesAvailWidth(t *testing.T) {
 
 	t.Run("widget with fixed width in HBox", func(t *testing.T) {
 		// Widget that returns fixed width
-		widget := Widget(
+		widget := Custom(
 			func(availW int16) (w, h int16) {
 				return 10, 1 // fixed 10 chars wide
 			},
@@ -3683,7 +3750,7 @@ func TestWidgetReceivesAvailWidth(t *testing.T) {
 	t.Run("widget inside bordered VBox", func(t *testing.T) {
 		var receivedWidth int16
 
-		widget := Widget(
+		widget := Custom(
 			func(availW int16) (w, h int16) {
 				receivedWidth = availW
 				return availW, 1
@@ -3905,7 +3972,7 @@ func TestAutoTableReactive(t *testing.T) {
 			{"second", "b"},
 		}
 
-		altBG := PaletteColor(235)
+		altBG := Ansi256(235)
 		tmpl := Build(AutoTable(&rows).
 			AltRowStyle(Style{BG: altBG}))
 
@@ -4504,8 +4571,8 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 	t.Run("custom format", func(t *testing.T) {
 		tmpl := Build(AutoTable(&stocks).
-			Column("Price", Currency("$", 2)).
-			Column("Volume", Number(0)))
+			Column("Price", FormatCurrency("$", 2)).
+			Column("Volume", FormatNumber(0)))
 		buf := NewBuffer(80, 10)
 		tmpl.Execute(buf, 80, 10)
 
@@ -4520,7 +4587,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 	t.Run("custom style per cell", func(t *testing.T) {
 		tmpl := Build(AutoTable(&stocks).
-			Column("Change", PercentChange(1)))
+			Column("Change", FormatPercentChange(1)))
 		buf := NewBuffer(80, 10)
 		tmpl.Execute(buf, 80, 10)
 
@@ -4564,7 +4631,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 	t.Run("bool formatting", func(t *testing.T) {
 		tmpl := Build(AutoTable(&stocks).
-			Column("Active", Bool("YES", "NO")))
+			Column("Active", FormatBool("YES", "NO")))
 		buf := NewBuffer(80, 10)
 		tmpl.Execute(buf, 80, 10)
 
@@ -4627,7 +4694,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 			{"AAPL", 178.92, 2.34, 52000000, true},
 		}
 		tmpl := Build(AutoTable(staticStocks).
-			Column("Price", Currency("$", 2)))
+			Column("Price", FormatCurrency("$", 2)))
 		buf := NewBuffer(80, 10)
 		tmpl.Execute(buf, 80, 10)
 
@@ -4642,7 +4709,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 		customGreen := Style{FG: Green}
 		tmpl := Build(AutoTable(&stocks).
 			Column("Price", func(c *ColumnConfig) {
-				Currency("$", 2)(c) // base preset
+				FormatCurrency("$", 2)(c) // base preset
 				c.Style(func(v any) Style { return customGreen })
 			}))
 		buf := NewBuffer(80, 10)
@@ -4669,7 +4736,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 		// right-aligned column should have right-aligned header
 		tmpl := Build(AutoTable(&stocks).
 			Columns("Symbol", "Price").
-			Column("Price", Currency("$", 2)))
+			Column("Price", FormatCurrency("$", 2)))
 		buf := NewBuffer(40, 10)
 		tmpl.Execute(buf, 40, 10)
 
@@ -4695,7 +4762,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 		tmpl := Build(AutoTable(&rows).
 			Columns("Label", "Active").
-			Column("Active", Bool("Y", "N")))
+			Column("Active", FormatBool("Y", "N")))
 		// use tight width to avoid proportional expansion muddling positions
 		buf := NewBuffer(14, 5)
 		tmpl.Execute(buf, 14, 5)
@@ -4734,7 +4801,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 		tmpl := Build(AutoTable(rows).
 			Columns("Label", "Active").
-			Column("Active", Bool("Y", "N")))
+			Column("Active", FormatBool("Y", "N")))
 		buf := NewBuffer(14, 5)
 		tmpl.Execute(buf, 14, 5)
 
@@ -4770,7 +4837,7 @@ func TestAutoTableColumnConfig(t *testing.T) {
 
 		tmpl := Build(AutoTable(&rows).
 			Columns("Name", "Value").
-			Column("Value", Number(0)))
+			Column("Value", FormatNumber(0)))
 		buf := NewBuffer(18, 5)
 		tmpl.Execute(buf, 18, 5)
 
@@ -4814,12 +4881,12 @@ func TestV2SplitLayout(t *testing.T) {
 	view := VBox(
 		HBox(
 			VBox(
-				LayerView(layer1).ViewHeight(5),
-				RichTextNode{Spans: spans1},
+				LayerView(layer1).Height(5),
+				richTextNode{Spans: spans1},
 			),
 			VBox(
-				LayerView(layer2).ViewHeight(5),
-				RichTextNode{Spans: spans2},
+				LayerView(layer2).Height(5),
+				richTextNode{Spans: spans2},
 			),
 		),
 		Text("Global status"),
@@ -5895,13 +5962,80 @@ func TestAnimate(t *testing.T) {
 		}
 	})
 
+	t.Run("Overlay can place content at screen edges and corners", func(t *testing.T) {
+		tests := []struct {
+			name string
+			view Component
+			x    int
+			y    int
+		}{
+			{"centered", Overlay.Centered()(Text("xy")), 9, 2},
+			{"top", Overlay.Top()(Text("xy")), 9, 0},
+			{"bottom", Overlay.Bottom()(Text("xy")), 9, 4},
+			{"left", Overlay.Left()(Text("xy")), 0, 2},
+			{"right", Overlay.Right()(Text("xy")), 18, 2},
+			{"top-left", Overlay.TopLeft()(Text("xy")), 0, 0},
+			{"top-right", Overlay.TopRight()(Text("xy")), 18, 0},
+			{"bottom-left", Overlay.BottomLeft()(Text("xy")), 0, 4},
+			{"bottom-right", Overlay.BottomRight()(Text("xy")), 18, 4},
+		}
+
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				tmpl := Build(VBox(Text("base"), tt.view))
+				buf := NewBuffer(20, 5)
+
+				tmpl.Execute(buf, 20, 5)
+				if got := buf.Get(tt.x, tt.y).Rune; got != 'x' {
+					t.Fatalf("expected overlay at %d,%d, got %q", tt.x, tt.y, got)
+				}
+			})
+		}
+	})
+
+	t.Run("BottomRight overlay renders dynamic ForEach content", func(t *testing.T) {
+		type notice struct {
+			Text    string
+			Opacity float64
+		}
+		visible := true
+		items := []notice{{Text: "synced", Opacity: 1}}
+		tmpl := Build(VBox(
+			Text("base"),
+			If(&visible).Then(
+				Overlay.BottomRight().Offset(-2, -2)(
+					VBox.Width(12).FitContent().Gap(1)(
+						ForEach(&items, func(item *notice) Component {
+							return Text(&item.Text).
+								Width(12).
+								Opacity(&item.Opacity).
+								Style(Style{Align: AlignRight})
+						}),
+					),
+				),
+			),
+		))
+		buf := NewBuffer(20, 5)
+
+		tmpl.Execute(buf, 20, 5)
+		if got := buf.GetLine(2); got != "            synced" {
+			t.Fatalf("line 2 = %q, want bottom-right notice\n0:%q\n1:%q\n2:%q\n3:%q\n4:%q",
+				got,
+				buf.GetLine(0),
+				buf.GetLine(1),
+				buf.GetLine(2),
+				buf.GetLine(3),
+				buf.GetLine(4),
+			)
+		}
+	})
+
 	t.Run("Out in overlay child retains If branch", func(t *testing.T) {
 		active := true
 		tmpl := Build(VBox(
 			Text("X").FG(RGB(200, 200, 200)),
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(8).Height(1)(
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).Height(1)(
 					Text("card"),
 					ScreenEffect(
 						SEVignette().Smooth().
@@ -5911,7 +6045,7 @@ func TestAnimate(t *testing.T) {
 							),
 					),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(20, 5)
 		pctx := PostContext{Width: 20, Height: 5}
@@ -5944,14 +6078,298 @@ func TestAnimate(t *testing.T) {
 		}
 	})
 
+	t.Run("Overlay child ref opacity tracks Out", func(t *testing.T) {
+		active := true
+		ref := NodeRef{}
+		tmpl := Build(VBox(
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).Height(1).
+					NodeRef(&ref).
+					Opacity(In(1.0).Out(Animate.Duration(120*time.Millisecond)(0.0)))(
+					Text("card"),
+					ScreenEffect(SEDropShadow().Focus(&ref)),
+				),
+			)),
+		))
+		buf := NewBuffer(20, 5)
+
+		tmpl.Execute(buf, 20, 5)
+		tmpl.Execute(buf, 20, 5)
+		if ref.Opacity < 0.99 {
+			t.Fatalf("expected active ref opacity near 1, got %f", ref.Opacity)
+		}
+
+		active = false
+		tmpl.Execute(buf, 20, 5)
+		start := ref.Opacity
+		time.Sleep(70 * time.Millisecond)
+		tmpl.Execute(buf, 20, 5)
+		mid := ref.Opacity
+		if mid >= start {
+			t.Fatalf("expected ref opacity to fall during exit, start=%f mid=%f", start, mid)
+		}
+		if mid <= 0 {
+			t.Fatalf("expected ref opacity to fade before branch drops, got %f", mid)
+		}
+	})
+
+	t.Run("Overlay child drop shadow fades with ref Out", func(t *testing.T) {
+		active := true
+		ref := NodeRef{}
+		bg := RGB(160, 160, 160)
+		tmpl := Build(VBox(
+			VBox.Width(20).Height(5).Fill(bg)(),
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).
+					Fill(RGB(20, 20, 20)).
+					NodeRef(&ref).
+					Opacity(In(1.0).Out(Animate.Duration(120*time.Millisecond)(0.0)))(
+					Text("card"),
+					ScreenEffect(SEDropShadow().Focus(&ref).Strength(1).Radius(4)),
+				),
+			)),
+		))
+		buf := NewBuffer(20, 5)
+		pctx := PostContext{Width: 20, Height: 5, DefaultFG: bg, DefaultBG: bg}
+		distance := func(a, b Color) int {
+			dr := int(a.R) - int(b.R)
+			if dr < 0 {
+				dr = -dr
+			}
+			dg := int(a.G) - int(b.G)
+			if dg < 0 {
+				dg = -dg
+			}
+			db := int(a.B) - int(b.B)
+			if db < 0 {
+				db = -db
+			}
+			return dr + dg + db
+		}
+		render := func() (Color, int, int, float64) {
+			buf.Clear()
+			for y := range 5 {
+				for x := range 20 {
+					buf.Set(x, y, Cell{Rune: ' ', Style: Style{FG: bg, BG: bg}})
+				}
+			}
+			tmpl.Execute(buf, 20, 5)
+			effects := tmpl.ScreenEffects()
+			for _, eff := range effects {
+				eff.Apply(buf, pctx)
+			}
+			maxDist := 0
+			for y := range 5 {
+				for x := range 20 {
+					if inRect(x, y, &ref) {
+						continue
+					}
+					maxDist = max(maxDist, distance(buf.Get(x, y).Style.BG, bg))
+				}
+			}
+			return buf.Get(ref.X+ref.W, ref.Y).Style.BG, maxDist, len(effects), ref.Opacity
+		}
+
+		render()
+		opaque, opaqueDist, opaqueEffects, opaqueOpacity := render()
+		active = false
+		start, startDist, _, _ := render()
+		time.Sleep(70 * time.Millisecond)
+		mid, midDist, _, _ := render()
+
+		if opaqueEffects != 1 {
+			t.Fatalf("expected one shadow effect, got %d", opaqueEffects)
+		}
+		if opaqueDist == 0 {
+			t.Fatalf("expected opaque card to cast a visible shadow, opacity=%f ref=%+v sample=%#v", opaqueOpacity, ref, opaque)
+		}
+		if midDist >= startDist {
+			t.Fatalf("expected shadow to move back toward backing during exit, start=%#v/%d mid=%#v/%d backing=%#v", start, startDist, mid, midDist, bg)
+		}
+	})
+
+	t.Run("Overlay child remains stronger than shadow while both fade", func(t *testing.T) {
+		active := true
+		ref := NodeRef{}
+		bg := RGB(160, 160, 160)
+		panel := RGB(0, 0, 0)
+		tmpl := Build(VBox(
+			VBox.Width(40).Height(10).Fill(bg)(),
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(12).
+					Fill(panel).
+					NodeRef(&ref).
+					Opacity(In(1.0).Out(Animate.Duration(300*time.Millisecond)(0.0)))(
+					Text("card").FG(RGB(220, 220, 220)),
+					ScreenEffect(
+						SEVignette().Dodge(&ref).Smooth().Strength(
+							In(0.55).Out(Animate.Duration(300*time.Millisecond)(0.0)),
+						),
+						SEDropShadow().Focus(&ref).Strength(0.28).Radius(10),
+					),
+				),
+			)),
+		))
+		buf := NewBuffer(40, 10)
+		pctx := PostContext{Width: 40, Height: 10, DefaultFG: bg, DefaultBG: bg}
+		distance := func(a, b Color) int {
+			dr := int(a.R) - int(b.R)
+			if dr < 0 {
+				dr = -dr
+			}
+			dg := int(a.G) - int(b.G)
+			if dg < 0 {
+				dg = -dg
+			}
+			db := int(a.B) - int(b.B)
+			if db < 0 {
+				db = -db
+			}
+			return dr + dg + db
+		}
+		render := func() (float64, int, int) {
+			buf.Clear()
+			tmpl.Execute(buf, 40, 10)
+			for _, eff := range tmpl.ScreenEffects() {
+				eff.Apply(buf, pctx)
+			}
+
+			inside := 0
+			for y := ref.Y; y < ref.Y+ref.H; y++ {
+				for x := ref.X; x < ref.X+ref.W; x++ {
+					inside = max(inside, distance(buf.Get(x, y).Style.BG, bg))
+				}
+			}
+			shadow := 0
+			radius := 10
+			for y := max(0, ref.Y-radius); y < min(10, ref.Y+ref.H+radius); y++ {
+				for x := max(0, ref.X-radius); x < min(40, ref.X+ref.W+radius); x++ {
+					if inRect(x, y, &ref) {
+						continue
+					}
+					shadow = max(shadow, distance(buf.Get(x, y).Style.BG, bg))
+				}
+			}
+			return ref.Opacity, inside, shadow
+		}
+
+		render()
+		active = false
+		for i := 0; i < 4; i++ {
+			time.Sleep(80 * time.Millisecond)
+			opacity, inside, shadow := render()
+			if opacity <= 0 {
+				continue
+			}
+			if inside < shadow {
+				t.Fatalf("card should not become less visible than shadow while opacity is %f: inside=%d shadow=%d ref=%+v", opacity, inside, shadow, ref)
+			}
+		}
+	})
+
+	t.Run("App render keeps fading card stronger than shadow", func(t *testing.T) {
+		active := true
+		ref := NodeRef{}
+		bg := RGB(25, 27, 27)
+		panel := RGB(8, 8, 8)
+		tmpl := Build(VBox.Fill(bg)(
+			VBox.Width(40).Height(10).Fill(bg)(),
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(12).
+					Fill(panel).
+					NodeRef(&ref).
+					Opacity(In(1.0).Out(Animate.Duration(300*time.Millisecond)(0.0)))(
+					Text("card").FG(RGB(220, 220, 220)),
+					ScreenEffect(
+						SEVignette().Dodge(&ref).Smooth().Strength(
+							In(0.55).Out(Animate.Duration(300*time.Millisecond)(0.0)),
+						),
+						SEDropShadow().Focus(&ref).Strength(0.28).Radius(10),
+					),
+				),
+			)),
+		))
+		var out bytes.Buffer
+		screen := NewScreen(&out)
+		screen.width = 40
+		screen.height = 10
+		screen.front.Resize(40, 10)
+		screen.back.Resize(40, 10)
+		app := &App{
+			screen:       screen,
+			template:     tmpl,
+			pool:         NewBufferPool(40, 10),
+			renderChan:   make(chan struct{}, 1),
+			defaultStyle: Style{FG: RGB(200, 200, 200), BG: bg},
+		}
+		tmpl.SetApp(app)
+		for _, buf := range app.pool.buffers {
+			buf.defaultStyle = app.defaultStyle
+			buf.Clear()
+		}
+		screen.front.defaultStyle = app.defaultStyle
+		screen.back.defaultStyle = app.defaultStyle
+
+		distance := func(a, b Color) int {
+			dr := int(a.R) - int(b.R)
+			if dr < 0 {
+				dr = -dr
+			}
+			dg := int(a.G) - int(b.G)
+			if dg < 0 {
+				dg = -dg
+			}
+			db := int(a.B) - int(b.B)
+			if db < 0 {
+				db = -db
+			}
+			return dr + dg + db
+		}
+		strengths := func() (float64, int, int) {
+			inside := 0
+			for y := ref.Y; y < ref.Y+ref.H; y++ {
+				for x := ref.X; x < ref.X+ref.W; x++ {
+					inside = max(inside, distance(screen.front.Get(x, y).Style.BG, bg))
+				}
+			}
+			shadow := 0
+			radius := 10
+			for y := max(0, ref.Y-radius); y < min(10, ref.Y+ref.H+radius); y++ {
+				for x := max(0, ref.X-radius); x < min(40, ref.X+ref.W+radius); x++ {
+					if inRect(x, y, &ref) {
+						continue
+					}
+					shadow = max(shadow, distance(screen.front.Get(x, y).Style.BG, bg))
+				}
+			}
+			return ref.Opacity, inside, shadow
+		}
+
+		app.render()
+		app.render()
+		active = false
+		app.render()
+		time.Sleep(150 * time.Millisecond)
+		app.render()
+		opacity, inside, shadow := strengths()
+		if opacity <= 0 || opacity >= 1 {
+			t.Fatalf("expected mid-exit opacity, got %f", opacity)
+		}
+		if shadow == 0 {
+			t.Fatalf("expected visible shadow during exit, opacity=%f", opacity)
+		}
+		if inside < shadow {
+			t.Fatalf("expected app-rendered card to remain at least as strong as shadow, opacity=%f inside=%d shadow=%d", opacity, inside, shadow)
+		}
+	})
+
 	t.Run("multiple Out screen effects in overlay child share exit lease", func(t *testing.T) {
 		active := true
 		ref := NodeRef{}
 		tmpl := Build(VBox(
 			Text("X").FG(RGB(200, 200, 200)),
-			If(&active).Then(OverlayNode{
-				Centered: true,
-				Child: VBox.Width(8).Height(1).NodeRef(&ref)(
+			If(&active).Then(Overlay.Centered()(
+				VBox.Width(8).Height(1).NodeRef(&ref)(
 					Text("card"),
 					ScreenEffect(
 						SEVignette().Dodge(&ref).
@@ -5966,7 +6384,7 @@ func TestAnimate(t *testing.T) {
 							),
 					),
 				),
-			}),
+			)),
 		))
 		buf := NewBuffer(20, 5)
 		pctx := PostContext{Width: 20, Height: 5}

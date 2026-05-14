@@ -144,7 +144,7 @@ func TestRenderPathAB_OverlayAndScreenEffectCollection(t *testing.T) {
 	directTmpl, _, directLines := renderParityLines(
 		VBox(
 			Text("base"),
-			Overlay.At(0, 0)(Text("overlay")),
+			Overlay.At(0, 1)(Text("overlay")),
 			ScreenEffect(effect),
 		),
 		20, 3,
@@ -154,7 +154,7 @@ func TestRenderPathAB_OverlayAndScreenEffectCollection(t *testing.T) {
 			ForEach(&items, func(item *string) Component {
 				return VBox(
 					Text("base"),
-					Overlay.At(0, 0)(Text("overlay")),
+					Overlay.At(0, 1)(Text("overlay")),
 					ScreenEffect(effect),
 				)
 			}),

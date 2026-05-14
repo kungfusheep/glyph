@@ -625,6 +625,10 @@ func (b *Buffer) ClearDirtyFlags() {
 // Useful after external modifications or for testing.
 func (b *Buffer) MarkAllDirty() {
 	b.allDirty = true
+	b.dirtyMaxY = b.height - 1
+	for i := range b.dirtyRows {
+		b.dirtyRows[i] = true
+	}
 }
 
 // ResetDirtyMax resets the dirty tracking without clearing content.

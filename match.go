@@ -61,10 +61,10 @@ func Where[T comparable](fn func(T) bool, node any) MatchCase[T] {
 	return MatchCase[T]{op: matchOpWhere, pred: fn, node: node}
 }
 
-// MatchNode is the compiled form of a Match, ready for template evaluation.
+// MatchC is the compiled form of a Match, ready for template evaluation.
 // T is comparable; ordered operators (Gt/Lt/Gte/Lte) constrain themselves
 // to cmp.Ordered at the case level.
-type MatchNode[T comparable] struct {
+type MatchC[T comparable] struct {
 	ptr       *T
 	offset    uintptr
 	hasOffset bool
@@ -81,19 +81,19 @@ type MatchNode[T comparable] struct {
 //	    Gt(70.0, Text("WARNING").FG(Yellow)),
 //	    Where(func(v float64) bool { return v < 10 }, Text("COLD").FG(Blue)),
 //	).Default(Text("OK").FG(Green))
-func Match[T comparable](ptr *T, cases ...MatchCase[T]) *MatchNode[T] {
-	m := &MatchNode[T]{ptr: ptr}
+func Match[T comparable](ptr *T, cases ...MatchCase[T]) *MatchC[T] {
+	m := &MatchC[T]{ptr: ptr}
 	m.cases = append(m.cases, cases...)
 	return m
 }
 
 // Default sets the fallback node when no case matches.
-func (m *MatchNode[T]) Default(node any) *MatchNode[T] {
+func (m *MatchC[T]) Default(node any) *MatchC[T] {
 	m.def = node
 	return m
 }
 
-func (m *MatchNode[T]) evaluate(v T) int {
+func (m *MatchC[T]) evaluate(v T) int {
 	for i, c := range m.cases {
 		if c.matchWithOrdered(v) {
 			return i
@@ -112,11 +112,11 @@ type matchNodeInterface interface {
 	setPtrOffset(uintptr)
 }
 
-func (m *MatchNode[T]) getMatchIndex() int {
+func (m *MatchC[T]) getMatchIndex() int {
 	return m.evaluate(*m.ptr)
 }
 
-func (m *MatchNode[T]) getMatchIndexWithBase(base unsafe.Pointer) int {
+func (m *MatchC[T]) getMatchIndexWithBase(base unsafe.Pointer) int {
 	var ptr *T
 	if base != nil && m.hasOffset {
 		ptr = (*T)(unsafe.Add(base, m.offset))
@@ -126,7 +126,7 @@ func (m *MatchNode[T]) getMatchIndexWithBase(base unsafe.Pointer) int {
 	return m.evaluate(*ptr)
 }
 
-func (m *MatchNode[T]) getCaseNodes() []any {
+func (m *MatchC[T]) getCaseNodes() []any {
 	nodes := make([]any, len(m.cases))
 	for i, c := range m.cases {
 		nodes[i] = c.node
@@ -134,20 +134,20 @@ func (m *MatchNode[T]) getCaseNodes() []any {
 	return nodes
 }
 
-func (m *MatchNode[T]) getDefaultNode() any {
+func (m *MatchC[T]) getDefaultNode() any {
 	return m.def
 }
 
-func (m *MatchNode[T]) getPtrAddr() uintptr {
+func (m *MatchC[T]) getPtrAddr() uintptr {
 	return uintptr(unsafe.Pointer(m.ptr))
 }
 
-func (m *MatchNode[T]) setPtrOffset(off uintptr) {
+func (m *MatchC[T]) setPtrOffset(off uintptr) {
 	m.offset = off
 	m.hasOffset = true
 }
 
-var _ matchNodeInterface = (*MatchNode[int])(nil)
+var _ matchNodeInterface = (*MatchC[int])(nil)
 
 func (c *MatchCase[T]) matchWithOrdered(v T) bool {
 	switch c.op {

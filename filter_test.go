@@ -7,7 +7,7 @@ import (
 
 func TestFilterBasic(t *testing.T) {
 	items := []string{"alpha", "bravo", "charlie", "delta", "echo"}
-	f := NewFilter(&items, func(s *string) string { return *s })
+	f := Filter(&items, func(s *string) string { return *s })
 
 	t.Run("initial state has all items", func(t *testing.T) {
 		if f.Len() != 5 {
@@ -89,7 +89,7 @@ func TestFilterStruct(t *testing.T) {
 		{"cpu-2024-01-01", "payment-service"},
 	}
 
-	f := NewFilter(&items, func(p *profile) string { return p.name + " " + p.service })
+	f := Filter(&items, func(p *profile) string { return p.name + " " + p.service })
 
 	t.Run("filter by service", func(t *testing.T) {
 		f.Update("gateway")
@@ -134,7 +134,7 @@ func TestFilterItemsReflectSourceMutations(t *testing.T) {
 		{"build", "pending"},
 		{"test", "pending"},
 	}
-	f := NewFilter(&items, func(t *task) string { return t.name + " " + t.status })
+	f := Filter(&items, func(t *task) string { return t.name + " " + t.status })
 
 	// no filter active — all items visible
 	f.Reset()
@@ -170,7 +170,7 @@ func TestFilterItemsReflectSourceMutations(t *testing.T) {
 
 func TestFilterOriginalBounds(t *testing.T) {
 	items := []string{"a", "b", "c"}
-	f := NewFilter(&items, func(s *string) string { return *s })
+	f := Filter(&items, func(s *string) string { return *s })
 
 	if f.Original(-1) != nil {
 		t.Error("negative index should return nil")
@@ -192,7 +192,7 @@ func TestFilterRanking(t *testing.T) {
 		"abc",        // exact match, should rank highest
 		"xxabcxxxxx", // abc present but longer
 	}
-	f := NewFilter(&items, func(s *string) string { return *s })
+	f := Filter(&items, func(s *string) string { return *s })
 
 	f.Update("abc")
 	if f.Len() != 3 {
@@ -206,7 +206,7 @@ func TestFilterRanking(t *testing.T) {
 
 func TestFilterSourceChanges(t *testing.T) {
 	items := []string{"alpha", "bravo"}
-	f := NewFilter(&items, func(s *string) string { return *s })
+	f := Filter(&items, func(s *string) string { return *s })
 
 	// add items to source
 	items = append(items, "charlie")
@@ -218,7 +218,7 @@ func TestFilterSourceChanges(t *testing.T) {
 
 	// proper way: mutate through pointer
 	items2 := []string{"alpha", "bravo"}
-	f2 := NewFilter(&items2, func(s *string) string { return *s })
+	f2 := Filter(&items2, func(s *string) string { return *s })
 	items2 = append(items2, "charlie")
 	f2.Reset()
 	// items2 may or may not have reallocated, but f2.source points at items2
@@ -301,6 +301,32 @@ func TestFilterListDefaultRenderShowsStringItems(t *testing.T) {
 	}
 	if line := buf.GetLine(3); !contains(line, "  THROT") {
 		t.Errorf("expected second item text, got %q", line)
+	}
+}
+
+func TestFilterListSelectedStyleFillsCustomRowWidth(t *testing.T) {
+	items := []string{"Compose New", "Resume Draft"}
+	selectedBG := Hex(0x333333)
+	fl := FilterList(&items, func(s *string) string { return *s }).
+		Marker("  ").
+		SelectedStyle(Style{BG: selectedBG}).
+		Render(func(s *string) Component {
+			return VBox.PaddingVH(1, 2)(
+				Text(s),
+				Text("compose").Dim(),
+			)
+		})
+
+	tmpl := Build(VBox.Width(40).Fill(Hex(0x111111))(fl))
+	buf := NewBuffer(40, 8)
+	tmpl.Execute(buf, 40, 8)
+
+	for _, y := range []int{2, 3} {
+		for x := range 40 {
+			if got := buf.Get(x, y).Style.BG; got != selectedBG {
+				t.Fatalf("expected selected row background at %d,%d to be %v, got %v", x, y, selectedBG, got)
+			}
+		}
 	}
 }
 
@@ -436,7 +462,7 @@ func BenchmarkFilterUpdate(b *testing.B) {
 	for i := range items {
 		items[i] = "prefix/service-name/instance-id/heap/profile_" + string(rune('a'+i%26)) + ".pb.gz"
 	}
-	f := NewFilter(&items, func(s *string) string { return *s })
+	f := Filter(&items, func(s *string) string { return *s })
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

@@ -165,9 +165,9 @@ func main() {
 	var mu sync.Mutex
 
 	// Colors
-	headerBG := PaletteColor(236)
-	rowBG := PaletteColor(234)
-	altRowBG := PaletteColor(235)
+	headerBG := Ansi256(236)
+	rowBG := Ansi256(234)
+	altRowBG := Ansi256(235)
 
 	// Column widths
 	const (
@@ -215,11 +215,11 @@ func main() {
 		} else if m.changeVal < 0 {
 			changeColor = RGB(255, 80, 80)
 		} else {
-			changeColor = PaletteColor(245)
+			changeColor = Ansi256(245)
 		}
 
 		// Sparkline widget
-		spark := Widget(
+		spark := Custom(
 			func(availW int16) (w, h int16) { return colSpark, 1 },
 			func(buf *Buffer, x, y, w, h int16) {
 				data := m.sparkline()
@@ -258,7 +258,7 @@ func main() {
 					}
 
 					// Color gradient based on position in range
-					color := LerpColor(RGB(255, 100, 100), RGB(100, 255, 100), norm)
+					color := Lerp(RGB(255, 100, 100), RGB(100, 255, 100), norm)
 					buf.Set(int(x)+i, int(y), Cell{Rune: chars[idx], Style: Style{FG: color, BG: bg}})
 				}
 			},
@@ -269,13 +269,13 @@ func main() {
 			Text(&m.Price).Width(colPrice).FG(BrightWhite),
 			Text(&m.Change).Width(colChange).FG(changeColor),
 			Text(&m.ChangePct).Width(colPct).FG(changeColor),
-			Text(&m.Bid).Width(colBid).FG(PaletteColor(250)),
-			Text(&m.Ask).Width(colAsk).FG(PaletteColor(250)),
-			Text(&m.Spread).Width(colSpread).FG(PaletteColor(245)),
-			Text(&m.Volume).Width(colVolume).FG(PaletteColor(245)),
+			Text(&m.Bid).Width(colBid).FG(Ansi256(250)),
+			Text(&m.Ask).Width(colAsk).FG(Ansi256(250)),
+			Text(&m.Spread).Width(colSpread).FG(Ansi256(245)),
+			Text(&m.Volume).Width(colVolume).FG(Ansi256(245)),
 			Text(&m.High).Width(colHigh).FG(RGB(100, 255, 100)),
 			Text(&m.Low).Width(colLow).FG(RGB(255, 100, 100)),
-			Text(&m.LastTrade).Width(colTime).FG(PaletteColor(240)),
+			Text(&m.LastTrade).Width(colTime).FG(Ansi256(240)),
 			spark,
 		)
 	}
@@ -296,7 +296,7 @@ func main() {
 	}
 	updateTicker()
 
-	tickerWidget := Widget(
+	tickerWidget := Custom(
 		func(availW int16) (w, h int16) { return availW, 1 },
 		func(buf *Buffer, x, y, w, h int16) {
 			text := tickerText
@@ -307,16 +307,16 @@ func main() {
 				ch := []rune(text)[idx]
 
 				// Color based on character context
-				color := PaletteColor(245)
+				color := Ansi256(245)
 				if ch == '+' {
 					color = RGB(0, 255, 128)
 				} else if ch == '-' {
 					color = RGB(255, 80, 80)
 				} else if ch == '●' {
-					color = PaletteColor(240)
+					color = Ansi256(240)
 				}
 
-				buf.Set(int(x+i), int(y), Cell{Rune: ch, Style: Style{FG: color, BG: PaletteColor(232)}})
+				buf.Set(int(x+i), int(y), Cell{Rune: ch, Style: Style{FG: color, BG: Ansi256(232)}})
 			}
 		},
 	)
@@ -327,11 +327,11 @@ func main() {
 			Text(" LIVE MARKETS ").BG(Cyan).FG(Black).Bold(),
 			Space(),
 			Text(&ups).FG(Green),
-			Text(" updates/sec").FG(PaletteColor(245)),
+			Text(" updates/sec").FG(Ansi256(245)),
 		),
-		HRule().Style(Style{FG: PaletteColor(238)}),
+		HRule().Style(Style{FG: Ansi256(238)}),
 		header,
-		HRule().Style(Style{FG: PaletteColor(238)}),
+		HRule().Style(Style{FG: Ansi256(238)}),
 
 		// Market rows - manually laid out to avoid ForEach for this perf demo
 		marketRow(&markets[0], false),
@@ -351,10 +351,10 @@ func main() {
 		marketRow(&markets[14], false),
 
 		Space(),
-		HRule().Style(Style{FG: PaletteColor(238)}),
+		HRule().Style(Style{FG: Ansi256(238)}),
 		tickerWidget,
-		HRule().Style(Style{FG: PaletteColor(238)}),
-		Text(" q: quit | Data updates ~60Hz | All values simulated").FG(PaletteColor(240)),
+		HRule().Style(Style{FG: Ansi256(238)}),
+		Text(" q: quit | Data updates ~60Hz | All values simulated").FG(Ansi256(240)),
 	))
 
 	// High-frequency update goroutine

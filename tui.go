@@ -1,7 +1,10 @@
 // Package glyph provides a terminal UI framework for Go.
 package glyph
 
-import "unsafe"
+import (
+	"math"
+	"unsafe"
+)
 
 // Attribute represents text styling attributes that can be combined.
 type Attribute uint8
@@ -64,16 +67,16 @@ func DefaultColor() Color {
 	return Color{Mode: ColorDefault}
 }
 
-// BasicColor returns one of the 16 basic terminal colours.
+// Ansi16 returns one of the 16 basic terminal colours.
 // RGB values are pre-populated for colour math (post-processing, lerp, etc.).
-func BasicColor(index uint8) Color {
+func Ansi16(index uint8) Color {
 	rgb := basic16RGB[index&0xF]
 	return Color{Mode: Color16, Index: index, R: rgb[0], G: rgb[1], B: rgb[2]}
 }
 
-// PaletteColor returns one of the 256 palette colours.
+// Ansi256 returns one of the 256 palette colours.
 // RGB values are pre-populated for colour math (post-processing, lerp, etc.).
-func PaletteColor(index uint8) Color {
+func Ansi256(index uint8) Color {
 	rgb := palette256RGB[index]
 	return Color{Mode: Color256, Index: index, R: rgb[0], G: rgb[1], B: rgb[2]}
 }
@@ -150,8 +153,8 @@ func init() {
 	}
 }
 
-// LerpColor blends between two colours. t=0 returns a, t=1 returns b.
-func LerpColor(a, b Color, t float64) Color {
+// Lerp blends between two colours. t=0 returns a, t=1 returns b.
+func Lerp(a, b Color, t float64) Color {
 	// Clamp t to 0-1
 	if t < 0 {
 		t = 0
@@ -159,53 +162,53 @@ func LerpColor(a, b Color, t float64) Color {
 		t = 1
 	}
 	return RGB(
-		uint8(float64(a.R)+t*(float64(b.R)-float64(a.R))),
-		uint8(float64(a.G)+t*(float64(b.G)-float64(a.G))),
-		uint8(float64(a.B)+t*(float64(b.B)-float64(a.B))),
+		uint8(math.Round(float64(a.R)+t*(float64(b.R)-float64(a.R)))),
+		uint8(math.Round(float64(a.G)+t*(float64(b.G)-float64(a.G)))),
+		uint8(math.Round(float64(a.B)+t*(float64(b.B)-float64(a.B)))),
 	)
 }
 
 // Standard basic colours for convenience.
 var (
-	Black   = BasicColor(0)
-	Red     = BasicColor(1)
-	Green   = BasicColor(2)
-	Yellow  = BasicColor(3)
-	Blue    = BasicColor(4)
-	Magenta = BasicColor(5)
-	Cyan    = BasicColor(6)
-	White   = BasicColor(7)
+	Black   = Ansi16(0)
+	Red     = Ansi16(1)
+	Green   = Ansi16(2)
+	Yellow  = Ansi16(3)
+	Blue    = Ansi16(4)
+	Magenta = Ansi16(5)
+	Cyan    = Ansi16(6)
+	White   = Ansi16(7)
 
 	// Bright variants
-	BrightBlack   = BasicColor(8)
-	BrightRed     = BasicColor(9)
-	BrightGreen   = BasicColor(10)
-	BrightYellow  = BasicColor(11)
-	BrightBlue    = BasicColor(12)
-	BrightMagenta = BasicColor(13)
-	BrightCyan    = BasicColor(14)
-	BrightWhite   = BasicColor(15)
+	BrightBlack   = Ansi16(8)
+	BrightRed     = Ansi16(9)
+	BrightGreen   = Ansi16(10)
+	BrightYellow  = Ansi16(11)
+	BrightBlue    = Ansi16(12)
+	BrightMagenta = Ansi16(13)
+	BrightCyan    = Ansi16(14)
+	BrightWhite   = Ansi16(15)
 )
 
 // refreshBasic16Vars rebuilds the package-level colour vars from basic16RGB.
 // called after OSC 4 detection updates the table with the terminal's actual palette.
 func refreshBasic16Vars() {
-	Black = BasicColor(0)
-	Red = BasicColor(1)
-	Green = BasicColor(2)
-	Yellow = BasicColor(3)
-	Blue = BasicColor(4)
-	Magenta = BasicColor(5)
-	Cyan = BasicColor(6)
-	White = BasicColor(7)
-	BrightBlack = BasicColor(8)
-	BrightRed = BasicColor(9)
-	BrightGreen = BasicColor(10)
-	BrightYellow = BasicColor(11)
-	BrightBlue = BasicColor(12)
-	BrightMagenta = BasicColor(13)
-	BrightCyan = BasicColor(14)
-	BrightWhite = BasicColor(15)
+	Black = Ansi16(0)
+	Red = Ansi16(1)
+	Green = Ansi16(2)
+	Yellow = Ansi16(3)
+	Blue = Ansi16(4)
+	Magenta = Ansi16(5)
+	Cyan = Ansi16(6)
+	White = Ansi16(7)
+	BrightBlack = Ansi16(8)
+	BrightRed = Ansi16(9)
+	BrightGreen = Ansi16(10)
+	BrightYellow = Ansi16(11)
+	BrightBlue = Ansi16(12)
+	BrightMagenta = Ansi16(13)
+	BrightCyan = Ansi16(14)
+	BrightWhite = Ansi16(15)
 }
 
 // Equal returns true if two colours are equal.
@@ -375,24 +378,6 @@ const (
 	AlignCenter
 )
 
-// TableColumn defines a column in a Table.
-type TableColumn struct {
-	Header string // column header text
-	Width  int    // column width (0 = auto-size)
-	Align  Align  // text alignment
-}
-
-// Table displays tabular data with columns and optional headers.
-// Uses pointer bindings for dynamic data updates.
-type Table struct {
-	Columns     []TableColumn // column definitions
-	Rows        any           // *[][]string - pointer to row data
-	ShowHeader  bool          // show header row
-	HeaderStyle Style         // style for header row
-	RowStyle    Style         // style for data rows
-	AltRowStyle Style         // style for alternating rows (if non-zero)
-}
-
 // SpinnerBraille is the default spinner animation (braille dots).
 var SpinnerBraille = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
@@ -413,16 +398,6 @@ const (
 	TabsStyleBox                        // tabs in boxes
 	TabsStyleBracket                    // tabs with [ ] brackets
 )
-
-// TabsNode displays a row of tab headers with active tab indicator.
-type TabsNode struct {
-	Labels        []string  // tab labels
-	Selected      *int      // pointer to selected tab index
-	Style         TabsStyle // visual style
-	Gap           int       // gap between tabs (default: 2)
-	ActiveStyle   Style     // style for active tab
-	InactiveStyle Style     // style for inactive tabs
-}
 
 // TreeNode represents a node in a tree structure.
 type TreeNode struct {
@@ -446,9 +421,11 @@ type TreeView struct {
 
 // Custom allows user-defined components without modifying the framework.
 // Use this for specialized widgets that aren't covered by built-in primitives.
-// Note: Custom components use function calls (not inlined like built-ins),
+// customC is the internal compile-form for user-defined components.
+// Constructed via Custom(measure, render).
+// Note: custom components use function calls (not inlined like built-ins),
 // but with viewport culling this overhead is negligible.
-type Custom struct {
+type customC struct {
 	// Measure returns natural (width, height) given available width.
 	// Called during the measure phase of rendering.
 	Measure func(availW int16) (w, h int16)
@@ -471,12 +448,12 @@ type flex struct {
 	flexGrowPtr     *float32
 }
 
-// SelectionList displays a list of items with selection marker.
+// selectionList displays a list of items with selection marker.
 // Items must be a pointer to a slice (*[]T).
 // Selected must be a pointer to an int (*int) tracking the selected index.
 // Render is optional - if nil, items are rendered using fmt.Sprintf("%v", item).
 // Marker defaults to "> " if not specified.
-type SelectionList struct {
+type selectionList struct {
 	Items            any      // *[]T - pointer to slice of items
 	Selected         *int     // pointer to selected index
 	Marker           string   // selection marker (default "> ", use " " for no visible marker)
@@ -494,8 +471,28 @@ type SelectionList struct {
 }
 
 // ensureVisible adjusts scroll offset so selected item is visible.
-func (s *SelectionList) ensureVisible() {
-	if s.Selected == nil || s.MaxVisible <= 0 {
+func (s *selectionList) ensureVisible() {
+	if s.Selected == nil {
+		return
+	}
+	if s.len <= 0 {
+		*s.Selected = 0
+		s.offset = 0
+		return
+	}
+	if *s.Selected < 0 {
+		*s.Selected = 0
+	}
+	if *s.Selected >= s.len {
+		*s.Selected = s.len - 1
+	}
+	if s.offset < 0 {
+		s.offset = 0
+	}
+	if s.offset >= s.len {
+		s.offset = s.len - 1
+	}
+	if s.MaxVisible <= 0 {
 		return
 	}
 	sel := *s.Selected
@@ -510,7 +507,7 @@ func (s *SelectionList) ensureVisible() {
 }
 
 // Up moves selection up by one. Safe to use directly with app.Handle.
-func (s *SelectionList) Up(m any) {
+func (s *selectionList) Up(m any) {
 	if s.Selected != nil && *s.Selected > 0 {
 		old := *s.Selected
 		*s.Selected--
@@ -522,7 +519,7 @@ func (s *SelectionList) Up(m any) {
 }
 
 // Down moves selection down by one. Safe to use directly with app.Handle.
-func (s *SelectionList) Down(m any) {
+func (s *selectionList) Down(m any) {
 	if s.Selected != nil && s.len > 0 && *s.Selected < s.len-1 {
 		old := *s.Selected
 		*s.Selected++
@@ -534,7 +531,7 @@ func (s *SelectionList) Down(m any) {
 }
 
 // PageUp moves selection up by page size (MaxVisible or 10).
-func (s *SelectionList) PageUp(m any) {
+func (s *selectionList) PageUp(m any) {
 	if s.Selected != nil {
 		old := *s.Selected
 		pageSize := 10
@@ -553,7 +550,7 @@ func (s *SelectionList) PageUp(m any) {
 }
 
 // PageDown moves selection down by page size (MaxVisible or 10).
-func (s *SelectionList) PageDown(m any) {
+func (s *selectionList) PageDown(m any) {
 	if s.Selected != nil && s.len > 0 {
 		old := *s.Selected
 		pageSize := 10
@@ -572,7 +569,7 @@ func (s *SelectionList) PageDown(m any) {
 }
 
 // First moves selection to the first item.
-func (s *SelectionList) First(m any) {
+func (s *selectionList) First(m any) {
 	if s.Selected != nil {
 		old := *s.Selected
 		*s.Selected = 0
@@ -584,7 +581,7 @@ func (s *SelectionList) First(m any) {
 }
 
 // Last moves selection to the last item.
-func (s *SelectionList) Last(m any) {
+func (s *selectionList) Last(m any) {
 	if s.Selected != nil && s.len > 0 {
 		old := *s.Selected
 		*s.Selected = s.len - 1
@@ -597,16 +594,18 @@ func (s *SelectionList) Last(m any) {
 
 // Span represents a styled segment of text within RichText.
 type Span struct {
-	Text  string
-	Style Style
+	Text     string
+	Style    Style
+	OnSelect func()
 }
 
-// RichTextNode displays text with mixed inline styles.
-// Spans can be []Span (static) or *[]Span (dynamic binding).
-type RichTextNode struct {
+// richTextNode is the internal compiled form for inline-styled text.
+// Constructed via Rich(...) or Textf(...).
+type richTextNode struct {
 	Flex
 	Spans    any       // []Span or *[]Span
 	spanPtrs []*string // per-span *string pointers for Textf (nil = static text)
+	charWrap bool
 }
 
 // Rich creates a RichText from a mix of strings and Spans.
@@ -615,7 +614,21 @@ type RichTextNode struct {
 // Example:
 //
 //	Rich("Hello ", Bold("world"), "!")
-func Rich(parts ...any) RichTextNode {
+//
+// Single-arg shortcut: pass a *[]Span (or []Span) to render a live span
+// slice. The renderer reads it every frame, so mutating the slice after
+// construction updates the render next frame.
+//
+//	Rich(&statusSpans)  // live spans, mutate slice to update
+func Rich(parts ...any) Component {
+	if len(parts) == 1 {
+		switch v := parts[0].(type) {
+		case *[]Span:
+			return richTextNode{Spans: v}
+		case []Span:
+			return richTextNode{Spans: v}
+		}
+	}
 	spans := make([]Span, 0, len(parts))
 	for _, p := range parts {
 		switch v := p.(type) {
@@ -625,7 +638,7 @@ func Rich(parts ...any) RichTextNode {
 			spans = append(spans, v)
 		}
 	}
-	return RichTextNode{Spans: spans}
+	return richTextNode{Spans: spans}
 }
 
 // Styled creates a span with the given style.
@@ -681,7 +694,6 @@ func BG(text any, color Color) any {
 }
 
 // InputState bundles the state for a text input field.
-// Use with TextInput.Field for cleaner multi-field forms.
 type InputState struct {
 	Value  string
 	Cursor int
@@ -699,19 +711,9 @@ type FocusGroup struct {
 	Current int
 }
 
-// TextInput is a single-line text input field.
-// Wire up input handling via riffkey.NewTextHandler or riffkey.NewFieldHandler.
-//
-// Example with InputState + FocusGroup (recommended for forms):
-//
-//	name := tui.InputState{}
-//	focus := tui.FocusGroup{}
-//	tui.TextInput{Field: &name, FocusGroup: &focus, FocusIndex: 0}
-//
-// Example with separate pointers (for single fields):
-//
-//	tui.TextInput{Value: &query, Cursor: &cursor, Placeholder: "Search..."}
-type TextInput struct {
+// textInput is the internal compiled form of a single-line text input.
+// Constructed via Input(...) and InputC.toTextInput.
+type textInput struct {
 	// Field-based API (recommended for forms)
 	Field      *InputState // Bundles Value + Cursor in one struct
 	FocusGroup *FocusGroup // Shared focus tracker - cursor shows when FocusGroup.Current == FocusIndex
@@ -729,22 +731,6 @@ type TextInput struct {
 	Style            Style  // Text style
 	PlaceholderStyle Style  // Placeholder style (zero = dim text)
 	CursorStyle      Style  // Cursor style (zero = reverse video)
-}
-
-// OverlayNode displays content floating above the main view.
-// Use for modals, dialogs, and floating windows.
-// Control visibility with glyph.If:
-//
-//	glyph.If(&showModal).Eq(true).Then(glyph.Overlay{Child: ...})
-type OverlayNode struct {
-	Centered   bool      // true = center on screen (default behavior if X/Y not set)
-	X, Y       int       // explicit position (used if Centered is false)
-	Width      int       // explicit width (0 = auto from content)
-	Height     int       // explicit height (0 = auto from content)
-	Backdrop   bool      // draw dimmed backdrop behind overlay
-	BackdropFG Color     // backdrop dim color (default: BrightBlack)
-	BG         Color     // background color for overlay content area (fills before rendering child)
-	Child      Component // overlay content
 }
 
 // sliceHeader is the runtime representation of a slice.

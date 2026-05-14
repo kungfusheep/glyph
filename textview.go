@@ -69,8 +69,8 @@ func (tv *TextViewC) MarginTRBL(t, r, b, l int16) *TextViewC {
 // Layer returns the underlying layer for external scroll wiring.
 func (tv *TextViewC) Layer() *Layer { return tv.layer }
 
-// BindScroll registers keys for line-by-line scrolling.
-func (tv *TextViewC) BindScroll(down, up string) *TextViewC {
+// BindNav registers keys for line-by-line navigation.
+func (tv *TextViewC) BindNav(down, up string) *TextViewC {
 	tv.declaredBindings = append(tv.declaredBindings,
 		binding{pattern: down, handler: func() { tv.layer.ScrollDown(1) }},
 		binding{pattern: up, handler: func() { tv.layer.ScrollUp(1) }},
@@ -78,8 +78,8 @@ func (tv *TextViewC) BindScroll(down, up string) *TextViewC {
 	return tv
 }
 
-// BindPageScroll registers keys for half-page scrolling.
-func (tv *TextViewC) BindPageScroll(down, up string) *TextViewC {
+// BindPageNav registers keys for half-page navigation.
+func (tv *TextViewC) BindPageNav(down, up string) *TextViewC {
 	tv.declaredBindings = append(tv.declaredBindings,
 		binding{pattern: down, handler: func() { tv.layer.HalfPageDown() }},
 		binding{pattern: up, handler: func() { tv.layer.HalfPageUp() }},
@@ -157,6 +157,206 @@ func wrapTextLines(s string, width int, charWrap bool) int {
 		return wrapDrawChar(s, nil, 0, 0, width, 0, Style{})
 	}
 	return wrapDrawWord(s, nil, 0, 0, width, 0, Style{})
+}
+
+// wrapSpansDraw wraps styled spans to width and writes them to buf.
+// It mirrors TextBlock wrapping while preserving each span's style.
+type spanJumpFunc func(x, y int, span Span)
+
+func wrapSpansDraw(spans []Span, buf *Buffer, x, y int, width, maxLines int, charWrap bool, jump spanJumpFunc) int {
+	if width <= 0 {
+		return 0
+	}
+	if charWrap {
+		return wrapSpansChar(spans, buf, x, y, width, maxLines, jump)
+	}
+	return wrapSpansWord(spans, buf, x, y, width, maxLines, jump)
+}
+
+func wrapSpansLines(spans []Span, width int, charWrap bool) int {
+	if width <= 0 {
+		return 0
+	}
+	return wrapSpansDraw(spans, nil, 0, 0, width, 0, charWrap, nil)
+}
+
+func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int, jump spanJumpFunc) int {
+	row := 0
+	col := 0
+	var rw RowWriter
+	style := Style{}
+	if buf != nil {
+		rw = buf.Row(y, style)
+	}
+
+	write := func(r rune, span Span, jumped *bool, allowJump bool) {
+		if buf == nil || (maxLines > 0 && row >= maxLines) {
+			return
+		}
+		if allowJump && !*jumped && jump != nil && span.OnSelect != nil {
+			jump(x+col, y+row, span)
+			*jumped = true
+		}
+		if !span.Style.Equal(style) {
+			style = span.Style
+			rw = buf.Row(y+row, style)
+		}
+		rw.Put(x+col, r)
+	}
+	flush := func() {
+		row++
+		col = 0
+		if buf != nil {
+			rw = buf.Row(y+row, style)
+		}
+	}
+
+	pendingSpace := false
+	for _, span := range spans {
+		text := span.Text
+		jumped := false
+		for i := 0; i < len(text); {
+			if text[i] == '\n' {
+				flush()
+				pendingSpace = false
+				i++
+				continue
+			}
+			spaceBefore := pendingSpace
+			pendingSpace = false
+			for i < len(text) && (text[i] == ' ' || text[i] == '\t') {
+				if col > 0 {
+					spaceBefore = true
+				}
+				i++
+			}
+			if i >= len(text) {
+				pendingSpace = spaceBefore
+				continue
+			}
+			if text[i] == '\n' {
+				pendingSpace = false
+				continue
+			}
+			wordStart := i
+			wordRunes := 0
+			for i < len(text) && text[i] != ' ' && text[i] != '\t' && text[i] != '\n' {
+				_, size := utf8.DecodeRuneInString(text[i:])
+				i += size
+				wordRunes++
+			}
+			word := text[wordStart:i]
+
+			if col == 0 {
+				if wordRunes <= width {
+					for _, r := range word {
+						write(r, span, &jumped, true)
+						col++
+					}
+				} else {
+					for _, r := range word {
+						if col >= width {
+							flush()
+						}
+						write(r, span, &jumped, true)
+						col++
+					}
+				}
+			} else if spaceBefore && col+1+wordRunes <= width {
+				write(' ', span, &jumped, false)
+				col++
+				for _, r := range word {
+					write(r, span, &jumped, true)
+					col++
+				}
+			} else if !spaceBefore && col+wordRunes <= width {
+				for _, r := range word {
+					write(r, span, &jumped, true)
+					col++
+				}
+			} else {
+				flush()
+				if wordRunes <= width {
+					for _, r := range word {
+						write(r, span, &jumped, true)
+						col++
+					}
+				} else {
+					for _, r := range word {
+						if col >= width {
+							flush()
+						}
+						write(r, span, &jumped, true)
+						col++
+					}
+				}
+			}
+		}
+	}
+	return row + 1
+}
+
+func wrapSpansChar(spans []Span, buf *Buffer, x, y, width, maxLines int, jump spanJumpFunc) int {
+	const tabWidth = 4
+	row := 0
+	col := 0
+	var rw RowWriter
+	style := Style{}
+	if buf != nil {
+		rw = buf.Row(y, style)
+	}
+
+	write := func(r rune, span Span, jumped *bool, allowJump bool) {
+		if buf == nil || (maxLines > 0 && row >= maxLines) {
+			return
+		}
+		if allowJump && !*jumped && jump != nil && span.OnSelect != nil {
+			jump(x+col, y+row, span)
+			*jumped = true
+		}
+		if !span.Style.Equal(style) {
+			style = span.Style
+			rw = buf.Row(y+row, style)
+		}
+		rw.Put(x+col, r)
+	}
+	flush := func() {
+		row++
+		col = 0
+		if buf != nil {
+			rw = buf.Row(y+row, style)
+		}
+	}
+
+	for _, span := range spans {
+		jumped := false
+		for i := 0; i < len(span.Text); {
+			r, size := utf8.DecodeRuneInString(span.Text[i:])
+			i += size
+
+			if r == '\n' {
+				flush()
+				continue
+			}
+			if r == '\t' {
+				spaces := tabWidth - (col % tabWidth)
+				for j := 0; j < spaces; j++ {
+					if col >= width {
+						flush()
+					}
+					write(' ', span, &jumped, false)
+					col++
+				}
+				continue
+			}
+			if col >= width {
+				flush()
+			}
+			write(r, span, &jumped, true)
+			col++
+		}
+	}
+	return row + 1
 }
 
 // wrapDrawWord does the actual word-wrap draw. If buf is nil, only counts lines.

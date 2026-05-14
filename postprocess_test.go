@@ -58,15 +58,15 @@ func TestSEDimAll(t *testing.T) {
 	buf := NewBuffer(3, 2)
 	buf.Set(1, 0, Cell{Rune: 'A', Style: Style{FG: RGB(255, 255, 255)}})
 
-	pass := SEDimAll()
+	pass := SEDim()
 	pass.Apply(buf, PostContext{Width: 3, Height: 2})
 
 	got := buf.Get(1, 0)
 	if !got.Style.Attr.Has(AttrDim) {
-		t.Error("SEDimAll: expected AttrDim to be set")
+		t.Error("SEDim: expected AttrDim to be set")
 	}
 	if got.Rune != 'A' {
-		t.Errorf("SEDimAll: expected rune 'A', got %c", got.Rune)
+		t.Errorf("SEDim: expected rune 'A', got %c", got.Rune)
 	}
 }
 
@@ -97,9 +97,9 @@ func TestSETintPartial(t *testing.T) {
 }
 
 func TestSETintProcessesAllModes(t *testing.T) {
-	// BasicColor(2) = green (R:0, G:170, B:0), tint fully toward blue
+	// Ansi16(2) = green (R:0, G:170, B:0), tint fully toward blue
 	buf := NewBuffer(1, 1)
-	buf.Set(0, 0, Cell{Rune: 'X', Style: Style{FG: BasicColor(2)}})
+	buf.Set(0, 0, Cell{Rune: 'X', Style: Style{FG: Ansi16(2)}})
 
 	pass := SETint(RGB(0, 0, 255)).Strength(1.0)
 	pass.Apply(buf, PostContext{Width: 1, Height: 1})
@@ -259,6 +259,72 @@ func TestSEVignetteDodge(t *testing.T) {
 	}
 }
 
+func TestSEVignetteDodgeTracksRefOpacity(t *testing.T) {
+	grey := RGB(200, 200, 200)
+	render := func(opacity float64) int {
+		buf := NewBuffer(40, 20)
+		for y := range 20 {
+			for x := range 40 {
+				buf.Set(x, y, Cell{Rune: 'X', Style: Style{FG: grey}})
+			}
+		}
+		ref := NodeRef{X: 25, Y: 12, W: 10, H: 6, Opacity: opacity, opacitySet: true}
+		SEVignette().Strength(1.0).Dodge(&ref).Smooth().Apply(buf, PostContext{Width: 40, Height: 20})
+		c := buf.Get(ref.X, ref.Y)
+		return int(c.Style.FG.R) + int(c.Style.FG.G) + int(c.Style.FG.B)
+	}
+
+	opaque := render(1)
+	half := render(0.5)
+	quarter := render(0.25)
+	hidden := render(0)
+	expected := int(grey.R) + int(grey.G) + int(grey.B)
+
+	if opaque != expected {
+		t.Fatalf("opaque dodge should leave ref untouched, got %d want %d", opaque, expected)
+	}
+	if half >= opaque || half <= hidden {
+		t.Fatalf("half-opacity dodge should sit between opaque and hidden, got hidden=%d half=%d opaque=%d", hidden, half, opaque)
+	}
+	if quarter >= half || quarter < hidden {
+		t.Fatalf("dodge should collapse as ref fades, got hidden=%d quarter=%d half=%d", hidden, quarter, half)
+	}
+}
+
+func TestSEVignetteDodgeFeathersOutsideRef(t *testing.T) {
+	grey := RGB(200, 200, 200)
+	render := func() *Buffer {
+		buf := NewBuffer(40, 20)
+		for y := range 20 {
+			for x := range 40 {
+				buf.Set(x, y, Cell{Rune: 'X', Style: Style{FG: grey}})
+			}
+		}
+		ref := NodeRef{X: 16, Y: 8, W: 8, H: 4, Opacity: 1, opacitySet: true}
+		SEVignette().Strength(1.0).Dodge(&ref).Smooth().Apply(buf, PostContext{Width: 40, Height: 20})
+		return buf
+	}
+	lum := func(c Color) int {
+		return int(c.R) + int(c.G) + int(c.B)
+	}
+
+	buf := render()
+	inside := lum(buf.Get(16, 9).Style.FG)
+	near := lum(buf.Get(24, 9).Style.FG)
+	far := lum(buf.Get(29, 9).Style.FG)
+
+	expected := lum(grey)
+	if inside != expected {
+		t.Fatalf("inside dodge should remain unaffected, got %d want %d", inside, expected)
+	}
+	if near <= far {
+		t.Fatalf("near outside dodge should be feathered brighter than far outside, near=%d far=%d", near, far)
+	}
+	if near >= inside {
+		t.Fatalf("outside feather should not fully dodge like inside, near=%d inside=%d", near, inside)
+	}
+}
+
 func TestSEVignetteFocusCorner(t *testing.T) {
 	// focus node near a corner — previously produced a tiny maxDist and near-black screen
 	buf := NewBuffer(80, 24)
@@ -329,6 +395,56 @@ func TestSEDropShadow(t *testing.T) {
 	farLum := int(far.Style.FG.R) + int(far.Style.FG.G) + int(far.Style.FG.B)
 	if nearLum >= farLum {
 		t.Errorf("SEDropShadow: cell near ref (%d) should be darker than far cell (%d)", nearLum, farLum)
+	}
+}
+
+func TestSEDropShadowTracksFocusOpacity(t *testing.T) {
+	grey := RGB(200, 200, 200)
+	render := func(opacity float64) Color {
+		ref := NodeRef{X: 10, Y: 5, W: 10, H: 5, Opacity: opacity, opacitySet: true}
+		buf := NewBuffer(40, 20)
+		for y := range 20 {
+			for x := range 40 {
+				buf.Set(x, y, Cell{Rune: 'X', Style: Style{FG: grey}})
+			}
+		}
+
+		SEDropShadow().Strength(1.0).Radius(6).Focus(&ref).Apply(buf, PostContext{Width: 40, Height: 20})
+		return buf.Get(ref.X+ref.W, ref.Y+ref.H/2).Style.FG
+	}
+
+	opaque := render(1)
+	half := render(0.5)
+	hidden := render(0)
+
+	if hidden != grey {
+		t.Fatalf("faded focus should not cast shadow, got %#v want %#v", hidden, grey)
+	}
+	if half.R >= grey.R || half.R <= opaque.R {
+		t.Fatalf("half-opacity shadow should sit between hidden and opaque, got hidden=%#v half=%#v opaque=%#v", hidden, half, opaque)
+	}
+}
+
+func TestSEGlowTracksFocusOpacity(t *testing.T) {
+	bg := RGB(20, 20, 20)
+	ref := NodeRef{X: 2, Y: 1, W: 4, H: 2, Opacity: 0, opacitySet: true}
+	buf := NewBuffer(12, 6)
+	for y := range 6 {
+		for x := range 12 {
+			buf.Set(x, y, Cell{Rune: ' ', Style: Style{FG: bg, BG: bg}})
+		}
+	}
+	for y := ref.Y; y < ref.Y+ref.H; y++ {
+		for x := ref.X; x < ref.X+ref.W; x++ {
+			buf.Set(x, y, Cell{Rune: ' ', Style: Style{FG: RGB(220, 220, 220), BG: RGB(120, 180, 220)}})
+		}
+	}
+
+	SEGlow().Strength(1.0).Radius(5).Focus(&ref).Apply(buf, PostContext{Width: 12, Height: 6})
+
+	near := buf.Get(ref.X+ref.W, ref.Y)
+	if near.Style.BG != bg {
+		t.Fatalf("faded focus should not glow, got %#v want %#v", near.Style.BG, bg)
 	}
 }
 
@@ -422,6 +538,22 @@ func TestSEBloom(t *testing.T) {
 	}
 }
 
+func TestSEBloomFocusTracksOpacity(t *testing.T) {
+	buf := NewBuffer(5, 1)
+	for x := range 5 {
+		buf.Set(x, 0, Cell{Rune: 'X', Style: Style{FG: RGB(20, 20, 20)}})
+	}
+	buf.Set(2, 0, Cell{Rune: 'X', Style: Style{FG: RGB(255, 255, 255)}})
+
+	ref := NodeRef{X: 0, Y: 0, W: 5, H: 1, Opacity: 0, opacitySet: true}
+	SEBloom().Focus(&ref).Threshold(0.5).Strength(0.8).Apply(buf, PostContext{Width: 5, Height: 1})
+
+	left := buf.Get(1, 0)
+	if left.Style.FG.R != 20 {
+		t.Errorf("faded focus should not bloom, got R=%d", left.Style.FG.R)
+	}
+}
+
 func TestSEBloomSkipsDark(t *testing.T) {
 	buf := NewBuffer(3, 1)
 	for x := range 3 {
@@ -478,7 +610,7 @@ func TestSEMonochromeAmber(t *testing.T) {
 func TestBlendMultiply(t *testing.T) {
 	a := RGB(200, 100, 50)
 	b := RGB(128, 128, 128)
-	result := BlendColor(a, b, BlendMultiply)
+	result := Blend(a, b, BlendMultiply)
 	// multiply darkens: 200*128/255 ≈ 100
 	if result.R >= 200 {
 		t.Errorf("BlendMultiply: expected darkened R, got %d", result.R)
@@ -488,7 +620,7 @@ func TestBlendMultiply(t *testing.T) {
 func TestBlendScreen(t *testing.T) {
 	a := RGB(100, 100, 100)
 	b := RGB(100, 100, 100)
-	result := BlendColor(a, b, BlendScreen)
+	result := Blend(a, b, BlendScreen)
 	// screen lightens
 	if result.R <= 100 {
 		t.Errorf("BlendScreen: expected brighter R, got %d", result.R)
@@ -497,8 +629,8 @@ func TestBlendScreen(t *testing.T) {
 
 func TestBlendOverlay(t *testing.T) {
 	// overlay with a bright top pushes dark bases darker, light bases lighter
-	dark := BlendColor(RGB(50, 50, 50), RGB(200, 200, 200), BlendOverlay)
-	light := BlendColor(RGB(200, 200, 200), RGB(200, 200, 200), BlendOverlay)
+	dark := Blend(RGB(50, 50, 50), RGB(200, 200, 200), BlendOverlay)
+	light := Blend(RGB(200, 200, 200), RGB(200, 200, 200), BlendOverlay)
 	if dark.R >= 100 {
 		t.Errorf("BlendOverlay: dark base with bright top should stay low, got R=%d", dark.R)
 	}
@@ -508,19 +640,19 @@ func TestBlendOverlay(t *testing.T) {
 }
 
 func TestBlendProcessesAllModes(t *testing.T) {
-	// BasicColor(1) = red (170,0,0), top = (128,128,128)
+	// Ansi16(1) = red (170,0,0), top = (128,128,128)
 	// multiply: 170*128/255 ≈ 85
-	base := BasicColor(1)
+	base := Ansi16(1)
 	top := RGB(128, 128, 128)
-	result := BlendColor(base, top, BlendMultiply)
+	result := Blend(base, top, BlendMultiply)
 	if result.R >= 128 {
-		t.Errorf("BlendColor: Color16 should be blended, got R=%d", result.R)
+		t.Errorf("Blend: Color16 should be blended, got R=%d", result.R)
 	}
 
 	// ColorDefault should still be skipped
-	result2 := BlendColor(Color{}, RGB(255, 0, 0), BlendMultiply)
+	result2 := Blend(Color{}, RGB(255, 0, 0), BlendMultiply)
 	if result2.R != 255 {
-		t.Errorf("BlendColor: should return top for ColorDefault base, got R=%d", result2.R)
+		t.Errorf("Blend: should return top for ColorDefault base, got R=%d", result2.R)
 	}
 }
 

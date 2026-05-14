@@ -274,7 +274,7 @@ func (lc *LogC) syncToLayerFiltered(query *FzfQuery) {
 	if len(filtered) == 0 {
 		// no matches, show empty
 		buf := NewBuffer(bufferWidth, 1)
-		buf.WriteStringFast(0, 0, "(no matches)", Style{FG: PaletteColor(8)}, bufferWidth)
+		buf.WriteStringFast(0, 0, "(no matches)", Style{FG: Ansi256(8)}, bufferWidth)
 		lc.layer.SetBuffer(buf)
 		return
 	}

@@ -375,7 +375,7 @@ func ExampleAutoTable() {
 		CPU  float64
 	}
 	rows := []Row{{Name: "api", CPU: 42.5}}
-	tree := AutoTable(&rows).Column("CPU", Number(1))
+	tree := AutoTable(&rows).Column("CPU", FormatNumber(1))
 	// :example
 
 	renderAndPrint("AutoTable", tree, 40, 5)
@@ -399,10 +399,10 @@ func ExampleAutoTable_columns() {
 		{Name: "api", CPU: 82.3, Memory: 1073741824, Active: true, Growth: 0.12},
 	}
 	tree := AutoTable(&rows).
-		Column("CPU", Percent(1)).
-		Column("Memory", Bytes()).
-		Column("Active", Bool("Yes", "No")).
-		Column("Growth", PercentChange(1))
+		Column("CPU", FormatPercent(1)).
+		Column("Memory", FormatBytes()).
+		Column("Active", FormatBool("Yes", "No")).
+		Column("Growth", FormatPercentChange(1))
 	// :example
 
 	renderAndPrint("AutoTable_columns", tree, 60, 5)
@@ -413,14 +413,14 @@ func ExampleAutoTable_columns() {
 
 // Currency formatting.
 // Format a float as a monetary value with the given symbol and decimal places.
-func ExampleCurrency() {
+func ExampleFormatCurrency() {
 	// example:
 	type Invoice struct {
 		Item  string
 		Price float64
 	}
 	rows := []Invoice{{Item: "Widget", Price: 42.50}}
-	tree := AutoTable(&rows).Column("Price", Currency("$", 2))
+	tree := AutoTable(&rows).Column("Price", FormatCurrency("$", 2))
 	// :example
 
 	renderAndPrint("Currency", tree, 40, 5)
@@ -525,7 +525,7 @@ func ExampleSpace() {
 
 // Fixed-height gap.
 // Use in VBox to add exact spacing between elements.
-func ExampleSpaceH() {
+func ExampleSpace_height() {
 	// example:
 	tree := VBox(
 		Text("above"),
@@ -543,7 +543,7 @@ func ExampleSpaceH() {
 
 // Fixed-width gap.
 // Use in HBox to add exact spacing between elements.
-func ExampleSpaceW() {
+func ExampleSpace_width() {
 	// example:
 	tree := HBox(
 		Text("left"),
@@ -591,12 +591,12 @@ func ExampleVRule() {
 
 // Scrollbar.
 // Parameters are total content height, visible viewport height, and a pointer to scroll position.
-func ExampleScroll() {
+func ExampleScrollbar() {
 	// example:
 	pos := 0
 	tree := HBox(
 		VBox(Text("line 1"), Text("line 2"), Text("line 3")),
-		Scroll(50, 10, &pos),
+		Scrollbar(50, 10, &pos),
 	)
 	// :example
 
@@ -943,45 +943,45 @@ func ExampleRGB() {
 }
 
 // Colour blending.
-// LerpColor blends two colours. t=0 returns the first, t=1 returns the second, 0.5 is the midpoint.
-func ExampleLerpColor() {
+// Lerp blends two colours. t=0 returns the first, t=1 returns the second, 0.5 is the midpoint.
+func ExampleLerp() {
 	// example:
 	pct := 0.75
-	bar := LerpColor(Red, Green, pct)
+	bar := Lerp(Red, Green, pct)
 	tree := Text("75%").FG(bar)
 	// :example
 
-	renderAndPrint("LerpColor", tree, 20, 1)
+	renderAndPrint("Lerp", tree, 20, 1)
 	// Output: 75%
 }
 
 // Terminal palette.
-// BasicColor uses the terminal's 16-colour palette (0–15). These respect the user's terminal theme.
-func ExampleBasicColor() {
+// Ansi16 uses the terminal's 16-colour palette (0–15). These respect the user's terminal theme.
+func ExampleAnsi16() {
 	// example:
-	tree := Text("theme-aware").FG(BasicColor(9))
+	tree := Text("theme-aware").FG(Ansi16(9))
 	// :example
 
-	renderAndPrint("BasicColor", tree, 20, 1)
+	renderAndPrint("Ansi16", tree, 20, 1)
 	// Output: theme-aware
 }
 
 // Extended palette.
-// PaletteColor uses the 256-colour extended palette.
-func ExamplePaletteColor() {
+// Ansi256 uses the 256-colour extended palette.
+func ExampleAnsi256() {
 	// example:
-	tree := Text("orange-ish").FG(PaletteColor(214))
+	tree := Text("orange-ish").FG(Ansi256(214))
 	// :example
 
-	renderAndPrint("PaletteColor", tree, 20, 1)
+	renderAndPrint("Ansi256", tree, 20, 1)
 	// Output: orange-ish
 }
 
 // Custom rendering.
 // Escape hatch for custom rendering. Measure reports size, Render draws directly into the cell buffer.
-func ExampleWidget() {
+func ExampleCustom() {
 	// example:
-	tree := Widget(
+	tree := Custom(
 		func(availW int16) (w, h int16) { return availW, 1 },
 		func(buf *Buffer, x, y, w, h int16) {
 			for i := int16(0); i < w; i++ {
@@ -1510,7 +1510,7 @@ func ExampleScreenEffect_conditional() {
 			Text("████").FG(Cyan),
 			Text("░░░░").FG(RGB(80, 80, 80)),
 		),
-		If(&dimmed).Then(ScreenEffect(SEDimAll())),
+		If(&dimmed).Then(ScreenEffect(SEDim())),
 	)
 	// :example
 
@@ -1587,12 +1587,12 @@ func ExampleWithQuantize() {
 }
 
 // Manual colour blend.
-// BlendColor combines two colours with a Photoshop-style mode — useful inside custom effects.
-func ExampleBlendColor() {
+// Blend combines two colours with a Photoshop-style mode — useful inside custom effects.
+func ExampleBlend() {
 	// example:
 	base := RGB(100, 150, 200)
 	top := RGB(255, 100, 50)
-	result := BlendColor(base, top, BlendScreen)
+	result := Blend(base, top, BlendScreen)
 	// :example
 
 	tree := HBox(
@@ -1600,12 +1600,12 @@ func ExampleBlendColor() {
 		Text("  █ top").FG(top),
 		Text("  █ result").FG(result),
 	)
-	renderAndPrint("BlendColor", tree, 30, 1)
+	renderAndPrint("Blend", tree, 30, 1)
 	// Output: █ base  █ top  █ result
 }
 
 // Dim entire screen uniformly.
-func ExampleSEDimAll() {
+func ExampleSEDim() {
 	// example:
 	tree := VBox(
 		VBox.Border(BorderRounded)(
@@ -1617,11 +1617,11 @@ func ExampleSEDimAll() {
 			),
 			Text("everything is dimmed").FG(RGB(200, 196, 184)),
 		),
-		ScreenEffect(SEDimAll()),
+		ScreenEffect(SEDim()),
 	)
 	// :example
 
-	renderWithEffects("SEDimAll", tree, 40, 4)
+	renderWithEffects("SEDim", tree, 40, 4)
 	// Output:
 	// ╭──────────────────────────────────────╮
 	// │● active  ████░░░░                    │
@@ -2222,7 +2222,7 @@ func ExampleMatch_ordered() {
 }
 
 // Predicate matching.
-// Where accepts a function for cases that need custom logic.
+// When accepts a function for cases that need custom logic.
 func ExampleMatch_where() {
 	// example:
 	query := "hello world"
@@ -2279,11 +2279,11 @@ func ExampleTextBlockC() {
 }
 
 // Scrollable text viewer.
-// TextView wraps text with character-level wrapping and provides a scrollable layer. Bind keys for scrolling.
+// TextView wraps text with character-level wrapping and provides a scrollable layer. Bind keys to navigate.
 func ExampleTextViewC() {
 	// example:
 	content := "first\nsecond\nthird"
-	TextView(&content).Grow(1).BindScroll("j", "k")
+	TextView(&content).Grow(1).BindNav("j", "k")
 	// :example
 
 	tree := VBox(
@@ -2296,32 +2296,6 @@ func ExampleTextViewC() {
 	// first
 	// second
 	// third
-}
-
-// Manual table.
-// Table renders tabular data with explicit column definitions, widths, and alignment.
-func ExampleTable() {
-	// example:
-	rows := [][]string{
-		{"Alice", "30", "Engineer"},
-		{"Bob", "25", "Designer"},
-	}
-	tree := Table{
-		Columns: []TableColumn{
-			{Header: "Name", Width: 10},
-			{Header: "Age", Width: 5, Align: AlignRight},
-			{Header: "Role", Width: 10},
-		},
-		Rows:       &rows,
-		ShowHeader: true,
-	}
-	// :example
-
-	renderAndPrint("Table", tree, 25, 3)
-	// Output:
-	// Name        AgeRole
-	// Alice        30Engineer
-	// Bob          25Designer
 }
 
 // Tree structure.
@@ -2349,29 +2323,6 @@ func ExampleTreeNode() {
 	//     README.md
 }
 
-// Low-level selection list.
-// SelectionList renders items with a selection marker. Use List() for the ergonomic generic wrapper.
-func ExampleSelectionList() {
-	// example:
-	items := []string{"Alpha", "Beta", "Gamma"}
-	selected := 1
-	tree := &SelectionList{
-		Items:    &items,
-		Selected: &selected,
-		Marker:   "> ",
-		Render: func(s *string) Component {
-			return Text(s)
-		},
-	}
-	// :example
-
-	renderAndPrint("SelectionList", tree, 20, 3)
-	// Output:
-	//   Alpha
-	// > Beta
-	//   Gamma
-}
-
 // Labeled form field.
 // Field pairs a label with a control. Used as arguments to Form().
 func ExampleFormField() {
@@ -2386,30 +2337,6 @@ func ExampleFormField() {
 	// Output: ▸Name: enter name
 }
 
-// Post-processing node.
-// ScreenEffectNode holds one or more screen effects. Place anywhere in the tree — it takes zero layout space.
-func ExampleScreenEffectNode() {
-	// example:
-	tree := VBox(
-		VBox.Border(BorderRounded)(
-			HBox(
-				Text("● active").FG(Green),
-				Text("  "),
-				Text("████").FG(Cyan),
-			),
-			Text("dimmed via node literal").FG(RGB(200, 196, 184)),
-		),
-		ScreenEffectNode{Effects: []Effect{SEDimAll()}},
-	)
-	// :example
-
-	renderWithEffects("ScreenEffectNode", tree, 40, 4)
-	// Output:
-	// ╭──────────────────────────────────────╮
-	// │● active  ████                        │
-	// │dimmed via node literal               │
-	// ╰──────────────────────────────────────╯
-}
 
 // Animation tween.
 // Animate interpolates toward a target value over time. Configure duration and easing, then apply to any numeric property.

@@ -38,6 +38,14 @@ type FormC struct {
 	flexGrowPtr  *float32
 	gapCond      conditionNode
 	flexGrowCond conditionNode
+
+	// wrapper config — applied to the VBox produced by toTemplate.
+	border   BorderStyle
+	borderFG any
+	borderBG any
+	fill     any
+	title    string
+	padding  [4]int16
 }
 
 type FormFn func(fields ...FormField) *FormC
@@ -248,6 +256,78 @@ func (f FormFn) MarginTRBL(t, r, b, l int16) FormFn {
 	}
 }
 
+// Border sets the border style around the form.
+func (f FormFn) Border(b BorderStyle) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.border = b
+		return form
+	}
+}
+
+// BorderFG sets the border foreground color.
+func (f FormFn) BorderFG(c any) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.borderFG = c
+		return form
+	}
+}
+
+// BorderBG sets the border background color.
+func (f FormFn) BorderBG(c any) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.borderBG = c
+		return form
+	}
+}
+
+// Fill sets the background fill color.
+func (f FormFn) Fill(c any) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.fill = c
+		return form
+	}
+}
+
+// Title sets a title for the bordered form.
+func (f FormFn) Title(t string) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.title = t
+		return form
+	}
+}
+
+// Padding sets uniform padding on all sides.
+func (f FormFn) Padding(all int16) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.padding = [4]int16{all, all, all, all}
+		return form
+	}
+}
+
+// PaddingVH sets vertical and horizontal padding.
+func (f FormFn) PaddingVH(v, h int16) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.padding = [4]int16{v, h, v, h}
+		return form
+	}
+}
+
+// PaddingTRBL sets individual padding for top, right, bottom, left.
+func (f FormFn) PaddingTRBL(t, r, b, l int16) FormFn {
+	return func(fields ...FormField) *FormC {
+		form := f(fields...)
+		form.padding = [4]int16{t, r, b, l}
+		return form
+	}
+}
+
 // FocusManager returns the internal focus manager for external wiring.
 func (f *FormC) FocusManager() *FocusManager {
 	return f.fm
@@ -311,6 +391,26 @@ func (f *FormC) toTemplate() Component {
 	}
 	if f.margin != [4]int16{} {
 		box = box.MarginTRBL(f.margin[0], f.margin[1], f.margin[2], f.margin[3])
+	}
+	if f.border.HasBorder() {
+		box = box.Border(f.border)
+	}
+	if f.borderFG != nil {
+		box = box.BorderFG(f.borderFG)
+	}
+	if f.borderBG != nil {
+		if c, ok := f.borderBG.(Color); ok {
+			box = box.BorderBG(c)
+		}
+	}
+	if f.fill != nil {
+		box = box.Fill(f.fill)
+	}
+	if f.title != "" {
+		box = box.Title(f.title)
+	}
+	if f.padding != [4]int16{} {
+		box = box.PaddingTRBL(f.padding[0], f.padding[1], f.padding[2], f.padding[3])
 	}
 	return box(rows...)
 }

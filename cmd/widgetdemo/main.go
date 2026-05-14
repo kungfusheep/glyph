@@ -1,4 +1,4 @@
-// widgetdemo: Demonstrates custom widgets with Widget()
+// widgetdemo: Demonstrates custom widgets with Custom()
 package main
 
 import (
@@ -26,7 +26,7 @@ func main() {
 	gradientEnd := RGB(255, 0, 128)   // magenta-red
 
 	// Smooth gradient progress bar with sub-character precision
-	gradientBar := Widget(
+	gradientBar := Custom(
 		func(availW int16) (w, h int16) {
 			return availW, 1
 		},
@@ -38,7 +38,7 @@ func main() {
 
 			for i := int16(0); i < w; i++ {
 				t := float64(i) / float64(w-1)
-				color := LerpColor(gradientStart, gradientEnd, t)
+				color := Lerp(gradientStart, gradientEnd, t)
 
 				var ch rune
 				var style Style
@@ -54,7 +54,7 @@ func main() {
 				} else {
 					// empty portion
 					ch = '░'
-					style.FG = PaletteColor(238)
+					style.FG = Ansi256(238)
 				}
 				buf.Set(int(x+i), int(y), Cell{Rune: ch, Style: style})
 			}
@@ -62,7 +62,7 @@ func main() {
 	)
 
 	// Animated sine wave using braille dots (2x4 sub-character resolution)
-	sineWave := Widget(
+	sineWave := Custom(
 		func(availW int16) (w, h int16) {
 			return availW, 5
 		},
@@ -126,14 +126,14 @@ func main() {
 				}
 				avgValue /= float64(len(cellDots))
 
-				color := LerpColor(waveBottom, waveTop, avgValue)
+				color := Lerp(waveBottom, waveTop, avgValue)
 				buf.Set(int(x)+charX, int(y)+charY, Cell{Rune: pattern, Style: Style{FG: color}})
 			}
 		},
 	)
 
 	// Sparkline with gradient
-	sparkline := Widget(
+	sparkline := Custom(
 		func(availW int16) (w, h int16) {
 			return int16(len(sparkData)), 1
 		},
@@ -147,7 +147,7 @@ func main() {
 				if idx >= len(chars) {
 					idx = len(chars) - 1
 				}
-				color := LerpColor(sparkLow, sparkHigh, v)
+				color := Lerp(sparkLow, sparkHigh, v)
 				buf.Set(int(x)+i, int(y), Cell{Rune: chars[idx], Style: Style{FG: color}})
 			}
 		},
@@ -155,7 +155,7 @@ func main() {
 
 	// Animated rainbow bar
 	rainbowPhase := 0.0
-	rainbowBar := Widget(
+	rainbowBar := Custom(
 		func(availW int16) (w, h int16) {
 			return availW, 1
 		},
@@ -171,7 +171,7 @@ func main() {
 
 	// Mini bar chart with gradient
 	barData := []float64{0.3, 0.7, 0.5, 0.9, 0.4, 0.8, 0.6}
-	barChart := Widget(
+	barChart := Custom(
 		func(availW int16) (w, h int16) {
 			return int16(len(barData) * 3), 5 // 3 chars per bar, 5 tall
 		},
@@ -187,7 +187,7 @@ func main() {
 					cellY := int(y) + int(h) - 1 - row
 					if row < barHeight {
 						t := float64(row) / float64(h-1)
-						color := LerpColor(barLow, barHigh, t)
+						color := Lerp(barLow, barHigh, t)
 						buf.Set(barX, cellY, Cell{Rune: '█', Style: Style{FG: color}})
 						buf.Set(barX+1, cellY, Cell{Rune: '█', Style: Style{FG: color}})
 					}
@@ -198,7 +198,7 @@ func main() {
 
 	app.SetView(VBox.Gap(1)(
 		Text("Widget Demo - Smooth Gradients").FG(Cyan).Bold(),
-		HRule().Style(Style{FG: PaletteColor(238)}),
+		HRule().Style(Style{FG: Ansi256(238)}),
 
 		Text("Smooth Gradient Progress (j/k to adjust):").FG(BrightWhite),
 		gradientBar,
@@ -220,8 +220,8 @@ func main() {
 			),
 		),
 
-		HRule().Style(Style{FG: PaletteColor(238)}),
-		Text("j/k: progress | q: quit").FG(PaletteColor(245)),
+		HRule().Style(Style{FG: Ansi256(238)}),
+		Text("j/k: progress | q: quit").FG(Ansi256(245)),
 	))
 
 	// Animation ticker

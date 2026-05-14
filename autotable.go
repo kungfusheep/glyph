@@ -32,9 +32,9 @@ func (c *ColumnConfig) Style(fn func(any) Style) { c.style = fn }
 // canned format presets
 // ----------------------------------------------------------------------------
 
-// Number formats numeric values with comma separators.
+// FormatNumber formats numeric values with comma separators.
 // decimals controls decimal places for floats (ignored for integers).
-func Number(decimals int) ColumnOption {
+func FormatNumber(decimals int) ColumnOption {
 	return func(c *ColumnConfig) {
 		c.Align(AlignRight)
 		c.Format(func(v any) string {
@@ -43,10 +43,10 @@ func Number(decimals int) ColumnOption {
 	}
 }
 
-// Currency formats numeric values with a symbol prefix and comma
+// FormatCurrency formats numeric values with a symbol prefix and comma
 // separators - it is by no means a full internationalization solution,
 // but it's a quick default.
-func Currency(symbol string, decimals int) ColumnOption {
+func FormatCurrency(symbol string, decimals int) ColumnOption {
 	return func(c *ColumnConfig) {
 		c.Align(AlignRight)
 		c.Format(func(v any) string {
@@ -55,8 +55,8 @@ func Currency(symbol string, decimals int) ColumnOption {
 	}
 }
 
-// Percent formats numeric values as percentages.
-func Percent(decimals int) ColumnOption {
+// FormatPercent formats numeric values as percentages.
+func FormatPercent(decimals int) ColumnOption {
 	return func(c *ColumnConfig) {
 		c.Align(AlignRight)
 		c.Format(func(v any) string {
@@ -66,8 +66,8 @@ func Percent(decimals int) ColumnOption {
 	}
 }
 
-// PercentChange formats numeric values as signed percentages with green/red coloring.
-func PercentChange(decimals int) ColumnOption {
+// FormatPercentChange formats numeric values as signed percentages with green/red coloring.
+func FormatPercentChange(decimals int) ColumnOption {
 	return func(c *ColumnConfig) {
 		c.Align(AlignRight)
 		c.Format(func(v any) string {
@@ -87,8 +87,8 @@ func PercentChange(decimals int) ColumnOption {
 	}
 }
 
-// Bytes formats numeric values as human-readable byte sizes.
-func Bytes() ColumnOption {
+// FormatBytes formats numeric values as human-readable byte sizes.
+func FormatBytes() ColumnOption {
 	return func(c *ColumnConfig) {
 		c.Align(AlignRight)
 		c.Format(func(v any) string {
@@ -97,8 +97,8 @@ func Bytes() ColumnOption {
 	}
 }
 
-// Bool formats boolean values with custom labels.
-func Bool(yes, no string) ColumnOption {
+// FormatBool formats boolean values with custom labels.
+func FormatBool(yes, no string) ColumnOption {
 	return func(c *ColumnConfig) {
 		c.Align(AlignCenter)
 		c.Format(func(v any) string {
@@ -372,8 +372,8 @@ func (t AutoTableC) Headers(names ...string) AutoTableC {
 // The option can be a canned preset or a custom function:
 //
 //	AutoTable(&data).
-//	    Column("Price", Currency("$", 2)).
-//	    Column("Change", PercentChange(1)).
+//	    Column("Price", FormatCurrency("$", 2)).
+//	    Column("Change", FormatPercentChange(1)).
 //	    Column("Active", func(c *ColumnConfig) {
 //	        c.Align(AlignCenter)
 //	        c.Format(func(v any) string { ... })

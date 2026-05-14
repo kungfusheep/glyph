@@ -62,7 +62,7 @@ func TestMatchAllOperators(t *testing.T) {
 	tests := []struct {
 		name string
 		val  int
-		m    *MatchNode[int]
+		m    *MatchC[int]
 		want int
 	}{
 		{"Gt match", 10, Match(&[]int{10}[0], Gt(5, Text("yes"))), 0},
@@ -91,23 +91,23 @@ func TestMatchAllOperators(t *testing.T) {
 }
 
 func TestMatchWhere(t *testing.T) {
-	t.Run("Where predicate matches", func(t *testing.T) {
+	t.Run("When predicate matches", func(t *testing.T) {
 		val := 42
 		m := Match(&val,
 			Where(func(v int) bool { return v%2 == 0 }, Text("EVEN")),
 		).Default(Text("ODD"))
 		if m.getMatchIndex() != 0 {
-			t.Error("expected Where to match for even number")
+			t.Error("expected When to match for even number")
 		}
 	})
 
-	t.Run("Where predicate no match falls through", func(t *testing.T) {
+	t.Run("When predicate no match falls through", func(t *testing.T) {
 		val := 41
 		m := Match(&val,
 			Where(func(v int) bool { return v%2 == 0 }, Text("EVEN")),
 		).Default(Text("ODD"))
 		if m.getMatchIndex() != -1 {
-			t.Error("expected Where to not match for odd number")
+			t.Error("expected When to not match for odd number")
 		}
 	})
 }
@@ -118,7 +118,7 @@ func TestMatchWhereWithString(t *testing.T) {
 		Where(func(s string) bool { return strings.HasPrefix(s, "admin:") }, Text("ADMIN")),
 	).Default(Text("USER"))
 	if m.getMatchIndex() != 0 {
-		t.Error("expected Where to match admin prefix")
+		t.Error("expected When to match admin prefix")
 	}
 }
 
@@ -133,12 +133,12 @@ func TestMatchWhereWithStruct(t *testing.T) {
 		Where(func(u user) bool { return !u.Active }, Text("DISABLED")),
 	).Default(Text("PROFILE"))
 	if m.getMatchIndex() != 0 {
-		t.Error("expected first Where to match active admin")
+		t.Error("expected first When to match active admin")
 	}
 
 	u.Active = false
 	if m.getMatchIndex() != 1 {
-		t.Errorf("expected second Where to match inactive user, got %d", m.getMatchIndex())
+		t.Errorf("expected second When to match inactive user, got %d", m.getMatchIndex())
 	}
 
 	u.Role = "user"

@@ -249,115 +249,6 @@ func TestLeaderComponent(t *testing.T) {
 	})
 }
 
-func TestTableComponent(t *testing.T) {
-	t.Run("basic table renders correctly", func(t *testing.T) {
-		rows := [][]string{
-			{"Alice", "30", "Engineer"},
-			{"Bob", "25", "Designer"},
-			{"Carol", "35", "Manager"},
-		}
-		tmpl := Build(VBox(
-			Table{
-				Columns: []TableColumn{
-					{Header: "Name", Width: 10},
-					{Header: "Age", Width: 5, Align: AlignRight},
-					{Header: "Role", Width: 12},
-				},
-				Rows:       &rows,
-				ShowHeader: true,
-			},
-		))
-
-		buf := NewBuffer(40, 10)
-		tmpl.Execute(buf, 40, 10)
-
-		output := buf.String()
-		t.Logf("Table output:\n%s", output)
-
-		// Check header
-		if !strings.Contains(output, "Name") {
-			t.Error("Output should contain header 'Name'")
-		}
-		if !strings.Contains(output, "Age") {
-			t.Error("Output should contain header 'Age'")
-		}
-		if !strings.Contains(output, "Role") {
-			t.Error("Output should contain header 'Role'")
-		}
-
-		// Check data
-		if !strings.Contains(output, "Alice") {
-			t.Error("Output should contain 'Alice'")
-		}
-		if !strings.Contains(output, "Bob") {
-			t.Error("Output should contain 'Bob'")
-		}
-		if !strings.Contains(output, "Manager") {
-			t.Error("Output should contain 'Manager'")
-		}
-	})
-
-	t.Run("table updates dynamically", func(t *testing.T) {
-		rows := [][]string{
-			{"Initial", "100"},
-		}
-		tmpl := Build(Table{
-			Columns: []TableColumn{
-				{Header: "Status", Width: 15},
-				{Header: "Value", Width: 10},
-			},
-			Rows: &rows,
-		})
-
-		buf := NewBuffer(30, 5)
-		tmpl.Execute(buf, 30, 5)
-		output1 := buf.String()
-		t.Logf("Initial:\n%s", output1)
-
-		if !strings.Contains(output1, "Initial") {
-			t.Error("Output should contain 'Initial'")
-		}
-
-		// Update data
-		rows[0] = []string{"Updated", "200"}
-		buf.Clear()
-		tmpl.Execute(buf, 30, 5)
-		output2 := buf.String()
-		t.Logf("Updated:\n%s", output2)
-
-		if !strings.Contains(output2, "Updated") {
-			t.Error("Output should contain 'Updated'")
-		}
-		if strings.Contains(output2, "Initial") {
-			t.Error("Output should NOT contain 'Initial'")
-		}
-	})
-
-	t.Run("table with alignment", func(t *testing.T) {
-		rows := [][]string{
-			{"L", "C", "R"},
-		}
-		tmpl := Build(Table{
-			Columns: []TableColumn{
-				{Header: "Left", Width: 10, Align: AlignLeft},
-				{Header: "Center", Width: 10, Align: AlignCenter},
-				{Header: "Right", Width: 10, Align: AlignRight},
-			},
-			Rows:       &rows,
-			ShowHeader: true,
-		})
-
-		buf := NewBuffer(40, 5)
-		tmpl.Execute(buf, 40, 5)
-		output := buf.String()
-		t.Logf("Aligned table:\n%s", output)
-
-		// Just verify it renders without crashing and contains data
-		if !strings.Contains(output, "L") {
-			t.Error("Output should contain 'L'")
-		}
-	})
-}
 
 func TestSparklineComponent(t *testing.T) {
 	t.Run("basic sparkline renders", func(t *testing.T) {
@@ -661,7 +552,7 @@ func TestScrollbarComponent(t *testing.T) {
 		pos := 0
 		tmpl := Build(HBox(
 			Text("Content"),
-			Scroll(100, 10, &pos).Length(10),
+			Scrollbar(100, 10, &pos).Length(10),
 		))
 
 		buf := NewBuffer(20, 10)
@@ -680,7 +571,7 @@ func TestScrollbarComponent(t *testing.T) {
 
 	t.Run("Vertical scrollbar at bottom", func(t *testing.T) {
 		pos := 90 // scrolled to bottom
-		tmpl := Build(Scroll(100, 10, &pos).Length(10))
+		tmpl := Build(Scrollbar(100, 10, &pos).Length(10))
 
 		buf := NewBuffer(5, 10)
 		tmpl.Execute(buf, 5, 10)
@@ -698,7 +589,7 @@ func TestScrollbarComponent(t *testing.T) {
 
 	t.Run("Horizontal scrollbar", func(t *testing.T) {
 		pos := 0
-		tmpl := Build(Scroll(100, 10, &pos).Length(10).Horizontal())
+		tmpl := Build(Scrollbar(100, 10, &pos).Length(10).Horizontal())
 
 		buf := NewBuffer(10, 3)
 		tmpl.Execute(buf, 10, 3)
@@ -715,7 +606,7 @@ func TestScrollbarComponent(t *testing.T) {
 
 	t.Run("Scrollbar thumb moves with position", func(t *testing.T) {
 		pos := 0
-		tmpl := Build(Scroll(100, 10, &pos).Length(10))
+		tmpl := Build(Scrollbar(100, 10, &pos).Length(10))
 
 		buf := NewBuffer(5, 10)
 
@@ -748,7 +639,7 @@ func TestScrollbarComponent(t *testing.T) {
 
 	t.Run("Custom scrollbar characters", func(t *testing.T) {
 		pos := 0
-		tmpl := Build(Scroll(20, 5, &pos).Length(4).TrackChar('░').ThumbChar('▓'))
+		tmpl := Build(Scrollbar(20, 5, &pos).Length(4).TrackChar('░').ThumbChar('▓'))
 
 		buf := NewBuffer(5, 4)
 		tmpl.Execute(buf, 5, 4)
@@ -782,10 +673,7 @@ func findThumbPosition(buf *Buffer, x, length int, horizontal bool) int {
 func TestTabsComponent(t *testing.T) {
 	t.Run("Tabs with underline style", func(t *testing.T) {
 		selected := 0
-		tmpl := Build(TabsNode{
-			Labels:   []string{"Home", "Settings", "Help"},
-			Selected: &selected,
-		})
+		tmpl := Build(Tabs([]string{"Home", "Settings", "Help"}, &selected))
 
 		buf := NewBuffer(30, 3)
 		tmpl.Execute(buf, 30, 3)
@@ -815,10 +703,7 @@ func TestTabsComponent(t *testing.T) {
 
 	t.Run("Tabs selection changes", func(t *testing.T) {
 		selected := 1 // Select "Settings"
-		tmpl := Build(TabsNode{
-			Labels:   []string{"Home", "Settings"},
-			Selected: &selected,
-		})
+		tmpl := Build(Tabs([]string{"Home", "Settings"}, &selected))
 
 		buf := NewBuffer(20, 3)
 		tmpl.Execute(buf, 20, 3)
@@ -835,11 +720,7 @@ func TestTabsComponent(t *testing.T) {
 
 	t.Run("Tabs with bracket style", func(t *testing.T) {
 		selected := 0
-		tmpl := Build(TabsNode{
-			Labels:   []string{"Tab1", "Tab2"},
-			Selected: &selected,
-			Style:    TabsStyleBracket,
-		})
+		tmpl := Build(Tabs([]string{"Tab1", "Tab2"}, &selected).Kind(TabsStyleBracket))
 
 		buf := NewBuffer(20, 3)
 		tmpl.Execute(buf, 20, 3)
@@ -857,11 +738,7 @@ func TestTabsComponent(t *testing.T) {
 
 	t.Run("Tabs with box style", func(t *testing.T) {
 		selected := 0
-		tmpl := Build(TabsNode{
-			Labels:   []string{"One", "Two"},
-			Selected: &selected,
-			Style:    TabsStyleBox,
-		})
+		tmpl := Build(Tabs([]string{"One", "Two"}, &selected).Kind(TabsStyleBox))
 
 		buf := NewBuffer(30, 5)
 		tmpl.Execute(buf, 30, 5)
@@ -882,11 +759,7 @@ func TestTabsComponent(t *testing.T) {
 
 	t.Run("Tabs with custom gap", func(t *testing.T) {
 		selected := 0
-		tmpl := Build(TabsNode{
-			Labels:   []string{"A", "B"},
-			Selected: &selected,
-			Gap:      5,
-		})
+		tmpl := Build(Tabs([]string{"A", "B"}, &selected).Gap(5))
 
 		buf := NewBuffer(20, 3)
 		tmpl.Execute(buf, 20, 3)
@@ -902,12 +775,9 @@ func TestTabsComponent(t *testing.T) {
 
 	t.Run("Tabs with styling", func(t *testing.T) {
 		selected := 0
-		tmpl := Build(TabsNode{
-			Labels:        []string{"Active", "Inactive"},
-			Selected:      &selected,
-			ActiveStyle:   Style{FG: Green},
-			InactiveStyle: Style{FG: White},
-		})
+		tmpl := Build(Tabs([]string{"Active", "Inactive"}, &selected).
+			ActiveStyle(Style{FG: Green}).
+			InactiveStyle(Style{FG: White}))
 
 		buf := NewBuffer(25, 3)
 		tmpl.Execute(buf, 25, 3)

@@ -48,16 +48,16 @@ func main() {
 
 	app.SetView(VBox.Gap(0)(
 		Text("AutoTable Demo").FG(Cyan).Bold(),
-		HRule().Style(Style{FG: PaletteColor(238)}),
+		HRule().Style(Style{FG: Ansi256(238)}),
 
 		Text("Stocks (with column formatting):").Style(title),
 		AutoTable(stocks).
-			Column("Price", Currency("$", 2)).
-			Column("Change", PercentChange(1)).
-			Column("Volume", Number(0)).
-			Column("Buy", Bool("✓", "✗")).
+			Column("Price", FormatCurrency("$", 2)).
+			Column("Change", FormatPercentChange(1)).
+			Column("Volume", FormatNumber(0)).
+			Column("Buy", FormatBool("✓", "✗")).
 			HeaderStyle(Style{FG: Cyan, Attr: AttrBold}).
-			AltRowStyle(Style{BG: PaletteColor(235)}),
+			AltRowStyle(Style{BG: Ansi256(235)}),
 
 		Text("People (selected columns with custom headers):").Style(title),
 		AutoTable(people).
@@ -68,11 +68,11 @@ func main() {
 		Text("Stocks (just Symbol and Price):").FG(Yellow).Style(title),
 		AutoTable(stocks).
 			Columns("Symbol", "Price").
-			Column("Price", Currency("$", 2)).
+			Column("Price", FormatCurrency("$", 2)).
 			Gap(3),
 
-		HRule().Style(Style{FG: PaletteColor(238)}),
-		Text("q: quit").FG(PaletteColor(245)),
+		HRule().Style(Style{FG: Ansi256(238)}),
+		Text("q: quit").FG(Ansi256(245)),
 	))
 
 	app.Handle("q", func(_ riffkey.Match) { app.Stop() })
