@@ -1040,6 +1040,20 @@ func (s CustomSparkline) Render(buf *Buffer, x, y, w, h int) {
 	}
 }
 
+type fixedRenderer struct {
+	Text string
+}
+
+func (r fixedRenderer) Build() Component { return r }
+
+func (r fixedRenderer) MinSize() (width, height int) {
+	return len(r.Text), 1
+}
+
+func (r fixedRenderer) Render(buf *Buffer, x, y, w, h int) {
+	buf.WriteStringFast(x, y, r.Text, Style{}, w)
+}
+
 func TestCustomRenderer(t *testing.T) {
 	values := []float64{1, 3, 5, 7, 5, 3, 1, 2, 4, 6}
 
@@ -1071,6 +1085,57 @@ func TestCustomRenderer(t *testing.T) {
 	}
 	if !hasSparkChars {
 		t.Errorf("sparkline missing bar chars: got %q", line1)
+	}
+}
+
+func TestForEachSubTemplateRenderSpecialOps(t *testing.T) {
+	type Row struct {
+		Label string
+	}
+
+	makeLayer := func(text string) *Layer {
+		layer := NewLayer()
+		layerBuf := NewBuffer(12, 1)
+		layerBuf.WriteStringFast(0, 0, text, Style{}, 12)
+		layer.SetBuffer(layerBuf)
+		return layer
+	}
+
+	rows := []Row{
+		{Label: "CPU"},
+		{Label: "MEM"},
+	}
+	current, total := 1, 4
+	layer := makeLayer("layer")
+
+	tmpl := Build(VBox(
+		ForEach(&rows, func(r *Row) Component {
+			return VBox(
+				HBox.Gap(1)(
+					Text(&r.Label),
+					Leader("load", "75%").Width(10).Fill('-'),
+					newCounter(&current, &total).Prefix(" "),
+					fixedRenderer{Text: "xx"},
+				),
+				LayerView(layer).ViewHeight(1),
+			)
+		}),
+	))
+
+	buf := NewBuffer(40, 8)
+	tmpl.Execute(buf, 40, 8)
+
+	if got := buf.GetLine(0); !strings.Contains(got, "CPU load---75%  1/4 xx") {
+		t.Fatalf("row 0 summary: got %q", got)
+	}
+	if got := buf.GetLine(1); !strings.Contains(got, "layer") {
+		t.Fatalf("row 0 layer: got %q", got)
+	}
+	if got := buf.GetLine(2); !strings.Contains(got, "MEM load---75%  1/4 xx") {
+		t.Fatalf("row 1 summary: got %q", got)
+	}
+	if got := buf.GetLine(3); !strings.Contains(got, "layer") {
+		t.Fatalf("row 1 layer: got %q", got)
 	}
 }
 
@@ -3271,6 +3336,90 @@ func TestFunctionalAPI_HBoxWithGap(t *testing.T) {
 	if line != "A  B" {
 		t.Errorf("line 0: got %q, want %q", line, "A  B")
 	}
+}
+
+func TestFunctionalAPI_ContainerDynamicCompileOptions(t *testing.T) {
+	t.Run("VBox pointer fill conditional style and dynamic border", func(t *testing.T) {
+		active := true
+		fill := RGB(10, 20, 30)
+		gap := int8(2)
+		opacity := 0.5
+		ref := &NodeRef{}
+		activeStyle := Style{FG: Green}
+		inactiveStyle := Style{FG: Red}
+
+		tmpl := Build(VBox.
+			Fill(&fill).
+			Gap(&gap).
+			Style(If(&active).Then(activeStyle).Else(inactiveStyle)).
+			Border(BorderSingle).
+			BorderFG(If(&active).Then(Blue).Else(Yellow)).
+			Opacity(&opacity).
+			NodeRef(ref)(
+			Text("A"),
+			Text("B"),
+		))
+
+		root := &tmpl.ops[0]
+		if root.Dyn == nil {
+			t.Fatal("expected dynamic container fields")
+		}
+		if root.Dyn.Fill != &fill {
+			t.Fatal("expected fill pointer to be compiled onto Dyn.Fill")
+		}
+		if root.Dyn.Gap != &gap {
+			t.Fatal("expected gap pointer to be compiled onto Dyn.Gap")
+		}
+		if root.Dyn.Opacity != &opacity {
+			t.Fatal("expected opacity pointer to be compiled onto Dyn.Opacity")
+		}
+		if root.LocalStyle == nil {
+			t.Fatal("expected conditional style to compile onto LocalStyle")
+		}
+		if root.BorderFG == nil {
+			t.Fatal("expected dynamic border foreground to compile onto BorderFG")
+		}
+		if root.NodeRef != ref {
+			t.Fatal("expected node ref to be attached to root op")
+		}
+
+		buf := NewBuffer(8, 6)
+		tmpl.Execute(buf, 8, 6)
+		if ref.W == 0 || ref.H == 0 {
+			t.Fatalf("expected node ref to be populated, got %+v", ref)
+		}
+		if got := *root.BorderFG; got != Blue {
+			t.Fatalf("expected active border fg blue, got %#v", got)
+		}
+
+		active = false
+		tmpl.Execute(buf, 8, 6)
+		if got := *root.BorderFG; got != Yellow {
+			t.Fatalf("expected inactive border fg yellow, got %#v", got)
+		}
+	})
+
+	t.Run("HBox static local style", func(t *testing.T) {
+		style := Style{FG: Cyan}
+		tmpl := Build(HBox.Border(BorderSingle).Style(style)(
+			Text("A"),
+			Text("B"),
+		))
+
+		root := &tmpl.ops[0]
+		if root.LocalStyle == nil {
+			t.Fatal("expected static local style to be compiled")
+		}
+		if root.LocalStyle.FG != Cyan {
+			t.Fatalf("expected local style fg cyan, got %#v", root.LocalStyle.FG)
+		}
+
+		buf := NewBuffer(4, 1)
+		tmpl.Execute(buf, 4, 1)
+		if got := buf.Get(0, 0).Style.FG; got != Cyan {
+			t.Fatalf("expected rendered border fg cyan, got %#v", got)
+		}
+	})
 }
 
 func TestFunctionalAPI_VBoxWithStyle(t *testing.T) {

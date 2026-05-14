@@ -2646,6 +2646,23 @@ func (t *Template) buildWithRoot(ui Component) *Template {
 	return child
 }
 
+func (t *Template) compileSubTemplate(node any, elemBase unsafe.Pointer, elemSize uintptr) *Template {
+	sub := &Template{
+		ops:     make([]Op, 0, 16),
+		byDepth: make([][]int16, 8),
+		root:    t.evalRoot(),
+	}
+	for i := range sub.byDepth {
+		sub.byDepth[i] = make([]int16, 0, 4)
+	}
+	sub.compile(node, -1, 0, elemBase, elemSize)
+	if sub.maxDepth >= 0 {
+		sub.byDepth = sub.byDepth[:sub.maxDepth+1]
+	}
+	sub.geom = make([]Geom, len(sub.ops))
+	return sub
+}
+
 func (t *Template) addOp(op Op, depth int) int16 {
 	idx := int16(len(t.ops))
 	op.Depth = int8(depth)
@@ -3008,20 +3025,7 @@ func (t *Template) compileSelectionList(v *SelectionList, parent int16, depth in
 		// Call render to get template structure
 		templateResult := renderRV.Call([]reflect.Value{dummyElem})[0].Interface()
 
-		// Compile iteration template
-		iterTmpl = &Template{
-			ops:     make([]Op, 0, 16),
-			byDepth: make([][]int16, 8),
-			root:    t.evalRoot(),
-		}
-		for i := range iterTmpl.byDepth {
-			iterTmpl.byDepth[i] = make([]int16, 0, 4)
-		}
-		iterTmpl.compile(templateResult, -1, 0, dummyBase, compileSize)
-		if iterTmpl.maxDepth >= 0 {
-			iterTmpl.byDepth = iterTmpl.byDepth[:iterTmpl.maxDepth+1]
-		}
-		iterTmpl.geom = make([]Geom, len(iterTmpl.ops))
+		iterTmpl = t.compileSubTemplate(templateResult, dummyBase, compileSize)
 	}
 
 	ext := &opSelectionList{
@@ -3320,38 +3324,14 @@ func (t *Template) compileCondition(cond conditionNode, parent int16, depth int,
 
 	// Compile then branch as sub-template
 	if cond.getThen() != nil {
-		thenTmpl := &Template{
-			ops:     make([]Op, 0, 16),
-			byDepth: make([][]int16, 8),
-			root:    t.evalRoot(),
-		}
-		for i := range thenTmpl.byDepth {
-			thenTmpl.byDepth[i] = make([]int16, 0, 4)
-		}
-		thenTmpl.compile(cond.getThen(), -1, 0, elemBase, elemSize)
-		if thenTmpl.maxDepth >= 0 {
-			thenTmpl.byDepth = thenTmpl.byDepth[:thenTmpl.maxDepth+1]
-		}
-		thenTmpl.geom = make([]Geom, len(thenTmpl.ops))
+		thenTmpl := t.compileSubTemplate(cond.getThen(), elemBase, elemSize)
 		ext.thenTmpl = thenTmpl
 		t.pendingBindings = append(t.pendingBindings, thenTmpl.pendingBindings...)
 	}
 
 	// Compile else branch if present
 	if cond.getElse() != nil {
-		elseTmpl := &Template{
-			ops:     make([]Op, 0, 16),
-			byDepth: make([][]int16, 8),
-			root:    t.evalRoot(),
-		}
-		for i := range elseTmpl.byDepth {
-			elseTmpl.byDepth[i] = make([]int16, 0, 4)
-		}
-		elseTmpl.compile(cond.getElse(), -1, 0, elemBase, elemSize)
-		if elseTmpl.maxDepth >= 0 {
-			elseTmpl.byDepth = elseTmpl.byDepth[:elseTmpl.maxDepth+1]
-		}
-		elseTmpl.geom = make([]Geom, len(elseTmpl.ops))
+		elseTmpl := t.compileSubTemplate(cond.getElse(), elemBase, elemSize)
 		ext.elseTmpl = elseTmpl
 		t.pendingBindings = append(t.pendingBindings, elseTmpl.pendingBindings...)
 	}
@@ -3382,19 +3362,7 @@ func (t *Template) compileSwitch(sw switchNodeInterface, parent int16, depth int
 	ext.cases = make([]*Template, len(caseNodes))
 	for i, caseNode := range caseNodes {
 		if caseNode != nil {
-			caseTmpl := &Template{
-				ops:     make([]Op, 0, 16),
-				byDepth: make([][]int16, 8),
-				root:    t.evalRoot(),
-			}
-			for j := range caseTmpl.byDepth {
-				caseTmpl.byDepth[j] = make([]int16, 0, 4)
-			}
-			caseTmpl.compile(caseNode, -1, 0, elemBase, elemSize)
-			if caseTmpl.maxDepth >= 0 {
-				caseTmpl.byDepth = caseTmpl.byDepth[:caseTmpl.maxDepth+1]
-			}
-			caseTmpl.geom = make([]Geom, len(caseTmpl.ops))
+			caseTmpl := t.compileSubTemplate(caseNode, elemBase, elemSize)
 			ext.cases[i] = caseTmpl
 			t.pendingBindings = append(t.pendingBindings, caseTmpl.pendingBindings...)
 		}
@@ -3402,19 +3370,7 @@ func (t *Template) compileSwitch(sw switchNodeInterface, parent int16, depth int
 
 	// Compile default branch
 	if defNode := sw.getDefaultNode(); defNode != nil {
-		defTmpl := &Template{
-			ops:     make([]Op, 0, 16),
-			byDepth: make([][]int16, 8),
-			root:    t.evalRoot(),
-		}
-		for i := range defTmpl.byDepth {
-			defTmpl.byDepth[i] = make([]int16, 0, 4)
-		}
-		defTmpl.compile(defNode, -1, 0, elemBase, elemSize)
-		if defTmpl.maxDepth >= 0 {
-			defTmpl.byDepth = defTmpl.byDepth[:defTmpl.maxDepth+1]
-		}
-		defTmpl.geom = make([]Geom, len(defTmpl.ops))
+		defTmpl := t.compileSubTemplate(defNode, elemBase, elemSize)
 		ext.def = defTmpl
 		t.pendingBindings = append(t.pendingBindings, defTmpl.pendingBindings...)
 	}
@@ -3441,38 +3397,14 @@ func (t *Template) compileMatch(mn matchNodeInterface, parent int16, depth int, 
 	ext.cases = make([]*Template, len(caseNodes))
 	for i, caseNode := range caseNodes {
 		if caseNode != nil {
-			caseTmpl := &Template{
-				ops:     make([]Op, 0, 16),
-				byDepth: make([][]int16, 8),
-				root:    t.evalRoot(),
-			}
-			for j := range caseTmpl.byDepth {
-				caseTmpl.byDepth[j] = make([]int16, 0, 4)
-			}
-			caseTmpl.compile(caseNode, -1, 0, elemBase, elemSize)
-			if caseTmpl.maxDepth >= 0 {
-				caseTmpl.byDepth = caseTmpl.byDepth[:caseTmpl.maxDepth+1]
-			}
-			caseTmpl.geom = make([]Geom, len(caseTmpl.ops))
+			caseTmpl := t.compileSubTemplate(caseNode, elemBase, elemSize)
 			ext.cases[i] = caseTmpl
 			t.pendingBindings = append(t.pendingBindings, caseTmpl.pendingBindings...)
 		}
 	}
 
 	if defNode := mn.getDefaultNode(); defNode != nil {
-		defTmpl := &Template{
-			ops:     make([]Op, 0, 16),
-			byDepth: make([][]int16, 8),
-			root:    t.evalRoot(),
-		}
-		for i := range defTmpl.byDepth {
-			defTmpl.byDepth[i] = make([]int16, 0, 4)
-		}
-		defTmpl.compile(defNode, -1, 0, elemBase, elemSize)
-		if defTmpl.maxDepth >= 0 {
-			defTmpl.byDepth = defTmpl.byDepth[:defTmpl.maxDepth+1]
-		}
-		defTmpl.geom = make([]Geom, len(defTmpl.ops))
+		defTmpl := t.compileSubTemplate(defNode, elemBase, elemSize)
 		ext.def = defTmpl
 		t.pendingBindings = append(t.pendingBindings, defTmpl.pendingBindings...)
 	}
@@ -3530,20 +3462,7 @@ func (t *Template) compileForEach(items any, render any, parent int16, depth int
 	// Call render to get template structure
 	templateResult := renderRV.Call([]reflect.Value{dummyElem})[0].Interface()
 
-	// Compile iteration template
-	iterTmpl := &Template{
-		ops:     make([]Op, 0, 16),
-		byDepth: make([][]int16, 8),
-		root:    t.evalRoot(),
-	}
-	for i := range iterTmpl.byDepth {
-		iterTmpl.byDepth[i] = make([]int16, 0, 4)
-	}
-	iterTmpl.compile(templateResult, -1, 0, dummyBase, compileSize)
-	if iterTmpl.maxDepth >= 0 {
-		iterTmpl.byDepth = iterTmpl.byDepth[:iterTmpl.maxDepth+1]
-	}
-	iterTmpl.geom = make([]Geom, len(iterTmpl.ops))
+	iterTmpl := t.compileSubTemplate(templateResult, dummyBase, compileSize)
 
 	op := Op{
 		Kind:   OpForEach,
@@ -3563,20 +3482,76 @@ func (t *Template) compileForEach(items any, render any, parent int16, depth int
 // Compile functions for new functional API types
 // ============================================================================
 
+func (t *Template) ensureOpDyn(idx int16) *OpDyn {
+	if t.ops[idx].Dyn == nil {
+		t.ops[idx].Dyn = &OpDyn{}
+	}
+	return t.ops[idx].Dyn
+}
+
+func (t *Template) compileContainerFlex(percentWidth float32, width, height int16, flexGrow float32, fitContent bool, widthPtr, heightPtr *int16, percentWidthPtr, flexGrowPtr *float32, widthCond, heightCond, percentWidthCond, flexGrowCond any, elemBase unsafe.Pointer, elemSize uintptr) flex {
+	f := flex{
+		percentWidth:    percentWidth,
+		width:           width,
+		height:          height,
+		flexGrow:        flexGrow,
+		fitContent:      fitContent,
+		widthPtr:        widthPtr,
+		heightPtr:       heightPtr,
+		percentWidthPtr: percentWidthPtr,
+		flexGrowPtr:     flexGrowPtr,
+	}
+	if heightCond != nil {
+		f.heightPtr = t.compileDynInt16(heightCond, elemBase, elemSize)
+	}
+	if widthCond != nil {
+		f.widthPtr = t.compileDynInt16(widthCond, elemBase, elemSize)
+	}
+	if percentWidthCond != nil {
+		f.percentWidthPtr = t.compileDynFloat32(percentWidthCond, elemBase, elemSize)
+	}
+	if flexGrowCond != nil {
+		f.flexGrowPtr = t.compileDynFloat32(flexGrowCond, elemBase, elemSize)
+	}
+	return f
+}
+
+func (t *Template) applyContainerDynamics(idx int16, nodeRef *NodeRef, opacityMode OpacityMode, gapPtr *int8, gapCond any, fillPtr *Color, fillCond any, localStyle, localStylePtr *Style, localStyleCond any, opacity dynFloat64, elemBase unsafe.Pointer, elemSize uintptr) {
+	if nodeRef != nil {
+		t.ops[idx].NodeRef = nodeRef
+	}
+	t.ops[idx].OpacityMode = opacityMode
+	if gapPtr != nil {
+		t.ensureOpDyn(idx).Gap = gapPtr
+	}
+	if gapCond != nil {
+		t.ensureOpDyn(idx).Gap = t.compileDynInt8(gapCond, elemBase, elemSize)
+	}
+	if fillCond != nil {
+		t.ensureOpDyn(idx).Fill = t.compileDynColor(fillCond, elemBase, elemSize)
+	} else if fillPtr != nil {
+		t.ensureOpDyn(idx).Fill = fillPtr
+	}
+	if localStyleCond != nil {
+		t.ops[idx].LocalStyle = t.compileDynStyle(localStyleCond, nil, 0)
+	} else if localStylePtr != nil {
+		t.ops[idx].LocalStyle = localStylePtr
+	} else if localStyle != nil {
+		t.ops[idx].LocalStyle = localStyle
+	}
+	if opacity.dyn != nil {
+		opacity.compileArmed(t, elemBase, elemSize)
+		dyn := t.ensureOpDyn(idx)
+		dyn.Opacity = opacity.ptr
+		dyn.OpacityArmed = opacity.armed
+	} else if opacity.isSet {
+		val := opacity.val
+		t.ensureOpDyn(idx).Opacity = &val
+	}
+}
+
 func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
-	f := flex{percentWidth: v.percentWidth, width: v.width, height: v.height, flexGrow: v.flexGrow, fitContent: v.fitContent, widthPtr: v.widthPtr, heightPtr: v.heightPtr, percentWidthPtr: v.percentWidthPtr, flexGrowPtr: v.flexGrowPtr}
-	if v.heightCond != nil {
-		f.heightPtr = t.compileDynInt16(v.heightCond, elemBase, elemSize)
-	}
-	if v.widthCond != nil {
-		f.widthPtr = t.compileDynInt16(v.widthCond, elemBase, elemSize)
-	}
-	if v.percentWidthCond != nil {
-		f.percentWidthPtr = t.compileDynFloat32(v.percentWidthCond, elemBase, elemSize)
-	}
-	if v.flexGrowCond != nil {
-		f.flexGrowPtr = t.compileDynFloat32(v.flexGrowCond, elemBase, elemSize)
-	}
+	f := t.compileContainerFlex(v.percentWidth, v.width, v.height, v.flexGrow, v.fitContent, v.widthPtr, v.heightPtr, v.percentWidthPtr, v.flexGrowPtr, v.widthCond, v.heightCond, v.percentWidthCond, v.flexGrowCond, elemBase, elemSize)
 	bfg := v.borderFG
 	if v.borderFGDyn != nil {
 		bfg = t.compileDynColor(v.borderFGDyn, elemBase, elemSize)
@@ -3599,71 +3574,12 @@ func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsaf
 		elemBase,
 		elemSize,
 	)
-	if v.nodeRef != nil {
-		t.ops[idx].NodeRef = v.nodeRef
-	}
-	t.ops[idx].OpacityMode = v.opacityMode
-	if v.gapPtr != nil {
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		t.ops[idx].Dyn.Gap = v.gapPtr
-	}
-	if v.gapCond != nil {
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		t.ops[idx].Dyn.Gap = t.compileDynInt8(v.gapCond, elemBase, elemSize)
-	}
-	if v.fillCond != nil {
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		t.ops[idx].Dyn.Fill = t.compileDynColor(v.fillCond, elemBase, elemSize)
-	} else if v.fillPtr != nil {
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		t.ops[idx].Dyn.Fill = v.fillPtr
-	}
-	if v.localStyleCond != nil {
-		t.ops[idx].LocalStyle = t.compileDynStyle(v.localStyleCond, nil, 0)
-	} else if v.localStylePtr != nil {
-		t.ops[idx].LocalStyle = v.localStylePtr
-	} else if v.localStyle != nil {
-		t.ops[idx].LocalStyle = v.localStyle
-	}
-	if v.opacity.dyn != nil {
-		v.opacity.compileArmed(t, elemBase, elemSize)
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		t.ops[idx].Dyn.Opacity = v.opacity.ptr
-		t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
-	} else if v.opacity.isSet {
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		val := v.opacity.val
-		t.ops[idx].Dyn.Opacity = &val
-	}
+	t.applyContainerDynamics(idx, v.nodeRef, v.opacityMode, v.gapPtr, v.gapCond, v.fillPtr, v.fillCond, v.localStyle, v.localStylePtr, v.localStyleCond, v.opacity, elemBase, elemSize)
 	return idx
 }
 
 func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
-	f := flex{percentWidth: v.percentWidth, width: v.width, height: v.height, flexGrow: v.flexGrow, fitContent: v.fitContent, widthPtr: v.widthPtr, heightPtr: v.heightPtr, percentWidthPtr: v.percentWidthPtr, flexGrowPtr: v.flexGrowPtr}
-	if v.heightCond != nil {
-		f.heightPtr = t.compileDynInt16(v.heightCond, elemBase, elemSize)
-	}
-	if v.widthCond != nil {
-		f.widthPtr = t.compileDynInt16(v.widthCond, elemBase, elemSize)
-	}
-	if v.percentWidthCond != nil {
-		f.percentWidthPtr = t.compileDynFloat32(v.percentWidthCond, elemBase, elemSize)
-	}
-	if v.flexGrowCond != nil {
-		f.flexGrowPtr = t.compileDynFloat32(v.flexGrowCond, elemBase, elemSize)
-	}
+	f := t.compileContainerFlex(v.percentWidth, v.width, v.height, v.flexGrow, v.fitContent, v.widthPtr, v.heightPtr, v.percentWidthPtr, v.flexGrowPtr, v.widthCond, v.heightCond, v.percentWidthCond, v.flexGrowCond, elemBase, elemSize)
 	idx := t.compileContainer(
 		v.children,
 		v.gap,
@@ -3682,54 +3598,7 @@ func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsaf
 		elemBase,
 		elemSize,
 	)
-	if v.nodeRef != nil {
-		t.ops[idx].NodeRef = v.nodeRef
-	}
-	t.ops[idx].OpacityMode = v.opacityMode
-	if v.gapPtr != nil {
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		t.ops[idx].Dyn.Gap = v.gapPtr
-	}
-	if v.gapCond != nil {
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		t.ops[idx].Dyn.Gap = t.compileDynInt8(v.gapCond, elemBase, elemSize)
-	}
-	if v.fillCond != nil {
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		t.ops[idx].Dyn.Fill = t.compileDynColor(v.fillCond, elemBase, elemSize)
-	} else if v.fillPtr != nil {
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		t.ops[idx].Dyn.Fill = v.fillPtr
-	}
-	if v.localStyleCond != nil {
-		t.ops[idx].LocalStyle = t.compileDynStyle(v.localStyleCond, nil, 0)
-	} else if v.localStylePtr != nil {
-		t.ops[idx].LocalStyle = v.localStylePtr
-	} else if v.localStyle != nil {
-		t.ops[idx].LocalStyle = v.localStyle
-	}
-	if v.opacity.dyn != nil {
-		v.opacity.compileArmed(t, elemBase, elemSize)
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		t.ops[idx].Dyn.Opacity = v.opacity.ptr
-		t.ops[idx].Dyn.OpacityArmed = v.opacity.armed
-	} else if v.opacity.isSet {
-		if t.ops[idx].Dyn == nil {
-			t.ops[idx].Dyn = &OpDyn{}
-		}
-		val := v.opacity.val
-		t.ops[idx].Dyn.Opacity = &val
-	}
+	t.applyContainerDynamics(idx, v.nodeRef, v.opacityMode, v.gapPtr, v.gapCond, v.fillPtr, v.fillCond, v.localStyle, v.localStylePtr, v.localStyleCond, v.opacity, elemBase, elemSize)
 	return idx
 }
 
@@ -6781,52 +6650,10 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		}
 
 	case OpLeader:
-		ext := op.Ext.(*opLeader)
-		width := int(op.width())
-		if width == 0 {
-			width = int(maxW)
-		}
-		baseStyle := ext.style
-		if ext.stylePtr != nil {
-			baseStyle = *ext.stylePtr
-		}
-		style := t.effectiveStyle(baseStyle)
-		label := applyTransform(ext.label, style.Transform)
-		var value string
-		switch ext.mode {
-		case leaderPtr:
-			value = applyTransform(*ext.valuePtr, style.Transform)
-		case leaderIntPtr:
-			var scratch [20]byte
-			b := strconv.AppendInt(scratch[:0], int64(*ext.intPtr), 10)
-			value = applyTransform(unsafe.String(&b[0], len(b)), style.Transform)
-		case leaderFloatPtr:
-			var scratch [32]byte
-			b := strconv.AppendFloat(scratch[:0], *ext.floatPtr, 'f', 1, 64)
-			value = applyTransform(unsafe.String(&b[0], len(b)), style.Transform)
-		default:
-			value = applyTransform(ext.value, style.Transform)
-		}
-		buf.WriteLeader(int(absX), int(absY), label, value, width, ext.fill, style)
+		t.renderLeader(buf, op, absX, absY, maxW)
 
 	case OpCounter:
-		ext := op.Ext.(*opCounter)
-		style := t.effectiveStyle(ext.style)
-		var scratch [48]byte
-		var b []byte
-		prefix := ext.prefix
-		if ext.streamingPtr != nil && *ext.streamingPtr && len(prefix) > 0 {
-			frame := int(atomic.LoadInt32(ext.framePtr))
-			b = append(scratch[:0], SpinnerCircle[frame%len(SpinnerCircle)]...)
-			b = append(b, prefix[1:]...)
-		} else {
-			b = append(scratch[:0], prefix...)
-		}
-		b = strconv.AppendInt(b, int64(*ext.currentPtr), 10)
-		b = append(b, '/')
-		b = strconv.AppendInt(b, int64(*ext.totalPtr), 10)
-		text := unsafe.String(&b[0], len(b))
-		buf.WriteStringFast(int(absX), int(absY), text, style, int(maxW))
+		t.renderCounter(buf, op, absX, absY, maxW)
 
 	case OpAutoTable:
 		t.renderAutoTable(buf, op, absX, absY, maxW)
@@ -6974,10 +6801,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		t.pendingScreenEffects = append(t.pendingScreenEffects, ext.fns...)
 
 	case OpCustom:
-		crExt := op.Ext.(*opCustomRenderer)
-		if crExt.renderer != nil {
-			crExt.renderer.Render(buf, int(absX), int(absY), int(contentW), int(contentH))
-		}
+		t.renderCustomRenderer(buf, op, absX, absY, contentW, contentH)
 
 	case OpLayout:
 		for i := op.ChildStart; i < op.ChildEnd; i++ {
@@ -6989,38 +6813,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		}
 
 	case OpLayer:
-		ext := op.Ext.(*opLayer)
-		if ext.ptr != nil {
-			layerW := int(contentW)
-			if ext.width > 0 {
-				layerW = int(ext.width)
-			}
-			ext.ptr.SetViewport(layerW, int(contentH))
-			ext.ptr.screenX = int(absX)
-			ext.ptr.screenY = int(absY)
-			if t.app != nil {
-				ext.ptr.defaultStyle = t.app.defaultStyle
-			}
-			ext.ptr.prepare()
-			ext.ptr.blit(buf, int(absX), int(absY), layerW, int(contentH))
-
-			// apply inheritedFill to layer cells with default BG
-			if t.inheritedFill.Mode != ColorDefault {
-				for cy := int(absY); cy < int(absY)+int(contentH) && cy < buf.height; cy++ {
-					for cx := int(absX); cx < int(absX)+layerW && cx < buf.width; cx++ {
-						cell := buf.Get(cx, cy)
-						if cell.Style.BG.Mode == ColorDefault {
-							cell.Style.BG = t.inheritedFill
-							buf.Set(cx, cy, cell)
-						}
-					}
-				}
-			}
-
-			if ext.ptr.cursor.Visible && t.app != nil {
-				t.app.activeLayer = ext.ptr
-			}
-		}
+		t.renderLayer(buf, op, absX, absY, contentW, contentH)
 
 	case OpContainer:
 		// Margin inset: visible box starts inside the margin
@@ -7166,14 +6959,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
 		branches, requested := ifBranches(ifExt, t.elemBase)
-		selector := ifExt.selector(t.elemBase)
-		selected, exiting := selector.selectBranch(requested, branches)
-		if tmpl := branchAt(branches, selected); tmpl != nil {
-			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, t.elemBase, exiting)
-			if exiting {
-				selector.markExitRendered()
-			}
-		}
+		t.renderSelectedBranch(buf, branches, requested, ifExt.selector(t.elemBase), absX, absY, geom.W, t.elemBase)
 
 	case OpForEach:
 		// Render each item using iterGeoms for positioning
@@ -7224,28 +7010,12 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpSwitch:
 		swExt := op.Ext.(*opSwitch)
 		branches, requested := switchBranches(swExt, t.elemBase)
-		selector := swExt.selector(t.elemBase)
-		selected, exiting := selector.selectBranch(requested, branches)
-		tmpl := branchAt(branches, selected)
-		if tmpl != nil {
-			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, t.elemBase, exiting)
-			if exiting {
-				selector.markExitRendered()
-			}
-		}
+		t.renderSelectedBranch(buf, branches, requested, swExt.selector(t.elemBase), absX, absY, geom.W, t.elemBase)
 
 	case OpMatch:
 		mExt := op.Ext.(*opMatch)
 		branches, requested := matchBranches(mExt, t.elemBase)
-		selector := mExt.selector(t.elemBase)
-		selected, exiting := selector.selectBranch(requested, branches)
-		tmpl := branchAt(branches, selected)
-		if tmpl != nil {
-			t.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, t.elemBase, exiting)
-			if exiting {
-				selector.markExitRendered()
-			}
-		}
+		t.renderSelectedBranch(buf, branches, requested, mExt.selector(t.elemBase), absX, absY, geom.W, t.elemBase)
 	}
 }
 
@@ -7255,11 +7025,15 @@ func (t *Template) renderSubTemplate(buf *Buffer, sub *Template, globalX, global
 	sub.clipMaxY = t.clipMaxY           // propagate vertical clip
 	sub.inheritedFill = t.inheritedFill // propagate fill so blank cells use parent bg
 	sub.elemBase = elemBase             // ensure renderOp paths (e.g. via renderJump) see the correct element
+	sub.pendingOverlays = sub.pendingOverlays[:0]
+	sub.pendingScreenEffects = sub.pendingScreenEffects[:0]
 	for i := range sub.ops {
 		if sub.ops[i].Parent == -1 {
 			sub.renderSubOp(buf, int16(i), globalX, globalY, maxW, elemBase)
 		}
 	}
+	t.pendingOverlays = append(t.pendingOverlays, sub.pendingOverlays...)
+	t.pendingScreenEffects = append(t.pendingScreenEffects, sub.pendingScreenEffects...)
 }
 
 func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, globalY, maxW int16, elemBase unsafe.Pointer, exiting bool) {
@@ -7281,6 +7055,111 @@ func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, glo
 	sub.refOpacitySet = oldRefOpacitySet
 	t.pendingOverlays = append(t.pendingOverlays, sub.pendingOverlays...)
 	t.pendingScreenEffects = append(t.pendingScreenEffects, sub.pendingScreenEffects...)
+}
+
+func (t *Template) renderSelectedBranch(buf *Buffer, branches []*Template, requested int, selector *branchSelector, globalX, globalY, maxW int16, elemBase unsafe.Pointer) {
+	selected, exiting := selector.selectBranch(requested, branches)
+	tmpl := branchAt(branches, selected)
+	if tmpl == nil {
+		return
+	}
+	t.renderBranchTemplate(buf, tmpl, globalX, globalY, maxW, elemBase, exiting)
+	if exiting {
+		selector.markExitRendered()
+	}
+}
+
+func (t *Template) renderLeader(buf *Buffer, op *Op, absX, absY, maxW int16) {
+	ext := op.Ext.(*opLeader)
+	width := int(op.width())
+	if width == 0 {
+		width = int(maxW)
+	}
+	baseStyle := ext.style
+	if ext.stylePtr != nil {
+		baseStyle = *ext.stylePtr
+	}
+	style := t.effectiveStyle(baseStyle)
+	label := applyTransform(ext.label, style.Transform)
+	var value string
+	switch ext.mode {
+	case leaderPtr:
+		value = applyTransform(*ext.valuePtr, style.Transform)
+	case leaderIntPtr:
+		var scratch [20]byte
+		b := strconv.AppendInt(scratch[:0], int64(*ext.intPtr), 10)
+		value = applyTransform(unsafe.String(&b[0], len(b)), style.Transform)
+	case leaderFloatPtr:
+		var scratch [32]byte
+		b := strconv.AppendFloat(scratch[:0], *ext.floatPtr, 'f', 1, 64)
+		value = applyTransform(unsafe.String(&b[0], len(b)), style.Transform)
+	default:
+		value = applyTransform(ext.value, style.Transform)
+	}
+	buf.WriteLeader(int(absX), int(absY), label, value, width, ext.fill, style)
+}
+
+func (t *Template) renderCounter(buf *Buffer, op *Op, absX, absY, maxW int16) {
+	ext := op.Ext.(*opCounter)
+	style := t.effectiveStyle(ext.style)
+	var scratch [48]byte
+	var b []byte
+	prefix := ext.prefix
+	if ext.streamingPtr != nil && *ext.streamingPtr && len(prefix) > 0 {
+		frame := int(atomic.LoadInt32(ext.framePtr))
+		b = append(scratch[:0], SpinnerCircle[frame%len(SpinnerCircle)]...)
+		b = append(b, prefix[1:]...)
+	} else {
+		b = append(scratch[:0], prefix...)
+	}
+	b = strconv.AppendInt(b, int64(*ext.currentPtr), 10)
+	b = append(b, '/')
+	b = strconv.AppendInt(b, int64(*ext.totalPtr), 10)
+	text := unsafe.String(&b[0], len(b))
+	buf.WriteStringFast(int(absX), int(absY), text, style, int(maxW))
+}
+
+func (t *Template) renderCustomRenderer(buf *Buffer, op *Op, absX, absY, contentW, contentH int16) {
+	crExt := op.Ext.(*opCustomRenderer)
+	if crExt.renderer != nil {
+		crExt.renderer.Render(buf, int(absX), int(absY), int(contentW), int(contentH))
+	}
+}
+
+func (t *Template) renderLayer(buf *Buffer, op *Op, absX, absY, contentW, contentH int16) {
+	ext := op.Ext.(*opLayer)
+	if ext.ptr == nil {
+		return
+	}
+
+	layerW := int(contentW)
+	if ext.width > 0 {
+		layerW = int(ext.width)
+	}
+	ext.ptr.SetViewport(layerW, int(contentH))
+	ext.ptr.screenX = int(absX)
+	ext.ptr.screenY = int(absY)
+	if t.app != nil {
+		ext.ptr.defaultStyle = t.app.defaultStyle
+	}
+	ext.ptr.prepare()
+	ext.ptr.blit(buf, int(absX), int(absY), layerW, int(contentH))
+
+	if t.inheritedFill.Mode != ColorDefault {
+		for cy := int(absY); cy < int(absY)+int(contentH) && cy < buf.height; cy++ {
+			for cx := int(absX); cx < int(absX)+layerW && cx < buf.width; cx++ {
+				cell := buf.Get(cx, cy)
+				if cell.Style.BG.Mode == ColorDefault {
+					cell.Style.BG = t.inheritedFill
+					buf.Set(cx, cy, cell)
+				}
+			}
+		}
+	}
+
+	if ext.ptr.cursor.Visible && t.app != nil {
+		t.app.activeLayer = ext.ptr
+	}
 }
 
 // renderSubOp renders a single op in a sub-template, recursing into children.
@@ -7378,52 +7257,10 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		}
 
 	case OpLeader:
-		ext := op.Ext.(*opLeader)
-		width := int(op.width())
-		if width == 0 {
-			width = int(maxW)
-		}
-		baseStyle := ext.style
-		if ext.stylePtr != nil {
-			baseStyle = *ext.stylePtr
-		}
-		style := sub.effectiveStyle(baseStyle)
-		label := applyTransform(ext.label, style.Transform)
-		var value string
-		switch ext.mode {
-		case leaderPtr:
-			value = applyTransform(*ext.valuePtr, style.Transform)
-		case leaderIntPtr:
-			var scratch [20]byte
-			b := strconv.AppendInt(scratch[:0], int64(*ext.intPtr), 10)
-			value = applyTransform(unsafe.String(&b[0], len(b)), style.Transform)
-		case leaderFloatPtr:
-			var scratch [32]byte
-			b := strconv.AppendFloat(scratch[:0], *ext.floatPtr, 'f', 1, 64)
-			value = applyTransform(unsafe.String(&b[0], len(b)), style.Transform)
-		default:
-			value = applyTransform(ext.value, style.Transform)
-		}
-		buf.WriteLeader(int(absX), int(absY), label, value, width, ext.fill, style)
+		sub.renderLeader(buf, op, absX, absY, maxW)
 
 	case OpCounter:
-		ext := op.Ext.(*opCounter)
-		style := sub.effectiveStyle(ext.style)
-		var scratch [48]byte
-		var b []byte
-		prefix := ext.prefix
-		if ext.streamingPtr != nil && *ext.streamingPtr && len(prefix) > 0 {
-			frame := int(atomic.LoadInt32(ext.framePtr))
-			b = append(scratch[:0], SpinnerCircle[frame%len(SpinnerCircle)]...)
-			b = append(b, prefix[1:]...)
-		} else {
-			b = append(scratch[:0], prefix...)
-		}
-		b = strconv.AppendInt(b, int64(*ext.currentPtr), 10)
-		b = append(b, '/')
-		b = strconv.AppendInt(b, int64(*ext.totalPtr), 10)
-		text := unsafe.String(&b[0], len(b))
-		buf.WriteStringFast(int(absX), int(absY), text, style, int(maxW))
+		sub.renderCounter(buf, op, absX, absY, maxW)
 
 	case OpTable:
 		sub.renderTable(buf, op, absX, absY, maxW)
@@ -7513,10 +7350,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		sub.pendingScreenEffects = append(sub.pendingScreenEffects, ext.fns...)
 
 	case OpCustom:
-		crExt := op.Ext.(*opCustomRenderer)
-		if crExt.renderer != nil {
-			crExt.renderer.Render(buf, int(absX), int(absY), int(contentW), int(contentH))
-		}
+		sub.renderCustomRenderer(buf, op, absX, absY, contentW, contentH)
 
 	case OpLayout:
 		for i := op.ChildStart; i < op.ChildEnd; i++ {
@@ -7528,25 +7362,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 		}
 
 	case OpLayer:
-		ext := op.Ext.(*opLayer)
-		if ext.ptr != nil {
-			layerW := int(contentW)
-			if ext.width > 0 {
-				layerW = int(ext.width)
-			}
-			ext.ptr.SetViewport(layerW, int(contentH))
-			ext.ptr.screenX = int(absX)
-			ext.ptr.screenY = int(absY)
-			if sub.app != nil {
-				ext.ptr.defaultStyle = sub.app.defaultStyle
-			}
-			ext.ptr.prepare()
-			ext.ptr.blit(buf, int(absX), int(absY), layerW, int(contentH))
-
-			if ext.ptr.cursor.Visible && sub.app != nil {
-				sub.app.activeLayer = ext.ptr
-			}
-		}
+		sub.renderLayer(buf, op, absX, absY, contentW, contentH)
 
 	case OpContainer:
 		// Margin inset: visible box starts inside the margin
@@ -7682,14 +7498,7 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
 		branches, requested := ifBranches(ifExt, elemBase)
-		selector := ifExt.selector(elemBase)
-		selected, exiting := selector.selectBranch(requested, branches)
-		if tmpl := branchAt(branches, selected); tmpl != nil {
-			sub.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
-			if exiting {
-				selector.markExitRendered()
-			}
-		}
+		sub.renderSelectedBranch(buf, branches, requested, ifExt.selector(elemBase), absX, absY, geom.W, elemBase)
 
 	case OpForEach:
 		// Nested ForEach - render with nested element base
@@ -7711,28 +7520,12 @@ func (sub *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW 
 	case OpSwitch:
 		swExt := op.Ext.(*opSwitch)
 		branches, requested := switchBranches(swExt, elemBase)
-		selector := swExt.selector(elemBase)
-		selected, exiting := selector.selectBranch(requested, branches)
-		tmpl := branchAt(branches, selected)
-		if tmpl != nil {
-			sub.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
-			if exiting {
-				selector.markExitRendered()
-			}
-		}
+		sub.renderSelectedBranch(buf, branches, requested, swExt.selector(elemBase), absX, absY, geom.W, elemBase)
 
 	case OpMatch:
 		mExt := op.Ext.(*opMatch)
 		branches, requested := matchBranches(mExt, elemBase)
-		selector := mExt.selector(elemBase)
-		selected, exiting := selector.selectBranch(requested, branches)
-		tmpl := branchAt(branches, selected)
-		if tmpl != nil {
-			sub.renderBranchTemplate(buf, tmpl, absX, absY, geom.W, elemBase, exiting)
-			if exiting {
-				selector.markExitRendered()
-			}
-		}
+		sub.renderSelectedBranch(buf, branches, requested, mExt.selector(elemBase), absX, absY, geom.W, elemBase)
 	}
 }
 
