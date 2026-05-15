@@ -138,7 +138,7 @@ type VBoxC struct {
 
 type VBoxFn func(children ...Component) VBoxC
 
-// Fill sets the background fill color. Accepts Color, *Color, conditionNode, or tweenNode.
+// Fill sets the background fill color. Accepts Color, *Color, conditionNode, valueBranchNode, or tweenNode.
 func (f VBoxFn) Fill(c any) VBoxFn {
 	return func(children ...Component) VBoxC {
 		v := f(children...)
@@ -148,6 +148,8 @@ func (f VBoxFn) Fill(c any) VBoxFn {
 		case *Color:
 			v.fillPtr = val
 		case conditionNode:
+			v.fillCond = val
+		case valueBranchNode:
 			v.fillCond = val
 		case tweenNode:
 			v.fillCond = val
@@ -243,8 +245,12 @@ func (f VBoxFn) BorderFG(c any) VBoxFn {
 			v.borderFG = &val
 		case *Color:
 			v.borderFG = val
-		default:
-			v.borderFGDyn = c
+		case conditionNode:
+			v.borderFGDyn = val
+		case valueBranchNode:
+			v.borderFGDyn = val
+		case tweenNode:
+			v.borderFGDyn = val
 		}
 		return v
 	}
@@ -458,6 +464,7 @@ type HBoxC struct {
 	gap              int8
 	border           BorderStyle
 	borderFG         *Color
+	borderFGDyn      any
 	borderBG         *Color
 	title            string
 	width            int16
@@ -490,7 +497,7 @@ type HBoxC struct {
 
 type HBoxFn func(children ...Component) HBoxC
 
-// Fill sets the background fill color. Accepts Color, *Color, conditionNode, or tweenNode.
+// Fill sets the background fill color. Accepts Color, *Color, conditionNode, valueBranchNode, or tweenNode.
 func (f HBoxFn) Fill(c any) HBoxFn {
 	return func(children ...Component) HBoxC {
 		h := f(children...)
@@ -500,6 +507,8 @@ func (f HBoxFn) Fill(c any) HBoxFn {
 		case *Color:
 			h.fillPtr = val
 		case conditionNode:
+			h.fillCond = val
+		case valueBranchNode:
 			h.fillCond = val
 		case tweenNode:
 			h.fillCond = val
@@ -595,6 +604,12 @@ func (f HBoxFn) BorderFG(c any) HBoxFn {
 			h.borderFG = &val
 		case *Color:
 			h.borderFG = val
+		case conditionNode:
+			h.borderFGDyn = val
+		case valueBranchNode:
+			h.borderFGDyn = val
+		case tweenNode:
+			h.borderFGDyn = val
 		}
 		return h
 	}

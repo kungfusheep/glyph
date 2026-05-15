@@ -3747,6 +3747,10 @@ func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsaf
 
 func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	f := t.compileContainerFlex(v.percentWidth, v.width, v.height, v.flexGrow, v.fitContent, v.widthPtr, v.heightPtr, v.percentWidthPtr, v.flexGrowPtr, v.widthCond, v.heightCond, v.percentWidthCond, v.flexGrowCond, elemBase, elemSize)
+	bfg := v.borderFG
+	if v.borderFGDyn != nil {
+		bfg = t.compileDynColor(v.borderFGDyn, elemBase, elemSize)
+	}
 	idx := t.compileContainer(
 		v.children,
 		v.gap,
@@ -3754,7 +3758,7 @@ func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsaf
 		f,
 		v.border,
 		v.title,
-		v.borderFG,
+		bfg,
 		v.borderBG,
 		v.fill,
 		v.inheritStyle,

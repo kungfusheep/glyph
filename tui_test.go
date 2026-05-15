@@ -117,6 +117,60 @@ func TestColor(t *testing.T) {
 			t.Errorf("t=2: should clamp to 1, got %+v", c)
 		}
 	})
+
+	t.Run("ContrastRatio", func(t *testing.T) {
+		if got := ContrastRatio(RGB(0, 0, 0), RGB(255, 255, 255)); got < 20.9 || got > 21.1 {
+			t.Errorf("expected black/white contrast around 21, got %.2f", got)
+		}
+		if got := ContrastRatio(RGB(64, 64, 64), RGB(64, 64, 64)); got != 1 {
+			t.Errorf("expected same-colour contrast of 1, got %.2f", got)
+		}
+	})
+
+	t.Run("LerpToContrast", func(t *testing.T) {
+		bg := White
+		start := RGB(180, 180, 180)
+		result := LerpToContrast(start, Black, bg, 4.5)
+		if ContrastRatio(result, bg) < 4.5 {
+			t.Errorf("expected AA contrast, got %.2f from %+v", ContrastRatio(result, bg), result)
+		}
+		if result.Equal(start) {
+			t.Error("expected colour to move towards target")
+		}
+	})
+
+	t.Run("LerpToContrast best effort", func(t *testing.T) {
+		bg := RGB(255, 255, 255)
+		start := RGB(230, 230, 230)
+		target := RGB(180, 180, 180)
+		result := LerpToContrast(start, target, bg, 4.5)
+		if !result.Equal(target) {
+			t.Errorf("expected closest reachable target, got %+v", result)
+		}
+	})
+
+	t.Run("ReadableTint", func(t *testing.T) {
+		bg := Hex(0x1c1c1c)
+		fg := Hex(0xe8e6e3)
+		result := ReadableTint(bg, Hex(0xd65f5f), fg, 4.5, 0.4)
+		if result.Equal(bg) {
+			t.Error("expected readable tint to move away from background")
+		}
+		if ContrastRatio(fg, result) < 4.5 {
+			t.Errorf("expected readable tint contrast >= 4.5, got %.2f", ContrastRatio(fg, result))
+		}
+	})
+
+	t.Run("ReadableTint caps at maximum", func(t *testing.T) {
+		bg := Black
+		fg := White
+		tint := RGB(20, 0, 0)
+		result := ReadableTint(bg, tint, fg, 4.5, 0.5)
+		want := Lerp(bg, tint, 0.5)
+		if !result.Equal(want) {
+			t.Errorf("expected tint capped at max amount %+v, got %+v", want, result)
+		}
+	})
 }
 
 func TestStyle(t *testing.T) {

@@ -168,6 +168,74 @@ func Lerp(a, b Color, t float64) Color {
 	)
 }
 
+// ContrastRatio returns the WCAG contrast ratio between two colours.
+func ContrastRatio(a, b Color) float64 {
+	l1 := relativeLuminance(a)
+	l2 := relativeLuminance(b)
+	if l1 < l2 {
+		l1, l2 = l2, l1
+	}
+	return (l1 + 0.05) / (l2 + 0.05)
+}
+
+// LerpToContrast moves from towards target until it reaches minRatio against bg.
+// If target cannot reach minRatio, it returns the sampled colour with the best contrast.
+func LerpToContrast(from, target, bg Color, minRatio float64) Color {
+	best := from
+	bestRatio := ContrastRatio(from, bg)
+	if bestRatio >= minRatio {
+		return best
+	}
+
+	for step := 1; step <= 64; step++ {
+		candidate := Lerp(from, target, float64(step)/64)
+		ratio := ContrastRatio(candidate, bg)
+		if ratio >= minRatio {
+			return candidate
+		}
+		if ratio > bestRatio {
+			best = candidate
+			bestRatio = ratio
+		}
+	}
+	return best
+}
+
+// ReadableTint returns the strongest mix from bg towards tint, capped by maxAmount,
+// that keeps fg at or above minRatio contrast against the result.
+func ReadableTint(bg, tint, fg Color, minRatio, maxAmount float64) Color {
+	if maxAmount < 0 {
+		maxAmount = 0
+	} else if maxAmount > 1 {
+		maxAmount = 1
+	}
+
+	best := bg
+	for step := 1; step <= 64; step++ {
+		amount := maxAmount * float64(step) / 64
+		candidate := Lerp(bg, tint, amount)
+		if ContrastRatio(fg, candidate) >= minRatio {
+			best = candidate
+		}
+	}
+	return best
+}
+
+func relativeLuminance(c Color) float64 {
+	r := linearRGB(c.R)
+	g := linearRGB(c.G)
+	b := linearRGB(c.B)
+	return 0.2126*r + 0.7152*g + 0.0722*b
+}
+
+func linearRGB(v uint8) float64 {
+	c := float64(v) / 255
+	if c <= 0.04045 {
+		return c / 12.92
+	}
+	return math.Pow((c+0.055)/1.055, 2.4)
+}
+
 // Standard basic colours for convenience.
 var (
 	Black   = Ansi16(0)

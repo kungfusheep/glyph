@@ -954,6 +954,70 @@ func TestForEachMatchDynamicFGUsesPerItemValue(t *testing.T) {
 	}
 }
 
+func TestForEachMatchDynamicHBoxBorderFGUsesPerItemValue(t *testing.T) {
+	type row struct {
+		Kind string
+	}
+	items := []row{
+		{Kind: "info"},
+		{Kind: "error"},
+	}
+
+	tmpl := Build(VBox(
+		ForEach(&items, func(item *row) Component {
+			return HBox.Border(BorderSoft).BorderFG(
+				Match(&item.Kind,
+					Eq("error", Red),
+				).Default(Blue),
+			)(
+				Text(&item.Kind),
+			)
+		}),
+	))
+
+	buf := NewBuffer(12, 6)
+	tmpl.Execute(buf, 12, 6)
+
+	if got := buf.Get(0, 0).Style.FG; got != Blue {
+		t.Fatalf("first border FG = %v, want Blue", got)
+	}
+	if got := buf.Get(0, 3).Style.FG; got != Red {
+		t.Fatalf("second border FG = %v, want Red", got)
+	}
+}
+
+func TestForEachMatchDynamicHBoxFillUsesPerItemValue(t *testing.T) {
+	type row struct {
+		Kind string
+	}
+	items := []row{
+		{Kind: "info"},
+		{Kind: "error"},
+	}
+
+	tmpl := Build(VBox(
+		ForEach(&items, func(item *row) Component {
+			return HBox.Width(8).Fill(
+				Match(&item.Kind,
+					Eq("error", Red),
+				).Default(Blue),
+			)(
+				Text(&item.Kind),
+			)
+		}),
+	))
+
+	buf := NewBuffer(12, 2)
+	tmpl.Execute(buf, 12, 2)
+
+	if got := buf.Get(0, 0).Style.BG; got != Blue {
+		t.Fatalf("first fill BG = %v, want Blue", got)
+	}
+	if got := buf.Get(0, 1).Style.BG; got != Red {
+		t.Fatalf("second fill BG = %v, want Red", got)
+	}
+}
+
 func lastRuneX(buf *Buffer, y int, r rune) int {
 	last := -1
 	for x := 0; x < buf.Width(); x++ {
