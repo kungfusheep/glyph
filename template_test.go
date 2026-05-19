@@ -67,6 +67,54 @@ func TestV2RowWithGap(t *testing.T) {
 	}
 }
 
+func TestForEachInsideHBoxUsesRowLayout(t *testing.T) {
+	type Item struct {
+		Label string
+	}
+	items := []Item{{Label: "one"}, {Label: "two"}}
+
+	tmpl := Build(HBox.Gap(1)(
+		Text("before"),
+		ForEach(&items, func(item *Item) Component {
+			return Text(&item.Label)
+		}),
+		Text("after"),
+	))
+
+	buf := NewBuffer(40, 4)
+	tmpl.Execute(buf, 40, 4)
+
+	if got, want := buf.GetLine(0), "before one two after"; got != want {
+		t.Fatalf("line 0 = %q, want %q\n%s", got, want, buf.String())
+	}
+	if got := strings.TrimSpace(buf.GetLine(1)); got != "" {
+		t.Fatalf("line 1 = %q, want empty", got)
+	}
+}
+
+func TestIntrinsicWidthDoesNotEvaluateItemConditionWithoutBase(t *testing.T) {
+	type Item struct {
+		Visible bool
+		Label   string
+	}
+	items := []Item{{Visible: true, Label: "one"}}
+
+	tmpl := Build(VBox(
+		ForEach(&items, func(item *Item) Component {
+			return HBox(
+				If(&item.Visible).Then(Text(&item.Label)),
+			)
+		}),
+	))
+
+	buf := NewBuffer(20, 2)
+	tmpl.Execute(buf, 20, 2)
+
+	if got := buf.GetLine(0); got != "one" {
+		t.Fatalf("line 0 = %q, want one", got)
+	}
+}
+
 func TestV2NestedContainers(t *testing.T) {
 	// Col containing Row
 	tmpl := Build(VBox(
@@ -983,6 +1031,44 @@ func TestForEachMatchDynamicHBoxBorderFGUsesPerItemValue(t *testing.T) {
 	}
 	if got := buf.Get(0, 3).Style.FG; got != Red {
 		t.Fatalf("second border FG = %v, want Red", got)
+	}
+}
+
+func TestNestedForEachHBoxBorderFGCanUseOuterItemCondition(t *testing.T) {
+	type child struct {
+		Name string
+	}
+	type row struct {
+		Selected bool
+		Children []child
+	}
+	items := []row{
+		{Selected: true, Children: []child{{Name: "one"}}},
+		{Selected: false, Children: []child{{Name: "two"}}},
+	}
+
+	tmpl := Build(VBox(
+		ForEach(&items, func(item *row) Component {
+			return HBox(
+				ForEach(&item.Children, func(child *child) Component {
+					return HBox.Border(BorderSoft).BorderFG(
+						If(&item.Selected).Then(Red).Else(Blue),
+					)(
+						Text(&child.Name),
+					)
+				}),
+			)
+		}),
+	))
+
+	buf := NewBuffer(12, 8)
+	tmpl.Execute(buf, 12, 8)
+
+	if got := buf.Get(0, 0).Style.FG; got != Red {
+		t.Fatalf("first nested border FG = %v, want Red\n%s", got, buf.String())
+	}
+	if got := buf.Get(0, 3).Style.FG; got != Blue {
+		t.Fatalf("second nested border FG = %v, want Blue\n%s", got, buf.String())
 	}
 }
 

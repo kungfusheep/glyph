@@ -33,9 +33,72 @@ type Effect interface {
 	Apply(buf *Buffer, ctx PostContext)
 }
 
-// effectCompilable is implemented by effects that have dynamic properties (e.g. animated strength).
-// The template compiler calls this during screenEffectNode compilation to wire tween evaluators.
-// Returns a new Effect with dynamic pointers wired in (effects are value types).
+// EffectCompiler wires template-bound values for custom effects. It lets an
+// external effect accept the same dynamic values as built-in properties:
+// pointers, If branches, Animate, and In(...).Out(...).
+type EffectCompiler interface {
+	Float64(v any) EffectFloat64
+}
+
+// EffectFloat64 is a late-read float value compiled from a template argument.
+type EffectFloat64 struct {
+	val   float64
+	ptr   *float64
+	armed *bool
+}
+
+// StaticEffectFloat64 creates a fixed effect float value.
+func StaticEffectFloat64(v float64) EffectFloat64 {
+	return EffectFloat64{val: v}
+}
+
+// Float64 returns the current value for this frame.
+func (v EffectFloat64) Float64() float64 {
+	if v.armed != nil {
+		*v.armed = true
+	}
+	if v.ptr != nil {
+		return *v.ptr
+	}
+	return v.val
+}
+
+// EffectCompilable is implemented by effects with template-bound dynamic
+// properties. The template compiler calls it once during Build.
+type EffectCompilable interface {
+	CompileEffect(c EffectCompiler) Effect
+}
+
+type effectCompiler struct {
+	t *Template
+}
+
+func (c effectCompiler) Float64(v any) EffectFloat64 {
+	switch val := v.(type) {
+	case EffectFloat64:
+		return val
+	case float64:
+		return StaticEffectFloat64(val)
+	case float32:
+		return StaticEffectFloat64(float64(val))
+	case int:
+		return StaticEffectFloat64(float64(val))
+	case *float64:
+		return EffectFloat64{ptr: val}
+	case conditionNode, valueBranchNode:
+		return EffectFloat64{ptr: c.t.compileDynFloat64(v, nil, 0)}
+	case tweenNode:
+		if tw, ok := v.(tweenNode); ok && (tw.getTweenFrom() != nil || tw.getTweenOut() != nil) && c.t.root != nil {
+			armed := new(bool)
+			return EffectFloat64{ptr: c.t.compileTweenFloat64(tw, armed, nil, 0), armed: armed}
+		}
+		return EffectFloat64{ptr: c.t.compileDynFloat64(v, nil, 0)}
+	default:
+		return EffectFloat64{}
+	}
+}
+
+// effectCompilable is the legacy private hook used by built-in effects.
 type effectCompilable interface {
 	compileEffect(t *Template) Effect
 }
@@ -163,14 +226,14 @@ func getCellPool() *cellPool {
 type BlendMode int
 
 const (
-	BlendNormal     BlendMode = iota
-	BlendMultiply             // darkens: a * b / 255
-	BlendScreen               // lightens: 255 - (255-a)(255-b)/255
-	BlendOverlay              // multiply if dark, screen if light
-	BlendAdd                  // clipped addition
-	BlendSoftLight            // gentle contrast
-	BlendDodge           // dramatic brighten
-	BlendBurn            // dramatic darken
+	BlendNormal    BlendMode = iota
+	BlendMultiply            // darkens: a * b / 255
+	BlendScreen              // lightens: 255 - (255-a)(255-b)/255
+	BlendOverlay             // multiply if dark, screen if light
+	BlendAdd                 // clipped addition
+	BlendSoftLight           // gentle contrast
+	BlendDodge               // dramatic brighten
+	BlendBurn                // dramatic darken
 )
 
 // Blend combines two RGB colours using the specified blend mode.

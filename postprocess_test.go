@@ -751,6 +751,104 @@ func TestScreenEffectWithIf(t *testing.T) {
 	}
 }
 
+func TestScreenEffectAnimatedStrengthStartsSettledWithoutFrom(t *testing.T) {
+	active := true
+	tmpl := Build(VBox(
+		Text("X").FG(RGB(200, 100, 50)),
+		If(&active).Then(
+			ScreenEffect(
+				SETint(RGB(0, 0, 0)).Strength(
+					In(Animate.Duration(time.Second)(0.5)).
+						Out(Animate.Duration(time.Second)(0.0)),
+				),
+			),
+		),
+	))
+	buf := NewBuffer(5, 3)
+	tmpl.Execute(buf, 5, 3)
+	for _, eff := range tmpl.ScreenEffects() {
+		eff.Apply(buf, PostContext{Width: 5, Height: 3})
+	}
+
+	got := buf.Get(0, 0).Style.FG
+	if got != RGB(100, 50, 25) {
+		t.Fatalf("active animated strength without From should start settled, got %v", got)
+	}
+}
+
+func TestScreenEffectAnimatedStrengthWithFromStartsFromValue(t *testing.T) {
+	active := true
+	tmpl := Build(VBox(
+		Text("X").FG(RGB(200, 100, 50)),
+		If(&active).Then(
+			ScreenEffect(
+				SETint(RGB(0, 0, 0)).Strength(
+					In(Animate.Duration(time.Second).From(0.0)(0.5)).
+						Out(Animate.Duration(time.Second)(0.0)),
+				),
+			),
+		),
+	))
+	buf := NewBuffer(5, 3)
+	tmpl.Execute(buf, 5, 3)
+	for _, eff := range tmpl.ScreenEffects() {
+		eff.Apply(buf, PostContext{Width: 5, Height: 3})
+	}
+
+	got := buf.Get(0, 0).Style.FG
+	if got != RGB(200, 100, 50) {
+		t.Fatalf("active animated strength with From should start at From value, got %v", got)
+	}
+}
+
+func TestExternalEffectCanCompileAnimatedFloat64(t *testing.T) {
+	active := true
+	tmpl := Build(VBox(
+		Text("X").FG(RGB(200, 100, 50)),
+		If(&active).Then(
+			ScreenEffect(
+				testExternalShadeEffect{strengthArg: In(Animate.Duration(time.Second)(0.5)).
+					Out(Animate.Duration(time.Second)(0.0))},
+			),
+		),
+	))
+
+	buf := NewBuffer(5, 3)
+	tmpl.Execute(buf, 5, 3)
+	for _, eff := range tmpl.ScreenEffects() {
+		eff.Apply(buf, PostContext{Width: 5, Height: 3})
+	}
+
+	got := buf.Get(0, 0).Style.FG
+	if got != RGB(100, 50, 25) {
+		t.Fatalf("external animated effect strength = %v, want half shade", got)
+	}
+}
+
+type testExternalShadeEffect struct {
+	strengthArg any
+	strength    EffectFloat64
+}
+
+func (e testExternalShadeEffect) CompileEffect(c EffectCompiler) Effect {
+	e.strength = c.Float64(e.strengthArg)
+	return e
+}
+
+func (e testExternalShadeEffect) Apply(buf *Buffer, ctx PostContext) {
+	strength := e.strength.Float64()
+	for y := range ctx.Height {
+		for x := range ctx.Width {
+			c := buf.Get(x, y)
+			if c.Rune == 0 || c.Style.FG.Mode == ColorDefault {
+				continue
+			}
+			c.Style.FG = Lerp(c.Style.FG, RGB(0, 0, 0), strength)
+			buf.Set(x, y, c)
+		}
+	}
+}
+
 func TestScreenEffectMultiple(t *testing.T) {
 	order := make([]int, 0, 3)
 	e1 := funcEffect(func(buf *Buffer, ctx PostContext) { order = append(order, 1) })

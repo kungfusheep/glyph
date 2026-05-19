@@ -116,6 +116,11 @@ type Template struct {
 
 	// Current element base for ForEach context (set during layout/render)
 	elemBase unsafe.Pointer
+	// Compile/runtime element contexts for nested ForEach captures. elemBase is
+	// kept for the current item fast path; elemBases keeps outer item bases
+	// addressable when an inner template captures an outer item field.
+	compileElemContexts []elemCompileContext
+	elemBases           []unsafe.Pointer
 
 	// App reference for jump mode coordination
 	app *App
@@ -200,6 +205,11 @@ type Template struct {
 	// root points to the outermost template so sub-templates (If branches,
 	// Overlays, ForEach) register evaluators where Execute actually runs them.
 	root *Template
+}
+
+type elemCompileContext struct {
+	base unsafe.Pointer
+	size uintptr
 }
 
 // evalRoot returns the root template where evaluators should be registered.
@@ -334,10 +344,45 @@ func (t *Template) isExitRenderingFor(elemBase unsafe.Pointer) bool {
 }
 
 func (t *Template) runItemEvals(elemBase unsafe.Pointer) {
-	t.elemBase = elemBase
+	t.runItemEvalsFrom(nil, elemBase)
+}
+
+func (t *Template) runItemEvalsFrom(parent *Template, elemBase unsafe.Pointer) {
+	t.bindItemContext(parent, elemBase)
 	for _, eval := range t.itemEvals {
 		eval()
 	}
+}
+
+func (t *Template) bindItemContext(parent *Template, elemBase unsafe.Pointer) {
+	t.elemBase = elemBase
+	contexts := len(t.compileElemContexts)
+	if contexts == 0 {
+		t.elemBases = nil
+		return
+	}
+	if cap(t.elemBases) < contexts {
+		t.elemBases = make([]unsafe.Pointer, contexts)
+	}
+	t.elemBases = t.elemBases[:contexts]
+	clear(t.elemBases)
+	parentContexts := 0
+	if parent != nil {
+		parentContexts = len(parent.compileElemContexts)
+		copy(t.elemBases, parent.elemBases)
+	}
+	if elemBase != nil && contexts > parentContexts {
+		t.elemBases[contexts-1] = elemBase
+	} else if elemBase != nil && contexts > 0 && t.elemBases[contexts-1] == nil {
+		t.elemBases[contexts-1] = elemBase
+	}
+}
+
+func (t *Template) runtimeElemBase(idx int) unsafe.Pointer {
+	if idx >= 0 && idx < len(t.elemBases) {
+		return t.elemBases[idx]
+	}
+	return t.elemBase
 }
 
 func (t *Template) runExitEvals() {
@@ -989,6 +1034,26 @@ func (t *Template) compileDynColor(v any, elemBase unsafe.Pointer, elemSize uint
 	return nil
 }
 
+func (t *Template) elemContextForPtr(ptrAddr uintptr, elemBase unsafe.Pointer, elemSize uintptr) (int, uintptr, bool) {
+	for i := len(t.compileElemContexts) - 1; i >= 0; i-- {
+		ctx := t.compileElemContexts[i]
+		if ctx.base == nil || ctx.size == 0 {
+			continue
+		}
+		baseAddr := uintptr(ctx.base)
+		if ptrAddr >= baseAddr && ptrAddr < baseAddr+ctx.size {
+			return i, ptrAddr - baseAddr, true
+		}
+	}
+	if elemBase != nil && elemSize > 0 {
+		baseAddr := uintptr(elemBase)
+		if ptrAddr >= baseAddr && ptrAddr < baseAddr+elemSize {
+			return len(t.compileElemContexts) - 1, ptrAddr - baseAddr, true
+		}
+	}
+	return -1, 0, false
+}
+
 func (t *Template) compileDynStyle(v any, elemBase unsafe.Pointer, elemSize uintptr) *Style {
 	switch c := v.(type) {
 	case *Style:
@@ -1080,14 +1145,9 @@ func (t *Template) compileCondColor(cond conditionNode, elemBase unsafe.Pointer,
 	thenFn := resolveColor(thenVal)
 	elseFn := resolveColor(elseVal)
 
-	inForEach := false
-	if elemBase != nil && elemSize > 0 {
-		ptrAddr := cond.getPtrAddr()
-		baseAddr := uintptr(elemBase)
-		if ptrAddr >= baseAddr && ptrAddr < baseAddr+elemSize {
-			cond.setOffset(ptrAddr - baseAddr)
-			inForEach = true
-		}
+	contextIdx, ptrOffset, inForEach := t.elemContextForPtr(cond.getPtrAddr(), elemBase, elemSize)
+	if inForEach {
+		cond.setOffset(ptrOffset)
 	}
 
 	if inForEach {
@@ -1097,7 +1157,7 @@ func (t *Template) compileCondColor(cond conditionNode, elemBase unsafe.Pointer,
 			*storage = elseFn()
 		}
 		eval := func() {
-			if cond.evaluateWithBase(t.elemBase) {
+			if cond.evaluateWithBase(t.runtimeElemBase(contextIdx)) {
 				*storage = thenFn()
 			} else {
 				*storage = elseFn()
@@ -1159,14 +1219,9 @@ func (t *Template) compileCondStyle(cond conditionNode, elemBase unsafe.Pointer,
 	elseFn := resolveStyle(elseVal)
 
 	// check if the condition pointer is within a ForEach element
-	inForEach := false
-	if elemBase != nil && elemSize > 0 {
-		ptrAddr := cond.getPtrAddr()
-		baseAddr := uintptr(elemBase)
-		if ptrAddr >= baseAddr && ptrAddr < baseAddr+elemSize {
-			cond.setOffset(ptrAddr - baseAddr)
-			inForEach = true
-		}
+	contextIdx, ptrOffset, inForEach := t.elemContextForPtr(cond.getPtrAddr(), elemBase, elemSize)
+	if inForEach {
+		cond.setOffset(ptrOffset)
 	}
 
 	if inForEach {
@@ -1176,7 +1231,7 @@ func (t *Template) compileCondStyle(cond conditionNode, elemBase unsafe.Pointer,
 			*storage = elseFn()
 		}
 		eval := func() {
-			if cond.evaluateWithBase(t.elemBase) {
+			if cond.evaluateWithBase(t.runtimeElemBase(contextIdx)) {
 				*storage = thenFn()
 			} else {
 				*storage = elseFn()
@@ -1203,10 +1258,10 @@ func (t *Template) compileBranchColor(branch valueBranchNode, elemBase unsafe.Po
 	storage := new(Color)
 	cases := branch.getCaseNodes()
 	def := branch.getDefaultNode()
-	inForEach := elemBase != nil && elemSize > 0
-	t.prepareValueBranchForBase(branch, elemBase, elemSize)
+	contextIdx := t.prepareValueBranchForBase(branch, elemBase, elemSize)
+	inForEach := contextIdx >= 0
 	eval := func() {
-		idx := t.valueBranchIndex(branch, inForEach)
+		idx := t.valueBranchIndex(branch, contextIdx)
 		if idx >= 0 && idx < len(cases) {
 			*storage = anyToColor(cases[idx])
 			return
@@ -1227,10 +1282,10 @@ func (t *Template) compileBranchStyle(branch valueBranchNode, elemBase unsafe.Po
 	storage := new(Style)
 	cases := branch.getCaseNodes()
 	def := branch.getDefaultNode()
-	inForEach := elemBase != nil && elemSize > 0
-	t.prepareValueBranchForBase(branch, elemBase, elemSize)
+	contextIdx := t.prepareValueBranchForBase(branch, elemBase, elemSize)
+	inForEach := contextIdx >= 0
 	eval := func() {
-		idx := t.valueBranchIndex(branch, inForEach)
+		idx := t.valueBranchIndex(branch, contextIdx)
 		if idx >= 0 && idx < len(cases) {
 			*storage = anyToStyle(cases[idx])
 			return
@@ -1247,28 +1302,29 @@ func (t *Template) compileBranchStyle(branch valueBranchNode, elemBase unsafe.Po
 	return storage
 }
 
-func (t *Template) prepareValueBranchForBase(branch valueBranchNode, elemBase unsafe.Pointer, elemSize uintptr) {
+func (t *Template) prepareValueBranchForBase(branch valueBranchNode, elemBase unsafe.Pointer, elemSize uintptr) int {
 	if elemBase == nil || elemSize == 0 {
-		return
+		return -1
 	}
 	base, ok := branch.(interface {
 		getPtrAddr() uintptr
 		setPtrOffset(uintptr)
 	})
 	if !ok {
-		return
+		return -1
 	}
-	ptrAddr := base.getPtrAddr()
-	baseAddr := uintptr(elemBase)
-	if ptrAddr >= baseAddr && ptrAddr < baseAddr+elemSize {
-		base.setPtrOffset(ptrAddr - baseAddr)
+	contextIdx, offset, ok := t.elemContextForPtr(base.getPtrAddr(), elemBase, elemSize)
+	if ok {
+		base.setPtrOffset(offset)
+		return contextIdx
 	}
+	return -1
 }
 
-func (t *Template) valueBranchIndex(branch valueBranchNode, inForEach bool) int {
-	if inForEach {
+func (t *Template) valueBranchIndex(branch valueBranchNode, contextIdx int) int {
+	if contextIdx >= 0 {
 		if base, ok := branch.(interface{ getMatchIndexWithBase(unsafe.Pointer) int }); ok {
-			return base.getMatchIndexWithBase(t.elemBase)
+			return base.getMatchIndexWithBase(t.runtimeElemBase(contextIdx))
 		}
 	}
 	return branch.getMatchIndex()
@@ -1774,15 +1830,22 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 
 			if !active {
 				wasActive = false
-				*storage = fromVal // reset so stale target doesn't flash on re-open
+				if hasFrom {
+					*storage = fromVal // reset so stale target doesn't flash on re-open
+				}
 				return
 			}
 
 			if !wasActive {
-				// inactive → active transition: (re)start From animation
+				// inactive → active transition: (re)start From animation when
+				// requested; otherwise animate from the last displayed value.
 				wasActive = true
-				*storage = fromVal
-				startVal = fromVal
+				if hasFrom {
+					*storage = fromVal
+					startVal = fromVal
+				} else {
+					startVal = *storage
+				}
 				lastTarget = target
 				startTime = now
 				needsFirstFrame = false
@@ -2890,9 +2953,16 @@ func (t *Template) buildWithRoot(ui Component) *Template {
 
 func (t *Template) compileSubTemplate(node any, elemBase unsafe.Pointer, elemSize uintptr) *Template {
 	sub := &Template{
-		ops:     make([]Op, 0, 16),
-		byDepth: make([][]int16, 8),
-		root:    t.evalRoot(),
+		ops:                 make([]Op, 0, 16),
+		byDepth:             make([][]int16, 8),
+		root:                t.evalRoot(),
+		compileElemContexts: append([]elemCompileContext(nil), t.compileElemContexts...),
+	}
+	if elemBase != nil && elemSize > 0 {
+		last := len(sub.compileElemContexts) - 1
+		if last < 0 || sub.compileElemContexts[last].base != elemBase || sub.compileElemContexts[last].size != elemSize {
+			sub.compileElemContexts = append(sub.compileElemContexts, elemCompileContext{base: elemBase, size: elemSize})
+		}
 	}
 	for i := range sub.byDepth {
 		sub.byDepth[i] = make([]int16, 0, 4)
@@ -2950,7 +3020,9 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		return t.compileTextInput(v, parent, depth)
 	case screenEffectNode:
 		for i, eff := range v.Effects {
-			if ec, ok := eff.(effectCompilable); ok {
+			if ec, ok := eff.(EffectCompilable); ok {
+				v.Effects[i] = ec.CompileEffect(effectCompiler{t: t})
+			} else if ec, ok := eff.(effectCompilable); ok {
 				v.Effects[i] = ec.compileEffect(t)
 			}
 		}
@@ -4781,6 +4853,10 @@ func (t *Template) distributeWidths(screenW int16, elemBase unsafe.Pointer) {
 // For VBox: maximum width of children (all children stack vertically, need same width)
 // For HBox: sum of children widths + gaps
 func (t *Template) computeIntrinsicWidth(idx int16) int16 {
+	return t.computeIntrinsicWidthWithBase(idx, nil)
+}
+
+func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Pointer) int16 {
 	op := &t.ops[idx]
 
 	// If this op has an explicit width, use it
@@ -4799,7 +4875,7 @@ func (t *Template) computeIntrinsicWidth(idx int16) int16 {
 			if childOp.Parent != idx {
 				continue
 			}
-			childW := t.computeIntrinsicWidth(i)
+			childW := t.computeIntrinsicWidthWithBase(i, elemBase)
 			childCount++
 
 			if op.IsRow {
@@ -4831,10 +4907,57 @@ func (t *Template) computeIntrinsicWidth(idx int16) int16 {
 
 	// For text, compute string width
 	if op.Kind == OpText {
-		return op.Ext.(*opText).textWidth(nil) + op.marginH()
+		return op.Ext.(*opText).textWidth(elemBase) + op.marginH()
 	}
 
 	switch op.Kind {
+	case OpIf:
+		ifExt := op.Ext.(*opIf)
+		if elemBase == nil {
+			var maxW int16
+			for _, tmpl := range []*Template{ifExt.thenTmpl, ifExt.elseTmpl} {
+				if tmpl == nil || len(tmpl.ops) == 0 {
+					continue
+				}
+				if w := tmpl.computeIntrinsicWidthWithBase(0, nil); w > maxW {
+					maxW = w
+				}
+			}
+			return maxW + op.marginH()
+		}
+		branches, requested := ifBranches(ifExt, elemBase)
+		selected, _ := ifExt.selector(elemBase).selectBranch(requested, branches)
+		if tmpl := branchAt(branches, selected); tmpl != nil && len(tmpl.ops) > 0 {
+			tmpl.runItemEvalsFrom(t, elemBase)
+			return tmpl.computeIntrinsicWidthWithBase(0, elemBase)
+		}
+		return op.marginH()
+	case OpSwitch:
+		swExt := op.Ext.(*opSwitch)
+		var maxW int16
+		for _, ct := range append(swExt.cases, swExt.def) {
+			if ct == nil || len(ct.ops) == 0 {
+				continue
+			}
+			ct.runItemEvalsFrom(t, elemBase)
+			if w := ct.computeIntrinsicWidthWithBase(0, elemBase); w > maxW {
+				maxW = w
+			}
+		}
+		return maxW + op.marginH()
+	case OpMatch:
+		mExt := op.Ext.(*opMatch)
+		var maxW int16
+		for _, ct := range append(mExt.cases, mExt.def) {
+			if ct == nil || len(ct.ops) == 0 {
+				continue
+			}
+			ct.runItemEvalsFrom(t, elemBase)
+			if w := ct.computeIntrinsicWidthWithBase(0, elemBase); w > maxW {
+				maxW = w
+			}
+		}
+		return maxW + op.marginH()
 	case OpLeader:
 		w := op.width()
 		if w == 0 {
@@ -4886,6 +5009,13 @@ func templateIntrinsicWidth(tmpl *Template) int16 {
 		return 0
 	}
 	return tmpl.computeIntrinsicWidth(0)
+}
+
+func templateIntrinsicWidthWithBase(tmpl *Template, elemBase unsafe.Pointer) int16 {
+	if tmpl == nil || len(tmpl.ops) == 0 {
+		return 0
+	}
+	return tmpl.computeIntrinsicWidthWithBase(0, elemBase)
 }
 
 // setOpWidth sets a single op's width based on available space.
@@ -5012,6 +5142,19 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 	case OpSelectionList:
 		geom.W = availW
 
+	case OpForEach:
+		if op.Parent >= 0 {
+			parent := &t.ops[op.Parent]
+			if parent.Kind == OpContainer && parent.IsRow {
+				_, w := t.layoutForEachRow(idx, op, availW, parent.gap())
+				geom.W = w
+			} else {
+				geom.W = availW
+			}
+		} else {
+			geom.W = availW
+		}
+
 	case OpJump:
 		// Jump is a transparent wrapper - uses full available width
 		// Children will be laid out within this width
@@ -5036,8 +5179,7 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 		subTmpl := branchAt(branches, selected)
 		if subTmpl != nil {
 			subTmpl.setExitRenderingFor(elemBase, exiting)
-			subTmpl.elemBase = elemBase
-			subTmpl.runItemEvals(elemBase)
+			subTmpl.runItemEvalsFrom(t, elemBase)
 			// computeIntrinsicWidth handles both ContentSized containers and
 			// leaf nodes (OpText, etc.) that have a computable fixed width.
 			// Falls back to 0 for truly flexible content (Space, unsized containers).
@@ -5661,7 +5803,7 @@ func (t *Template) layout(_ int16) {
 							if ext.elemIsPtr {
 								elemPtr = *(*unsafe.Pointer)(elemPtr)
 							}
-							ext.iterTmpl.elemBase = elemPtr
+							ext.iterTmpl.bindItemContext(t, elemPtr)
 							ext.iterTmpl.itemIndex = li
 							for _, eval := range ext.iterTmpl.itemEvals {
 								eval()
@@ -5763,8 +5905,7 @@ func (t *Template) layout(_ int16) {
 				selected, exiting := ifExt.selector(t.elemBase).selectBranch(requested, branches)
 				if tmpl := branchAt(branches, selected); tmpl != nil {
 					tmpl.setExitRenderingFor(t.elemBase, exiting)
-					tmpl.elemBase = t.elemBase
-					tmpl.runItemEvals(t.elemBase)
+					tmpl.runItemEvalsFrom(t, t.elemBase)
 					tmpl.distributeWidths(geom.W, t.elemBase)
 					tmpl.layout(0)
 					geom.H = tmpl.Height()
@@ -5784,8 +5925,7 @@ func (t *Template) layout(_ int16) {
 				switchTmpl := branchAt(branches, selected)
 				if switchTmpl != nil {
 					switchTmpl.setExitRenderingFor(t.elemBase, exiting)
-					switchTmpl.elemBase = t.elemBase
-					switchTmpl.runItemEvals(t.elemBase)
+					switchTmpl.runItemEvalsFrom(t, t.elemBase)
 					switchTmpl.distributeWidths(geom.W, t.elemBase)
 					switchTmpl.layout(0)
 					geom.H = switchTmpl.Height()
@@ -5803,8 +5943,7 @@ func (t *Template) layout(_ int16) {
 				matchTmpl := branchAt(branches, selected)
 				if matchTmpl != nil {
 					matchTmpl.setExitRenderingFor(t.elemBase, exiting)
-					matchTmpl.elemBase = t.elemBase
-					matchTmpl.runItemEvals(t.elemBase)
+					matchTmpl.runItemEvalsFrom(t, t.elemBase)
 					matchTmpl.distributeWidths(geom.W, t.elemBase)
 					matchTmpl.layout(0)
 					geom.H = matchTmpl.Height()
@@ -5872,8 +6011,7 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 						cursor += int16(g)
 					}
 					tmpl.setExitRenderingFor(t.elemBase, exiting)
-					tmpl.elemBase = t.elemBase
-					tmpl.runItemEvals(t.elemBase)
+					tmpl.runItemEvalsFrom(t, t.elemBase)
 					tmpl.distributeWidths(ifWidth, t.elemBase)
 					tmpl.layout(0)
 					h := tmpl.Height()
@@ -5897,7 +6035,11 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 				if g := op.gap(); needGap && g > 0 {
 					cursor += int16(g)
 				}
-				h, w := t.layoutForEach(i, childOp, availW)
+				childAvailW := t.geom[i].W
+				if childAvailW <= 0 {
+					childAvailW = availW
+				}
+				h, w := t.layoutForEachRow(i, childOp, childAvailW, op.gap())
 				t.geom[i].LocalX = contentOffX + cursor
 				t.geom[i].LocalY = contentOffY
 				t.geom[i].H = h
@@ -6029,8 +6171,7 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 				tmpl := branchAt(branches, selected)
 				if tmpl != nil {
 					tmpl.setExitRenderingFor(t.elemBase, exiting)
-					tmpl.elemBase = t.elemBase
-					tmpl.runItemEvals(t.elemBase)
+					tmpl.runItemEvalsFrom(t, t.elemBase)
 					tmpl.distributeWidths(availW, t.elemBase)
 					tmpl.layout(0)
 					h := tmpl.Height()
@@ -6060,8 +6201,7 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 				tmpl := branchAt(branches, selected)
 				if tmpl != nil {
 					tmpl.setExitRenderingFor(t.elemBase, exiting)
-					tmpl.elemBase = t.elemBase
-					tmpl.runItemEvals(t.elemBase)
+					tmpl.runItemEvalsFrom(t, t.elemBase)
 					tmpl.distributeWidths(availW, t.elemBase)
 					tmpl.layout(0)
 					h := tmpl.Height()
@@ -6081,8 +6221,7 @@ func (t *Template) layoutContainer(idx int16, op *Op, geom *Geom) {
 				tmpl := branchAt(branches, selected)
 				if tmpl != nil {
 					tmpl.setExitRenderingFor(t.elemBase, exiting)
-					tmpl.elemBase = t.elemBase
-					tmpl.runItemEvals(t.elemBase)
+					tmpl.runItemEvalsFrom(t, t.elemBase)
 					tmpl.distributeWidths(availW, t.elemBase)
 					tmpl.layout(0)
 					h := tmpl.Height()
@@ -6461,7 +6600,8 @@ func (t *Template) layoutCustom(idx int16, op *Op, geom *Geom) {
 	geom.H = maxH
 }
 
-// layoutForEach iterates items, layouts each, returns total height and max width.
+// layoutForEach iterates items, lays each item out vertically, and returns
+// total height plus max width.
 func (t *Template) layoutForEach(_ int16, op *Op, availW int16) (totalH, maxW int16) {
 	feExt := op.Ext.(*opForEach)
 	if feExt.iterTmpl == nil {
@@ -6491,10 +6631,7 @@ func (t *Template) layoutForEach(_ int16, op *Op, availW int16) (totalH, maxW in
 		}
 
 		// Layout sub-template for this item with element base
-		feExt.iterTmpl.elemBase = elemPtr
-		for _, eval := range feExt.iterTmpl.itemEvals {
-			eval()
-		}
+		feExt.iterTmpl.runItemEvalsFrom(t, elemPtr)
 		feExt.iterTmpl.distributeWidths(availW, elemPtr)
 		feExt.iterTmpl.layout(0)
 		itemH := feExt.iterTmpl.Height()
@@ -6512,6 +6649,74 @@ func (t *Template) layoutForEach(_ int16, op *Op, availW int16) (totalH, maxW in
 	}
 
 	return cursor, maxW
+}
+
+// layoutForEachRow iterates items, lays each item out horizontally, and returns
+// max height plus total width. This is used when ForEach is a direct child of
+// an HBox, where the repeated items should behave like row children.
+func (t *Template) layoutForEachRow(_ int16, op *Op, availW int16, gap int8) (maxH, totalW int16) {
+	feExt := op.Ext.(*opForEach)
+	if feExt.iterTmpl == nil {
+		return 0, 0
+	}
+
+	sliceHdr, ok := feExt.sliceHeaderFor(t.elemBase)
+	if !ok {
+		return 0, 0
+	}
+	if sliceHdr.Len == 0 {
+		return 0, 0
+	}
+
+	if cap(feExt.geoms) < sliceHdr.Len {
+		feExt.geoms = make([]Geom, sliceHdr.Len)
+	}
+	feExt.geoms = feExt.geoms[:sliceHdr.Len]
+
+	cursor := int16(0)
+	for i := 0; i < sliceHdr.Len; i++ {
+		elemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*feExt.elemSize)
+		if feExt.elemIsPtr {
+			elemPtr = *(*unsafe.Pointer)(elemPtr)
+		}
+
+		feExt.iterTmpl.runItemEvalsFrom(t, elemPtr)
+		itemW := templateIntrinsicWidthWithBase(feExt.iterTmpl, elemPtr)
+		if itemW <= 0 {
+			itemW = availW
+		}
+		if itemW > availW {
+			itemW = availW
+		}
+		feExt.iterTmpl.distributeWidths(itemW, elemPtr)
+		feExt.iterTmpl.layout(0)
+
+		itemH := feExt.iterTmpl.Height()
+		if len(feExt.iterTmpl.geom) > 0 {
+			itemW = feExt.iterTmpl.geom[0].W
+		}
+		if itemW < 0 {
+			itemW = 0
+		}
+		if itemW > availW {
+			itemW = availW
+		}
+
+		if i > 0 && gap > 0 && itemW > 0 {
+			cursor += int16(gap)
+		}
+		feExt.geoms[i].LocalX = cursor
+		feExt.geoms[i].LocalY = 0
+		feExt.geoms[i].H = itemH
+		feExt.geoms[i].W = itemW
+
+		cursor += itemW
+		if itemH > maxH {
+			maxH = itemH
+		}
+	}
+
+	return maxH, cursor
 }
 
 // render draws to buffer, accumulating global positions top-down.
@@ -6607,10 +6812,19 @@ func (t *Template) currentRefOpacity() float64 {
 }
 
 func refOpacity(ref *NodeRef) float64 {
-	if ref == nil || !ref.opacitySet {
+	if ref == nil {
+		return 1
+	}
+	if !ref.opacitySet && ref.Opacity == 0 {
 		return 1
 	}
 	return clampOpacity(ref.Opacity)
+}
+
+// NodeOpacity returns a node ref's effective rendered opacity. Refs without an
+// opacity-producing ancestor are treated as fully opaque.
+func NodeOpacity(ref *NodeRef) float64 {
+	return refOpacity(ref)
 }
 
 func (t *Template) opacityForOp(op *Op) (float64, bool) {
@@ -7207,10 +7421,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 			}
 
 			// run per-item evaluators so conditions/tweens resolve for this item
-			feExt.iterTmpl.elemBase = elemPtr
-			for _, eval := range feExt.iterTmpl.itemEvals {
-				eval()
-			}
+			feExt.iterTmpl.runItemEvalsFrom(t, elemPtr)
 			feExt.iterTmpl.itemIndex = i
 			feExt.iterTmpl.distributeWidths(itemGeom.W, elemPtr)
 			feExt.iterTmpl.layout(0)
@@ -7255,7 +7466,7 @@ func (t *Template) renderSubTemplate(buf *Buffer, sub *Template, globalX, global
 	} else {
 		sub.inheritedFill = t.inheritedFill // propagate fill so blank cells use parent bg
 	}
-	sub.elemBase = elemBase // ensure renderOp paths (e.g. via renderJump) see the correct element
+	sub.bindItemContext(t, elemBase) // ensure renderOp paths (e.g. via renderJump) see the correct element
 	sub.pendingOverlays = sub.pendingOverlays[:0]
 	sub.pendingScreenEffects = sub.pendingScreenEffects[:0]
 	for i := range sub.ops {
@@ -7273,14 +7484,14 @@ func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, glo
 	sub.inheritedFill = t.inheritedFill
 	sub.clipMaxY = t.clipMaxY
 	sub.setJumpViewport(t.jumpOffsetX, t.jumpOffsetY, t.jumpMinY, t.jumpMaxY)
-	sub.elemBase = elemBase
+	sub.bindItemContext(t, elemBase)
 	sub.setExitRenderingFor(elemBase, exiting)
 	sub.pendingOverlays = sub.pendingOverlays[:0]
 	sub.pendingScreenEffects = sub.pendingScreenEffects[:0]
 	if exiting && !sub.hasActiveExitLeases() {
 		sub.runExitEvals()
 	}
-	sub.runItemEvals(elemBase)
+	sub.runItemEvalsFrom(t, elemBase)
 	oldRefOpacity := sub.refOpacity
 	oldRefOpacitySet := sub.refOpacitySet
 	sub.refOpacity = t.currentRefOpacity()
@@ -7757,11 +7968,9 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 				if feExt.elemIsPtr {
 					nestedElemPtr = *(*unsafe.Pointer)(nestedElemPtr)
 				}
-				feExt.iterTmpl.elemBase = nestedElemPtr
+				feExt.iterTmpl.bindItemContext(t, nestedElemPtr)
 				feExt.iterTmpl.itemIndex = j
-				for _, eval := range feExt.iterTmpl.itemEvals {
-					eval()
-				}
+				feExt.iterTmpl.runItemEvalsFrom(t, nestedElemPtr)
 				feExt.iterTmpl.distributeWidths(itemGeom.W, nestedElemPtr)
 				feExt.iterTmpl.layout(0)
 				t.renderSubTemplate(buf, feExt.iterTmpl, itemAbsX, itemAbsY, itemGeom.W, nestedElemPtr)
@@ -7951,11 +8160,9 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 
 			if needsFullPipeline {
 				// complex layout: use pre-calculated heights from layout phase
-				ext.iterTmpl.elemBase = elemPtr
+				ext.iterTmpl.bindItemContext(t, elemPtr)
 				ext.iterTmpl.itemIndex = i
-				for _, eval := range ext.iterTmpl.itemEvals {
-					eval()
-				}
+				ext.iterTmpl.runItemEvalsFrom(t, elemPtr)
 				ext.iterTmpl.distributeWidths(contentW, elemPtr)
 				ext.iterTmpl.layout(0)
 				if isSelected {
@@ -7988,11 +8195,9 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 				t.renderSubTemplate(buf, ext.iterTmpl, contentX, int16(y), contentW, elemPtr)
 			} else {
 				// Simple text: fast path (no layout needed)
-				ext.iterTmpl.elemBase = elemPtr
+				ext.iterTmpl.bindItemContext(t, elemPtr)
 				ext.iterTmpl.itemIndex = i
-				for _, eval := range ext.iterTmpl.itemEvals {
-					eval()
-				}
+				ext.iterTmpl.runItemEvalsFrom(t, elemPtr)
 				iterOp := &ext.iterTmpl.ops[0]
 
 				switch iterOp.Kind {
