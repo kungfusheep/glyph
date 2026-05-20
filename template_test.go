@@ -92,6 +92,35 @@ func TestForEachInsideHBoxUsesRowLayout(t *testing.T) {
 	}
 }
 
+func TestForEachInsideHBoxConstrainedToParentWidth(t *testing.T) {
+	type Item struct {
+		Label string
+	}
+	items := []Item{{Label: "first"}, {Label: "second"}}
+
+	tmpl := Build(VBox.Width(18)(
+		HBox.Gap(1)(
+			ForEach(&items, func(item *Item) Component {
+				return HBox.Width(12).Fill(Red)(
+					Text(&item.Label),
+				)
+			}),
+		),
+	))
+
+	buf := NewBuffer(30, 3)
+	tmpl.Execute(buf, 30, 3)
+
+	for x := 18; x < 30; x++ {
+		if got := buf.Get(x, 0).Style.BG; got != (Color{}) {
+			t.Fatalf("cell %d bg = %v, want default outside constrained parent\n%s", x, got, buf.String())
+		}
+	}
+	if got := buf.Get(17, 0).Style.BG; got != Red {
+		t.Fatalf("last in-bounds repeated child bg = %v, want Red\n%s", got, buf.String())
+	}
+}
+
 func TestIntrinsicWidthDoesNotEvaluateItemConditionWithoutBase(t *testing.T) {
 	type Item struct {
 		Visible bool

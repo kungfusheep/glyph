@@ -5018,6 +5018,15 @@ func templateIntrinsicWidthWithBase(tmpl *Template, elemBase unsafe.Pointer) int
 	return tmpl.computeIntrinsicWidthWithBase(0, elemBase)
 }
 
+func (t *Template) clampRootWidth(maxW int16) {
+	if t == nil || len(t.geom) == 0 || maxW < 0 {
+		return
+	}
+	if t.geom[0].W > maxW {
+		t.geom[0].W = maxW
+	}
+}
+
 // setOpWidth sets a single op's width based on available space.
 func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemBase unsafe.Pointer) {
 	switch op.Kind {
@@ -6680,16 +6689,29 @@ func (t *Template) layoutForEachRow(_ int16, op *Op, availW int16, gap int8) (ma
 			elemPtr = *(*unsafe.Pointer)(elemPtr)
 		}
 
+		if i > 0 && gap > 0 {
+			cursor += int16(gap)
+		}
+		if cursor >= availW {
+			feExt.geoms[i].LocalX = availW
+			feExt.geoms[i].LocalY = 0
+			feExt.geoms[i].H = 0
+			feExt.geoms[i].W = 0
+			continue
+		}
+
+		remainingW := availW - cursor
 		feExt.iterTmpl.runItemEvalsFrom(t, elemPtr)
 		itemW := templateIntrinsicWidthWithBase(feExt.iterTmpl, elemPtr)
 		if itemW <= 0 {
-			itemW = availW
+			itemW = remainingW
 		}
-		if itemW > availW {
-			itemW = availW
+		if itemW > remainingW {
+			itemW = remainingW
 		}
 		feExt.iterTmpl.distributeWidths(itemW, elemPtr)
 		feExt.iterTmpl.layout(0)
+		feExt.iterTmpl.clampRootWidth(itemW)
 
 		itemH := feExt.iterTmpl.Height()
 		if len(feExt.iterTmpl.geom) > 0 {
@@ -6698,13 +6720,10 @@ func (t *Template) layoutForEachRow(_ int16, op *Op, availW int16, gap int8) (ma
 		if itemW < 0 {
 			itemW = 0
 		}
-		if itemW > availW {
-			itemW = availW
+		if itemW > remainingW {
+			itemW = remainingW
 		}
 
-		if i > 0 && gap > 0 && itemW > 0 {
-			cursor += int16(gap)
-		}
 		feExt.geoms[i].LocalX = cursor
 		feExt.geoms[i].LocalY = 0
 		feExt.geoms[i].H = itemH
@@ -7425,6 +7444,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 			feExt.iterTmpl.itemIndex = i
 			feExt.iterTmpl.distributeWidths(itemGeom.W, elemPtr)
 			feExt.iterTmpl.layout(0)
+			feExt.iterTmpl.clampRootWidth(itemGeom.W)
 
 			// apply dynamic fills on root container before rendering
 			if len(feExt.iterTmpl.ops) > 0 {
@@ -7973,6 +7993,7 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 				feExt.iterTmpl.runItemEvalsFrom(t, nestedElemPtr)
 				feExt.iterTmpl.distributeWidths(itemGeom.W, nestedElemPtr)
 				feExt.iterTmpl.layout(0)
+				feExt.iterTmpl.clampRootWidth(itemGeom.W)
 				t.renderSubTemplate(buf, feExt.iterTmpl, itemAbsX, itemAbsY, itemGeom.W, nestedElemPtr)
 			}
 		}
