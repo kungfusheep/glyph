@@ -47,6 +47,33 @@ func TestWrapSpansRegistersJumpAfterWordWrap(t *testing.T) {
 	}
 }
 
+func TestWrapSpansKeepsPendingSpaceStyle(t *testing.T) {
+	buf := NewBuffer(20, 2)
+	linkStyle := Style{FG: Blue, Attr: AttrUnderline}
+	spans := []Span{
+		{Text: "before"},
+		{Text: " "},
+		{Text: "link", Style: linkStyle},
+	}
+
+	wrapSpansDraw(spans, buf, 0, 0, 20, 2, false, nil)
+
+	space := buf.Get(6, 0)
+	if space.Rune != ' ' {
+		t.Fatalf("cell 6 rune = %q, want space", space.Rune)
+	}
+	if space.Style.Attr&AttrUnderline != 0 || space.Style.FG.Equal(linkStyle.FG) {
+		t.Fatalf("space style = %#v, want plain spacer before link", space.Style)
+	}
+	link := buf.Get(7, 0)
+	if link.Rune != 'l' {
+		t.Fatalf("cell 7 rune = %q, want link start", link.Rune)
+	}
+	if link.Style.Attr&AttrUnderline == 0 || !link.Style.FG.Equal(linkStyle.FG) {
+		t.Fatalf("link style = %#v, want underlined link style", link.Style)
+	}
+}
+
 func TestRichSpanRegistersNativeJumpTarget(t *testing.T) {
 	app := NewApp()
 	selected := false

@@ -1043,6 +1043,72 @@ func TestRichTextInsideForEach(t *testing.T) {
 	})
 }
 
+func TestDynamicStylePointersInsideForEach(t *testing.T) {
+	t.Run("text foreground pointer resolves per element", func(t *testing.T) {
+		type Row struct {
+			Label string
+			Color Color
+		}
+		rows := []Row{
+			{Label: "one", Color: Red},
+			{Label: "two", Color: Green},
+		}
+
+		tmpl := Build(VBox(
+			ForEach(&rows, func(row *Row) Component {
+				return Text(&row.Label).FG(&row.Color)
+			}),
+		))
+		buf := NewBuffer(10, 3)
+		tmpl.Execute(buf, 10, 3)
+
+		if got := buf.Get(0, 0).Style.FG; got != Red {
+			t.Fatalf("row 0 FG = %#v, want red", got)
+		}
+		if got := buf.Get(0, 1).Style.FG; got != Green {
+			t.Fatalf("row 1 FG = %#v, want green", got)
+		}
+
+		rows[0].Color = Blue
+		rows[1].Color = Yellow
+		buf.Clear()
+		tmpl.Execute(buf, 10, 3)
+
+		if got := buf.Get(0, 0).Style.FG; got != Blue {
+			t.Fatalf("updated row 0 FG = %#v, want blue", got)
+		}
+		if got := buf.Get(0, 1).Style.FG; got != Yellow {
+			t.Fatalf("updated row 1 FG = %#v, want yellow", got)
+		}
+	})
+
+	t.Run("text style pointer resolves per element", func(t *testing.T) {
+		type Row struct {
+			Label string
+			Style Style
+		}
+		rows := []Row{
+			{Label: "one", Style: Style{FG: Red, Attr: AttrBold}},
+			{Label: "two", Style: Style{FG: Green, Attr: AttrDim}},
+		}
+
+		tmpl := Build(VBox(
+			ForEach(&rows, func(row *Row) Component {
+				return Text(&row.Label).Style(&row.Style)
+			}),
+		))
+		buf := NewBuffer(10, 3)
+		tmpl.Execute(buf, 10, 3)
+
+		if got := buf.Get(0, 0).Style; got.FG != Red || got.Attr&AttrBold == 0 {
+			t.Fatalf("row 0 style = %#v, want red bold", got)
+		}
+		if got := buf.Get(0, 1).Style; got.FG != Green || got.Attr&AttrDim == 0 {
+			t.Fatalf("row 1 style = %#v, want green dim", got)
+		}
+	})
+}
+
 func TestRichTextWrapsAcrossLines(t *testing.T) {
 	t.Run("word wraps static spans", func(t *testing.T) {
 		view := VBox.Width(12)(

@@ -212,6 +212,7 @@ func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int, jump sp
 	}
 
 	pendingSpace := false
+	pendingSpaceStyle := Style{}
 	for _, span := range spans {
 		text := span.Text
 		jumped := false
@@ -219,23 +220,29 @@ func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int, jump sp
 			if text[i] == '\n' {
 				flush()
 				pendingSpace = false
+				pendingSpaceStyle = Style{}
 				i++
 				continue
 			}
 			spaceBefore := pendingSpace
+			spaceStyle := pendingSpaceStyle
 			pendingSpace = false
+			pendingSpaceStyle = Style{}
 			for i < len(text) && (text[i] == ' ' || text[i] == '\t') {
 				if col > 0 {
 					spaceBefore = true
+					spaceStyle = span.Style
 				}
 				i++
 			}
 			if i >= len(text) {
 				pendingSpace = spaceBefore
+				pendingSpaceStyle = spaceStyle
 				continue
 			}
 			if text[i] == '\n' {
 				pendingSpace = false
+				pendingSpaceStyle = Style{}
 				continue
 			}
 			wordStart := i
@@ -263,7 +270,7 @@ func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int, jump sp
 					}
 				}
 			} else if spaceBefore && col+1+wordRunes <= width {
-				write(' ', span, &jumped, false)
+				write(' ', Span{Style: spaceStyle}, &jumped, false)
 				col++
 				for _, r := range word {
 					write(r, span, &jumped, true)

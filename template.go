@@ -1023,6 +1023,18 @@ func (t *Template) compileDynInt8(v any, elemBase unsafe.Pointer, elemSize uintp
 func (t *Template) compileDynColor(v any, elemBase unsafe.Pointer, elemSize uintptr) *Color {
 	switch c := v.(type) {
 	case *Color:
+		if contextIdx, ptrOffset, inForEach := t.elemContextForPtr(uintptr(unsafe.Pointer(c)), elemBase, elemSize); inForEach {
+			storage := new(Color)
+			*storage = *c
+			eval := func() {
+				base := t.runtimeElemBase(contextIdx)
+				if base != nil {
+					*storage = *(*Color)(unsafe.Pointer(uintptr(base) + ptrOffset))
+				}
+			}
+			t.itemEvals = append(t.itemEvals, eval)
+			return storage
+		}
 		return c
 	case conditionNode:
 		return t.compileCondColor(c, elemBase, elemSize)
@@ -1057,6 +1069,18 @@ func (t *Template) elemContextForPtr(ptrAddr uintptr, elemBase unsafe.Pointer, e
 func (t *Template) compileDynStyle(v any, elemBase unsafe.Pointer, elemSize uintptr) *Style {
 	switch c := v.(type) {
 	case *Style:
+		if contextIdx, ptrOffset, inForEach := t.elemContextForPtr(uintptr(unsafe.Pointer(c)), elemBase, elemSize); inForEach {
+			storage := new(Style)
+			*storage = *c
+			eval := func() {
+				base := t.runtimeElemBase(contextIdx)
+				if base != nil {
+					*storage = *(*Style)(unsafe.Pointer(uintptr(base) + ptrOffset))
+				}
+			}
+			t.itemEvals = append(t.itemEvals, eval)
+			return storage
+		}
 		return c
 	case conditionNode:
 		return t.compileCondStyle(c, elemBase, elemSize)
