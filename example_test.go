@@ -726,15 +726,15 @@ func ExampleSpan() {
 }
 
 // Full-screen app.
-// SetView compiles the tree once, Handle binds keys, Run blocks until Stop is called.
+// SetView compiles the tree once. On declares key bindings in the tree. Run blocks until Stop is called.
 func ExampleNewApp() {
 	// example:
 	app := NewApp()
 	app.SetView(VBox(
 		Text("hello from glyph"),
 		Text("press q to quit"),
+		On(Key("q", func() { app.Stop() })),
 	))
-	app.Handle("q", func() { app.Stop() })
 	app.Run()
 	// :example
 
@@ -774,12 +774,14 @@ func ExampleApp_multiView() {
 	app.View("home", VBox(
 		Text("Welcome"),
 		Text("press n for next"),
-	)).Handle("n", func() { app.Go("detail") })
+		On(Key("n", func() { app.Go("detail") })),
+	))
 
 	app.View("detail", VBox(
 		Text("Detail view"),
 		Text("press b for back"),
-	)).Handle("b", func() { app.Go("home") })
+		On(Key("b", func() { app.Go("home") })),
+	))
 
 	app.RunFrom("home")
 	// :example
@@ -801,8 +803,10 @@ func ExampleApp_goroutine() {
 	app := NewApp()
 
 	status := "waiting..."
-	app.SetView(Text(&status))
-	app.Handle("q", func() { app.Stop() })
+	app.SetView(VBox(
+		Text(&status),
+		On(Key("q", func() { app.Stop() })),
+	))
 
 	time.AfterFunc(2*time.Second, func() {
 		status = "done!"
@@ -828,12 +832,16 @@ func ExampleViewBuilder() {
 		VBox(
 			Text("Editor"),
 			Input().Placeholder("type here..."),
+			On(
+				Key("<C-s>", func() {
+					name = name + " saved"
+				}),
+				Key("<Esc>", func() {
+					app.Go("home")
+				}),
+			),
 		),
-	).NoCounts().Handle("<C-s>", func() {
-		name = name + " saved"
-	}).Handle("escape", func() {
-		app.Go("home")
-	})
+	).NoCounts()
 	// :example
 	_ = name
 
