@@ -60,6 +60,7 @@ type App struct {
 	renderChan     chan struct{}
 	frameFlushed   atomic.Bool // set when input renders directly, cleared by debounce timer
 	forceFullFlush bool        // set by Go() to force full redraw on next frame
+	suspended      atomic.Bool // when set, render() is a no-op (terminal handed to an external program, e.g. $EDITOR)
 	effectsActive  bool        // previous frame used post-processing; clear pooled buffers fully
 
 	// Cursor state
@@ -849,8 +850,24 @@ func (a *App) ForceRedraw() {
 	a.RequestRender()
 }
 
+// Suspend stops all rendering until Resume. Use it around handing the terminal to an
+// external program (e.g. shelling out to $EDITOR): while suspended, render() is a
+// no-op, so no source — animation goroutines, reload signals, anything — can draw over
+// the other program. One gate instead of teaching every render caller about the editor.
+func (a *App) Suspend() { a.suspended.Store(true) }
+
+// Resume re-enables rendering and forces a full repaint (the external program will have
+// scribbled over the screen, so a diff against the stale front buffer isn't enough).
+func (a *App) Resume() {
+	a.suspended.Store(false)
+	a.ForceRedraw()
+}
+
 // render performs the actual render if needed.
 func (a *App) render() {
+	if a.suspended.Load() {
+		return // terminal handed to an external program — draw nothing
+	}
 	a.renderMu.Lock()
 	defer a.renderMu.Unlock()
 
