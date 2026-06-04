@@ -602,9 +602,9 @@ func ExampleScrollbar() {
 
 	renderAndPrint("Scroll", tree, 15, 3)
 	// Output:
-	// line 1        █
-	// line 2
-	// line 3
+	// line 1        ▀
+	// line 2        │
+	// line 3        │
 }
 
 // Conditional show.
@@ -2345,7 +2345,6 @@ func ExampleFormField() {
 	// Output: ▸Name: enter name
 }
 
-
 // Animation tween.
 // Animate interpolates toward a target value over time. Configure duration and easing, then apply to any numeric property.
 func ExampleAnimateFn() {
@@ -2437,10 +2436,10 @@ func ExampleIn() {
 		VBox.Border(BorderRounded).
 			Width(
 				In(20).
-				Out(Animate(0)),
+					Out(Animate(0)),
 			)(
-				Text("hello"),
-			),
+			Text("hello"),
+		),
 	)
 	// :example
 

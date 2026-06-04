@@ -2364,8 +2364,14 @@ func (l *ListC[T]) Style(s any) *ListC[T] {
 	switch v := s.(type) {
 	case Style:
 		l.style = v
+		if l.cached != nil {
+			l.cached.Style = v
+		}
 	default:
 		l.styleDyn = s
+		if l.cached != nil {
+			l.cached.StyleDyn = s
+		}
 	}
 	return l
 }
@@ -2376,8 +2382,14 @@ func (l *ListC[T]) SelectedStyle(s any) *ListC[T] {
 	switch v := s.(type) {
 	case Style:
 		l.selectedStyle = v
+		if l.cached != nil {
+			l.cached.SelectedStyle = v
+		}
 	default:
 		l.selectedStyleDyn = s
+		if l.cached != nil {
+			l.cached.SelectedStyleDyn = s
+		}
 	}
 	return l
 }
@@ -2579,16 +2591,21 @@ func (t TabsC) MarginTRBL(a, b, c, d int16) TabsC { t.margin = [4]int16{a, b, c,
 // ============================================================================
 
 type ScrollbarC struct {
-	contentSize int
-	viewSize    int
-	position    *int
-	length      int16
-	horizontal  bool
-	trackChar   rune
-	thumbChar   rune
-	trackStyle  Style
-	thumbStyle  Style
-	margin      [4]int16
+	contentSize   int
+	viewSize      int
+	position      *int
+	layer         *Layer
+	length        int16
+	horizontal    bool
+	trackChar     rune
+	thumbChar     rune
+	trackStyle    Style
+	thumbStyle    Style
+	trackStyleDyn any
+	thumbStyleDyn any
+	opacity       dynFloat64
+	opacityMode   OpacityMode
+	margin        [4]int16
 }
 
 // Scroll creates a scrollbar for tracking position in scrollable content.
@@ -2599,6 +2616,15 @@ func Scrollbar(contentSize, viewSize int, position *int) ScrollbarC {
 		position:    position,
 		trackChar:   '│',
 		thumbChar:   '█',
+	}
+}
+
+// ScrollbarForLayer creates a scrollbar bound to a scrollable Layer.
+func ScrollbarForLayer(layer *Layer) ScrollbarC {
+	return ScrollbarC{
+		layer:     layer,
+		trackChar: '│',
+		thumbChar: '█',
 	}
 }
 
@@ -2628,14 +2654,45 @@ func (s ScrollbarC) ThumbChar(c rune) ScrollbarC {
 }
 
 // TrackStyle sets the style for the track.
-func (s ScrollbarC) TrackStyle(st Style) ScrollbarC {
-	s.trackStyle = st
+func (s ScrollbarC) TrackStyle(st any) ScrollbarC {
+	switch val := st.(type) {
+	case Style:
+		s.trackStyle = val
+	case *Style:
+		s.trackStyleDyn = val
+	case conditionNode:
+		s.trackStyleDyn = val
+	case tweenNode:
+		s.trackStyleDyn = val
+	}
 	return s
 }
 
 // ThumbStyle sets the style for the thumb.
-func (s ScrollbarC) ThumbStyle(st Style) ScrollbarC {
-	s.thumbStyle = st
+func (s ScrollbarC) ThumbStyle(st any) ScrollbarC {
+	switch val := st.(type) {
+	case Style:
+		s.thumbStyle = val
+	case *Style:
+		s.thumbStyleDyn = val
+	case conditionNode:
+		s.thumbStyleDyn = val
+	case tweenNode:
+		s.thumbStyleDyn = val
+	}
+	return s
+}
+
+// Opacity sets the scrollbar opacity (0.0 = backing cell, 1.0 = fully visible).
+// Accepts float64, *float64, conditionNode, or tweenNode.
+func (s ScrollbarC) Opacity(o any) ScrollbarC {
+	s.opacity.set(o)
+	return s
+}
+
+// OpacityMode sets how rune ownership hands off during opacity fades.
+func (s ScrollbarC) OpacityMode(mode OpacityMode) ScrollbarC {
+	s.opacityMode = mode
 	return s
 }
 

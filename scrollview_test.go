@@ -114,3 +114,51 @@ func TestScrollView_Refresh(t *testing.T) {
 		t.Errorf("after refresh: got %q, want %q", got, "updated")
 	}
 }
+
+func TestScrollView_WithScrollbarReservesGutterOutsideLayer(t *testing.T) {
+	sv := ScrollView.Grow(1).Scrollbar()(
+		Text("01234567890"),
+		Text("line1"),
+		Text("line2"),
+		Text("line3"),
+		Text("line4"),
+		Text("line5"),
+	)
+
+	screen := NewBuffer(12, 3)
+	tmpl := Build(sv)
+	tmpl.Execute(screen, 12, 3)
+
+	if got := sv.Layer().ViewportWidth(); got != 11 {
+		t.Fatalf("scroll layer width = %d, want 11 with one-column gutter", got)
+	}
+	if got := screen.Get(10, 0).Rune; got != '0' {
+		t.Fatalf("last content column = %q, want 0 before gutter\n%s", got, screen.String())
+	}
+	if got := screen.Get(11, 0).Rune; got != '█' {
+		t.Fatalf("scrollbar top glyph = %q, want thumb in gutter\n%s", got, screen.String())
+	}
+}
+
+func TestScrollViewScrollbarFollowsLayerScroll(t *testing.T) {
+	sv := ScrollView.Grow(1).Scrollbar()(
+		Text("line0"),
+		Text("line1"),
+		Text("line2"),
+		Text("line3"),
+		Text("line4"),
+		Text("line5"),
+	)
+
+	screen := NewBuffer(12, 3)
+	tmpl := Build(sv)
+	tmpl.Execute(screen, 12, 3)
+
+	sv.Layer().ScrollToEnd()
+	screen.Clear()
+	tmpl.Execute(screen, 12, 3)
+
+	if got := screen.Get(11, 2).Rune; got != '█' {
+		t.Fatalf("scrollbar bottom glyph = %q, want thumb at bottom\n%s", got, screen.String())
+	}
+}

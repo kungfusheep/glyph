@@ -839,6 +839,16 @@ func (a *App) RenderNow() {
 	a.render()
 }
 
+// ForceRedraw schedules a FULL repaint (every cell) on the next frame instead of
+// the usual diff against the front buffer. Needed after the terminal has been
+// written to outside glyph's control — e.g. shelling out to $EDITOR and
+// re-entering raw mode (which clears the screen) — where the stale front buffer
+// would otherwise suppress the repaint and leave a blank screen.
+func (a *App) ForceRedraw() {
+	a.forceFullFlush = true
+	a.RequestRender()
+}
+
 // render performs the actual render if needed.
 func (a *App) render() {
 	a.renderMu.Lock()

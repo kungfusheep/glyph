@@ -249,7 +249,6 @@ func TestLeaderComponent(t *testing.T) {
 	})
 }
 
-
 func TestSparklineComponent(t *testing.T) {
 	t.Run("basic sparkline renders", func(t *testing.T) {
 		values := []float64{1, 3, 5, 7, 5, 3, 1, 2, 4, 6, 8}
@@ -663,7 +662,7 @@ func findThumbPosition(buf *Buffer, x, length int, horizontal bool) int {
 		} else {
 			char = buf.Get(x, i).Rune
 		}
-		if char == '█' || char == '▓' {
+		if char == '█' || char == '▓' || char == '▁' || char == '▂' || char == '▃' || char == '▄' || char == '▅' || char == '▆' || char == '▇' || char == '▔' || char == '🮂' || char == '🮃' || char == '▀' || char == '🮄' || char == '🮅' || char == '🮆' {
 			return i
 		}
 	}

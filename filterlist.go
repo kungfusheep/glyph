@@ -219,6 +219,16 @@ func (fl *FilterListC[T]) Render(fn func(*T) Component) *FilterListC[T] {
 	return fl
 }
 
+// OnSelect fires when the filtered list selection moves.
+func (fl *FilterListC[T]) OnSelect(fn func(*T)) *FilterListC[T] {
+	fl.list.OnSelect(func(pp **T) {
+		if pp != nil && *pp != nil {
+			fn(*pp)
+		}
+	})
+	return fl
+}
+
 // MaxVisible sets the maximum number of visible items.
 func (fl *FilterListC[T]) MaxVisible(n int) *FilterListC[T] {
 	fl.maxVisible = n
@@ -383,13 +393,13 @@ func (fl *FilterListC[T]) Marker(m string) *FilterListC[T] {
 }
 
 // Style sets the default style for non-selected rows.
-func (fl *FilterListC[T]) Style(s Style) *FilterListC[T] {
+func (fl *FilterListC[T]) Style(s any) *FilterListC[T] {
 	fl.list.Style(s)
 	return fl
 }
 
 // SelectedStyle sets the style for the selected row.
-func (fl *FilterListC[T]) SelectedStyle(s Style) *FilterListC[T] {
+func (fl *FilterListC[T]) SelectedStyle(s any) *FilterListC[T] {
 	fl.list.SelectedStyle(s)
 	return fl
 }

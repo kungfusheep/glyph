@@ -12,10 +12,16 @@ package glyph
 //	    Text("World"),
 //	)
 type ScrollViewC struct {
-	layer    *Layer
-	children []Component
-	flexGrow float32
-	margin   [4]int16
+	layer     *Layer
+	children  []Component
+	flexGrow  float32
+	margin    [4]int16
+	scrollbar bool
+
+	scrollbarTrackStyle  any
+	scrollbarThumbStyle  any
+	scrollbarOpacity     dynFloat64
+	scrollbarOpacityMode OpacityMode
 
 	// wrapper config — when any of these are set, the layer view is
 	// wrapped in a configured VBox at compile time.
@@ -163,6 +169,56 @@ func (f ScrollViewFn) PaddingTRBL(top, right, bottom, left int16) ScrollViewFn {
 	}
 }
 
+// Scrollbar reserves a one-column gutter and renders a scrollbar bound to the
+// scroll view's layer.
+func (f ScrollViewFn) Scrollbar() ScrollViewFn {
+	return func(children ...Component) *ScrollViewC {
+		sv := f(children...)
+		sv.scrollbar = true
+		return sv
+	}
+}
+
+// ScrollbarVisible reserves the scrollbar gutter and fades the scrollbar in
+// while the condition is true.
+func (f ScrollViewFn) ScrollbarVisible(visible *bool) ScrollViewFn {
+	return f.Scrollbar().ScrollbarOpacity(
+		Animate(If(visible).Then(1.0).Else(0.0)),
+	)
+}
+
+func (f ScrollViewFn) ScrollbarTrackStyle(st any) ScrollViewFn {
+	return func(children ...Component) *ScrollViewC {
+		sv := f(children...)
+		sv.scrollbarTrackStyle = st
+		return sv
+	}
+}
+
+func (f ScrollViewFn) ScrollbarThumbStyle(st any) ScrollViewFn {
+	return func(children ...Component) *ScrollViewC {
+		sv := f(children...)
+		sv.scrollbarThumbStyle = st
+		return sv
+	}
+}
+
+func (f ScrollViewFn) ScrollbarOpacity(o any) ScrollViewFn {
+	return func(children ...Component) *ScrollViewC {
+		sv := f(children...)
+		sv.scrollbarOpacity.set(o)
+		return sv
+	}
+}
+
+func (f ScrollViewFn) ScrollbarOpacityMode(mode OpacityMode) ScrollViewFn {
+	return func(children ...Component) *ScrollViewC {
+		sv := f(children...)
+		sv.scrollbarOpacityMode = mode
+		return sv
+	}
+}
+
 // Ref captures a reference to the ScrollView via a callback during construction.
 func (f ScrollViewFn) Ref(fn func(*ScrollViewC)) ScrollViewFn {
 	return func(children ...Component) *ScrollViewC {
@@ -192,11 +248,27 @@ func (sv *ScrollViewC) Refresh() {
 
 func (t *Template) compileScrollViewC(v *ScrollViewC, parent int16, depth int) int16 {
 	layerView := LayerView(v.layer).Grow(v.flexGrow)
-	if v.margin != [4]int16{} {
+	if v.scrollbar {
+		layerView = LayerView(v.layer).Grow(1)
+	}
+	if v.margin != [4]int16{} && !v.scrollbar {
 		layerView = layerView.MarginTRBL(v.margin[0], v.margin[1], v.margin[2], v.margin[3])
 	}
+	component := Component(layerView)
+	if v.scrollbar {
+		bar := ScrollbarForLayer(v.layer).
+			TrackStyle(v.scrollbarTrackStyle).
+			ThumbStyle(v.scrollbarThumbStyle).
+			OpacityMode(v.scrollbarOpacityMode)
+		bar.opacity = v.scrollbarOpacity
+		box := HBox.Grow(v.flexGrow)
+		if v.margin != [4]int16{} {
+			box = box.MarginTRBL(v.margin[0], v.margin[1], v.margin[2], v.margin[3])
+		}
+		component = box(layerView, bar)
+	}
 	if !v.wrap {
-		return t.compileLayerViewC(layerView, parent, depth)
+		return t.compile(component, parent, depth, nil, 0)
 	}
 	// wrap in a configured VBox carrying border/title/padding/fill.
 	box := VBox
@@ -220,7 +292,7 @@ func (t *Template) compileScrollViewC(v *ScrollViewC, parent int16, depth int) i
 	if v.padding != [4]int16{} {
 		box = box.PaddingTRBL(v.padding[0], v.padding[1], v.padding[2], v.padding[3])
 	}
-	return t.compileVBoxC(box(layerView), parent, depth, nil, 0)
+	return t.compileVBoxC(box(component), parent, depth, nil, 0)
 }
 
 func (sv *ScrollViewC) render() {

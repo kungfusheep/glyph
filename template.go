@@ -2777,14 +2777,17 @@ type opRule struct {
 }
 
 type opScrollbar struct {
-	contentSize int
-	viewSize    int
-	posPtr      *int
-	horizontal  bool
-	trackChar   rune
-	thumbChar   rune
-	trackStyle  Style
-	thumbStyle  Style
+	contentSize   int
+	viewSize      int
+	posPtr        *int
+	layer         *Layer
+	horizontal    bool
+	trackChar     rune
+	thumbChar     rune
+	trackStyle    Style
+	thumbStyle    Style
+	trackStylePtr *Style
+	thumbStylePtr *Style
 }
 
 type opTabs struct {
@@ -4395,23 +4398,44 @@ func (t *Template) compileScrollbarC(v ScrollbarC, parent int16, depth int) int1
 		thumbChar = '█'
 	}
 	ext := &opScrollbar{
-		contentSize: v.contentSize,
-		viewSize:    v.viewSize,
-		posPtr:      v.position,
-		horizontal:  v.horizontal,
-		trackChar:   trackChar,
-		thumbChar:   thumbChar,
-		trackStyle:  v.trackStyle,
-		thumbStyle:  v.thumbStyle,
+		contentSize:   v.contentSize,
+		viewSize:      v.viewSize,
+		posPtr:        v.position,
+		layer:         v.layer,
+		horizontal:    v.horizontal,
+		trackChar:     trackChar,
+		thumbChar:     thumbChar,
+		trackStyle:    v.trackStyle,
+		thumbStyle:    v.thumbStyle,
+		trackStylePtr: t.compileStyleDyn(v.trackStyle, v.trackStyleDyn, nil, nil, nil, 0),
+		thumbStylePtr: t.compileStyleDyn(v.thumbStyle, v.thumbStyleDyn, nil, nil, nil, 0),
 	}
-	return t.addOp(Op{
-		Kind:   OpScrollbar,
-		Parent: parent,
-		Width:  v.length,
-		Height: v.length,
-		Margin: v.margin,
-		Ext:    ext,
+	width, height := v.length, v.length
+	if v.horizontal {
+		if height == 0 {
+			height = 1
+		}
+	} else {
+		width = 1
+	}
+	idx := t.addOp(Op{
+		Kind:        OpScrollbar,
+		Parent:      parent,
+		Width:       width,
+		Height:      height,
+		OpacityMode: v.opacityMode,
+		Margin:      v.margin,
+		Ext:         ext,
 	}, depth)
+	if v.opacity.dyn != nil {
+		t.ops[idx].Dyn = &OpDyn{}
+		t.ops[idx].Dyn.Opacity = t.compileDynFloat64(v.opacity.dyn, nil, 0)
+	} else if v.opacity.isSet {
+		t.ops[idx].Dyn = &OpDyn{}
+		val := v.opacity.val
+		t.ops[idx].Dyn.Opacity = &val
+	}
+	return idx
 }
 
 func (t *Template) compileAutoTableC(v AutoTableC, parent int16, depth int) int16 {
@@ -6351,8 +6375,8 @@ func (t *Template) stretchRowChildren(idx int16, op *Op) {
 		}
 		childGeom := &t.geom[i]
 
-		// Stretch containers, layers, and VRule to fill height (unless they have explicit height)
-		if childOp.Kind == OpContainer || childOp.Kind == OpLayer || childOp.Kind == OpVRule {
+		// Stretch containers, layers, vertical rules, and vertical scrollbars to fill height.
+		if childOp.Kind == OpContainer || childOp.Kind == OpLayer || childOp.Kind == OpVRule || childOp.Kind == OpScrollbar {
 			if childOp.height() == 0 && childGeom.H < availH {
 				childGeom.H = availH
 			}
@@ -8803,25 +8827,34 @@ func (t *Template) renderTabs(buf *Buffer, op *Op, geom *Geom, absX, absY int16)
 
 func (t *Template) renderScrollbar(buf *Buffer, op *Op, geom *Geom, absX, absY int16) {
 	ext := op.Ext.(*opScrollbar)
-	// Calculate scrollbar dimensions
+	trackStyle := ext.trackStyle
+	if ext.trackStylePtr != nil {
+		trackStyle = *ext.trackStylePtr
+	}
+	thumbStyle := ext.thumbStyle
+	if ext.thumbStylePtr != nil {
+		thumbStyle = *ext.thumbStylePtr
+	}
 	length := int(geom.H)
 	if ext.horizontal {
 		length = int(geom.W)
 	}
-
 	if length == 0 {
 		return
 	}
+	opacity, hasOpacity := t.opacityForOp(op)
 
-	// Get scroll position
 	pos := 0
 	if ext.posPtr != nil {
 		pos = *ext.posPtr
 	}
-
-	// Calculate thumb size and position
 	contentSize := ext.contentSize
 	viewSize := ext.viewSize
+	if ext.layer != nil {
+		pos = ext.layer.ScrollY()
+		contentSize = ext.layer.ContentHeight()
+		viewSize = ext.layer.ViewportHeight()
+	}
 	if contentSize <= 0 {
 		contentSize = 1
 	}
@@ -8829,62 +8862,73 @@ func (t *Template) renderScrollbar(buf *Buffer, op *Op, geom *Geom, absX, absY i
 		viewSize = 1
 	}
 
-	// Thumb size proportional to view/content ratio (minimum 1)
-	thumbSize := (viewSize * length) / contentSize
-	if thumbSize < 1 {
-		thumbSize = 1
+	trackUnits := length * 8
+	thumbUnits := (viewSize * trackUnits) / contentSize
+	if thumbUnits < 1 {
+		thumbUnits = 1
 	}
-	if thumbSize > length {
-		thumbSize = length
+	if thumbUnits > trackUnits {
+		thumbUnits = trackUnits
 	}
-
-	// Thumb position
+	maxThumbStart := trackUnits - thumbUnits
 	scrollRange := contentSize - viewSize
-	if scrollRange <= 0 {
-		scrollRange = 1
+	thumbStart := 0
+	if scrollRange > 0 && maxThumbStart > 0 {
+		thumbStart = (pos * maxThumbStart) / scrollRange
 	}
-	trackSpace := length - thumbSize
-	thumbPos := 0
-	if trackSpace > 0 {
-		thumbPos = (pos * trackSpace) / scrollRange
-		if thumbPos < 0 {
-			thumbPos = 0
-		}
-		if thumbPos > trackSpace {
-			thumbPos = trackSpace
-		}
+	if thumbStart < 0 {
+		thumbStart = 0
 	}
+	if thumbStart > maxThumbStart {
+		thumbStart = maxThumbStart
+	}
+	thumbEnd := thumbStart + thumbUnits
 
-	// Draw the scrollbar
-	if ext.horizontal {
-		// Horizontal scrollbar
-		for i := 0; i < length; i++ {
-			var char rune
-			var style Style
-			if i >= thumbPos && i < thumbPos+thumbSize {
-				char = ext.thumbChar
-				style = ext.thumbStyle
-			} else {
-				char = ext.trackChar
-				style = ext.trackStyle
+	for i := 0; i < length; i++ {
+		cellStart := i * 8
+		cellEnd := cellStart + 8
+		covered := min(cellEnd, thumbEnd) - max(cellStart, thumbStart)
+		char := ext.trackChar
+		style := trackStyle
+		if covered > 0 {
+			if covered > 8 {
+				covered = 8
 			}
-			buf.Set(int(absX)+i, int(absY), Cell{Rune: char, Style: style})
+			char = scrollbarThumbRune(covered, cellEnd > thumbEnd, ext.thumbChar, ext.horizontal)
+			style = thumbStyle
 		}
-	} else {
-		// Vertical scrollbar
-		for i := 0; i < length; i++ {
-			var char rune
-			var style Style
-			if i >= thumbPos && i < thumbPos+thumbSize {
-				char = ext.thumbChar
-				style = ext.thumbStyle
+		cell := Cell{Rune: char, Style: style}
+		if ext.horizontal {
+			if hasOpacity && opacity < 1 {
+				buf.SetOpacity(int(absX)+i, int(absY), cell, opacity, op.OpacityMode)
 			} else {
-				char = ext.trackChar
-				style = ext.trackStyle
+				buf.Set(int(absX)+i, int(absY), cell)
 			}
-			buf.Set(int(absX), int(absY)+i, Cell{Rune: char, Style: style})
+		} else {
+			if hasOpacity && opacity < 1 {
+				buf.SetOpacity(int(absX), int(absY)+i, cell, opacity, op.OpacityMode)
+			} else {
+				buf.Set(int(absX), int(absY)+i, cell)
+			}
 		}
 	}
+}
+
+var scrollbarLowerBlocks = [...]rune{'│', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+var scrollbarUpperBlocks = [...]rune{'│', '▔', '🮂', '🮃', '▀', '🮄', '🮅', '🮆', '█'}
+var scrollbarLeftBlocks = [...]rune{'─', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'}
+
+func scrollbarThumbRune(covered int, trailing bool, fallback rune, horizontal bool) rune {
+	if covered >= 8 {
+		return fallback
+	}
+	if horizontal {
+		return scrollbarLeftBlocks[covered]
+	}
+	if trailing {
+		return scrollbarUpperBlocks[covered]
+	}
+	return scrollbarLowerBlocks[covered]
 }
 
 func (t *Template) writeTableCell(buf *Buffer, x, y int, text string, width int, align Align, style Style) {

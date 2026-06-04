@@ -330,6 +330,52 @@ func TestFilterListSelectedStyleFillsCustomRowWidth(t *testing.T) {
 	}
 }
 
+func TestFilterListStyleUpdatesCachedList(t *testing.T) {
+	items := []string{"Compose New", "Resume Draft"}
+	darkBG := Hex(0x111111)
+	lightBG := Hex(0xf6f6f6)
+	fl := FilterList(&items, func(s *string) string { return *s }).
+		Marker("  ").
+		Style(Style{BG: darkBG}).
+		SelectedStyle(Style{BG: darkBG}).
+		Render(func(s *string) Component {
+			return VBox.PaddingVH(1, 2)(
+				Text(s),
+			)
+		})
+
+	tmpl := Build(VBox.Width(40)(fl))
+	buf := NewBuffer(40, 6)
+	tmpl.Execute(buf, 40, 6)
+	if got := buf.Get(0, 2).Style.BG; got != darkBG {
+		t.Fatalf("initial cached row bg = %v, want %v", got, darkBG)
+	}
+
+	fl.Style(Style{BG: lightBG})
+	fl.SelectedStyle(Style{BG: lightBG})
+	buf = NewBuffer(40, 6)
+	tmpl.Execute(buf, 40, 6)
+	if got := buf.Get(0, 2).Style.BG; got != lightBG {
+		t.Fatalf("updated cached row bg = %v, want %v", got, lightBG)
+	}
+}
+
+func TestFilterListOnSelectFiresWhenSelectionMoves(t *testing.T) {
+	items := []string{"dark", "light"}
+	selected := ""
+	fl := FilterList(&items, func(s *string) string { return *s }).
+		OnSelect(func(s *string) {
+			selected = *s
+		})
+
+	Build(fl).Execute(NewBuffer(40, 10), 40, 10)
+	fl.SelectNext()
+
+	if selected != "light" {
+		t.Fatalf("selected = %q, want light", selected)
+	}
+}
+
 func TestFilterListSelectedMapsToOriginal(t *testing.T) {
 	items := []string{"Go", "Rust", "Python", "JavaScript"}
 	fl := FilterList(&items, func(s *string) string { return *s })
