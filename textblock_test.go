@@ -19,6 +19,34 @@ func TestTextBlock_WrapsText(t *testing.T) {
 	}
 }
 
+func TestTextBlock_WrapsWideRunes(t *testing.T) {
+	// 8 double-width runes = 16 cells. In width 10 they must wrap after 5 (10 cells),
+	// not pack 8 runes into 8 columns and bleed past the right edge — the rune-count
+	// wrap bug behind the ragged comment pane. Each wide rune claims its glyph cell
+	// plus a placeholder (Rune 0) so the renderer skips the continuation.
+	buf := NewBuffer(10, 6)
+	tmpl := Build(VBox(TextBlock("你好世界你好世界")))
+	tmpl.Execute(buf, 10, 6)
+
+	if r := buf.Get(0, 0).Rune; r != '你' {
+		t.Fatalf("(0,0) = %q, want 你", r)
+	}
+	if r := buf.Get(1, 0).Rune; r != 0 {
+		t.Fatalf("(1,0) = %q, want placeholder 0 (continuation of a wide rune)", r)
+	}
+	if r := buf.Get(2, 0).Rune; r != '好' {
+		t.Fatalf("(2,0) = %q, want 好", r)
+	}
+	// 5th rune sits at col 8 (0,2,4,6,8) — the line fills exactly 10 cells, no overflow
+	if r := buf.Get(8, 0).Rune; r != '你' {
+		t.Fatalf("(8,0) = %q, want 你 (5th wide rune)", r)
+	}
+	// the 6th rune wraps to line 1
+	if r := buf.Get(0, 1).Rune; r != '好' {
+		t.Fatalf("(0,1) = %q, want 好 (6th rune wrapped to line 1)", r)
+	}
+}
+
 func TestTextBlock_MultipleLines(t *testing.T) {
 	buf := NewBuffer(40, 10)
 	tmpl := Build(VBox(

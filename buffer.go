@@ -167,12 +167,18 @@ func (b *Buffer) Row(y int, style Style) RowWriter {
 	}
 }
 
-// Put writes a rune at column x. Out-of-bounds columns are silently dropped.
+// Put writes a rune at column x. Out-of-bounds columns are silently dropped. A
+// double-width rune also claims the next cell with a placeholder (Rune: 0), the same
+// convention WriteString/WriteSpans use, so the renderer skips the continuation cell
+// instead of emitting a stray glyph and shoving the row right.
 func (rw *RowWriter) Put(x int, r rune) {
 	if x < 0 || x >= rw.width {
 		return
 	}
 	rw.cells[x] = Cell{Rune: r, Style: rw.style}
+	if RuneWidth(r) == 2 && x+1 < rw.width {
+		rw.cells[x+1] = Cell{Rune: 0, Style: rw.style}
+	}
 }
 
 // Partial block characters for sub-character progress bar precision (1/8 to 8/8)

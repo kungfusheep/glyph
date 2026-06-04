@@ -401,50 +401,52 @@ func wrapDrawWord(s string, buf *Buffer, x, y, width, maxLines int, style Style)
 			continue
 		}
 		wordStart := i
-		wordRunes := 0
+		wordCells := 0 // visual width in cells, not rune count — wide runes cost 2
 		for i < len(s) && s[i] != ' ' && s[i] != '\t' && s[i] != '\n' {
-			_, size := utf8.DecodeRuneInString(s[i:])
+			r, size := utf8.DecodeRuneInString(s[i:])
 			i += size
-			wordRunes++
+			wordCells += RuneWidth(r)
 		}
 		word := s[wordStart:i]
 
 		if col == 0 {
-			if wordRunes <= width {
+			if wordCells <= width {
 				for _, r := range word {
 					write(r)
-					col++
+					col += RuneWidth(r)
 				}
 			} else {
 				for _, r := range word {
-					if col >= width {
+					cw := RuneWidth(r)
+					if col+cw > width {
 						flush()
 					}
 					write(r)
-					col++
+					col += cw
 				}
 			}
-		} else if col+1+wordRunes <= width {
+		} else if col+1+wordCells <= width {
 			write(' ')
 			col++
 			for _, r := range word {
 				write(r)
-				col++
+				col += RuneWidth(r)
 			}
 		} else {
 			flush()
-			if wordRunes <= width {
+			if wordCells <= width {
 				for _, r := range word {
 					write(r)
-					col++
+					col += RuneWidth(r)
 				}
 			} else {
 				for _, r := range word {
-					if col >= width {
+					cw := RuneWidth(r)
+					if col+cw > width {
 						flush()
 					}
 					write(r)
-					col++
+					col += cw
 				}
 			}
 		}
@@ -498,11 +500,12 @@ func wrapDrawChar(s string, buf *Buffer, x, y, width, maxLines int, style Style)
 			}
 			continue
 		}
-		if col >= width {
+		cw := RuneWidth(r)
+		if col+cw > width {
 			flush()
 		}
 		write(r)
-		col++
+		col += cw
 	}
 	return row + 1
 }
