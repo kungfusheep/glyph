@@ -2722,7 +2722,7 @@ func styleSpans(spans []Span, styleFor func(Style) Style) []Span {
 	}
 	styled := make([]Span, len(spans))
 	for i, span := range spans {
-		styled[i] = Span{Text: span.Text, Style: styleFor(span.Style), OnSelect: span.OnSelect}
+		styled[i] = Span{Text: span.Text, Style: styleFor(span.Style), OnSelect: span.OnSelect, OnSelectRef: span.OnSelectRef}
 	}
 	return styled
 }
@@ -8442,7 +8442,7 @@ func (t *Template) richSpanJumpFunc(buf *Buffer) spanJumpFunc {
 		return nil
 	}
 	return func(x, y int, span Span) {
-		if span.OnSelect == nil {
+		if span.OnSelect == nil && span.OnSelectRef == nil {
 			return
 		}
 		x += t.jumpOffsetX
@@ -8450,7 +8450,12 @@ func (t *Template) richSpanJumpFunc(buf *Buffer) spanJumpFunc {
 		if t.jumpMaxY > t.jumpMinY && (y < t.jumpMinY || y >= t.jumpMaxY) {
 			return
 		}
-		t.app.AddJumpTarget(int16(x), int16(y), span.OnSelect, Style{})
+		onSelect := span.OnSelect
+		if span.OnSelectRef != nil {
+			ref := NodeRef{X: x, Y: y, W: max(1, StringWidth(span.Text)), H: 1}
+			onSelect = func() { span.OnSelectRef(ref) }
+		}
+		t.app.AddJumpTarget(int16(x), int16(y), onSelect, Style{})
 	}
 }
 

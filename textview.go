@@ -193,7 +193,7 @@ func wrapSpansWord(spans []Span, buf *Buffer, x, y, width, maxLines int, jump sp
 		if buf == nil || (maxLines > 0 && row >= maxLines) {
 			return
 		}
-		if allowJump && !*jumped && jump != nil && span.OnSelect != nil {
+		if allowJump && !*jumped && jump != nil && (span.OnSelect != nil || span.OnSelectRef != nil) {
 			jump(x+col, y+row, span)
 			*jumped = true
 		}
@@ -317,7 +317,7 @@ func wrapSpansChar(spans []Span, buf *Buffer, x, y, width, maxLines int, jump sp
 		if buf == nil || (maxLines > 0 && row >= maxLines) {
 			return
 		}
-		if allowJump && !*jumped && jump != nil && span.OnSelect != nil {
+		if allowJump && !*jumped && jump != nil && (span.OnSelect != nil || span.OnSelectRef != nil) {
 			jump(x+col, y+row, span)
 			*jumped = true
 		}

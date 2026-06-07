@@ -662,9 +662,10 @@ func (s *selectionList) Last(m any) {
 
 // Span represents a styled segment of text within RichText.
 type Span struct {
-	Text     string
-	Style    Style
-	OnSelect func()
+	Text        string
+	Style       Style
+	OnSelect    func()
+	OnSelectRef func(NodeRef)
 }
 
 // richTextNode is the internal compiled form for inline-styled text.

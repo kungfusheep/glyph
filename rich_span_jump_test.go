@@ -102,6 +102,30 @@ func TestRichSpanRegistersNativeJumpTarget(t *testing.T) {
 	}
 }
 
+func TestRichSpanSelectRefReceivesRenderedBounds(t *testing.T) {
+	app := NewApp()
+	var selected NodeRef
+	tree := Rich([]Span{
+		{Text: "before "},
+		{Text: "link", OnSelectRef: func(ref NodeRef) { selected = ref }},
+	})
+	tmpl := Build(tree)
+	tmpl.SetApp(app)
+
+	app.jumpMode.Active = true
+	buf := NewBuffer(20, 2)
+	tmpl.Execute(buf, 20, 2)
+	app.jumpMode.AssignLabels()
+
+	if len(app.jumpMode.Targets) != 1 {
+		t.Fatalf("targets = %#v, want one rich span jump target", app.jumpMode.Targets)
+	}
+	app.jumpMode.Targets[0].OnSelect()
+	if selected.X != 7 || selected.Y != 0 || selected.W != 4 || selected.H != 1 {
+		t.Fatalf("selected ref = %#v, want rendered span bounds", selected)
+	}
+}
+
 func TestScrollViewRichSpanRegistersVisibleJumpTarget(t *testing.T) {
 	app := NewApp()
 	selected := false
