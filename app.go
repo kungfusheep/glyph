@@ -409,6 +409,9 @@ func (a *App) wireChildRouteScopes(tmpl *Template) {
 			child.routeModalRouter = riffkey.NewRouter().Disable()
 			a.wireBindingList(child.routeModalRouter, child.pendingModalRouteBindings)
 			a.wireComponentBindings(child, child.routeModalRouter)
+			if !hasScopedComponents {
+				a.wireComponentBindings(tmpl, child.routeModalRouter)
+			}
 		}
 		a.wireChildRouteScopes(child)
 	}

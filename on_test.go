@@ -361,3 +361,50 @@ func TestOnModalRoutesSiblingFilterListBinding(t *testing.T) {
 		t.Fatalf("expected two filtered items, got %d", filter.Filter().Len())
 	}
 }
+
+func TestOnModalNestedConditionRoutesSiblingFilterListBinding(t *testing.T) {
+	app := NewApp()
+	showOverlay := false
+	items := []string{"compose", "reply", "refresh"}
+	filter := FilterList(&items, func(s *string) string { return *s })
+
+	app.SetView(VBox(
+		If(&showOverlay).Then(
+			Overlay.Centered()(
+				VBox(
+					If(&showOverlay).Then(
+						On.Modal(Key("<Esc>", func() { showOverlay = false })),
+					),
+					filter,
+				),
+			),
+		),
+	))
+
+	baseDepth := app.Input().Depth()
+	app.render()
+	if dispatchRune(app, 'r') {
+		t.Fatal("hidden modal filter list handled key")
+	}
+	if filter.Query() != "" {
+		t.Fatalf("hidden modal filter query changed: %q", filter.Query())
+	}
+
+	showOverlay = true
+	app.render()
+	if app.Input().Depth() != baseDepth+1 {
+		t.Fatalf("overlay modal should push one input frame: %d -> %d", baseDepth, app.Input().Depth())
+	}
+	if !dispatchRune(app, 'r') {
+		t.Fatal("expected modal filter list to handle typed rune")
+	}
+	if filter.Query() != "r" {
+		t.Fatalf("expected modal filter query %q, got %q", "r", filter.Query())
+	}
+
+	showOverlay = false
+	app.render()
+	if app.Input().Depth() != baseDepth {
+		t.Fatalf("hidden overlay modal should pop input frame: %d -> %d", baseDepth, app.Input().Depth())
+	}
+}
