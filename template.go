@@ -595,7 +595,9 @@ func matchBranches(mExt *opMatch, elemBase unsafe.Pointer) ([]*Template, int) {
 
 // pendingOverlay stores info needed to render an overlay after main content
 type pendingOverlay struct {
-	op *Op // pointer to the overlay op
+	op      *Op  // pointer to the overlay op
+	exiting bool // the overlay's branch is animating out (condition went false) — its modal
+	// router must be released, not kept alive, so it can't orphan on the input stack.
 }
 
 // SetApp links this template to an App for jump mode support.
@@ -7640,7 +7642,12 @@ func (t *Template) renderBranchTemplate(buf *Buffer, sub *Template, globalX, glo
 	sub.render(buf, globalX, globalY, maxW)
 	sub.refOpacity = oldRefOpacity
 	sub.refOpacitySet = oldRefOpacitySet
-	t.pendingOverlays = append(t.pendingOverlays, sub.pendingOverlays...)
+	// an exiting branch's overlays carry that state up, so renderOverlay releases their
+	// modal routers instead of re-pushing them while the fade plays (orphan fix).
+	for _, po := range sub.pendingOverlays {
+		po.exiting = po.exiting || exiting
+		t.pendingOverlays = append(t.pendingOverlays, po)
+	}
 	t.pendingScreenEffects = append(t.pendingScreenEffects, sub.pendingScreenEffects...)
 }
 
@@ -8676,12 +8683,14 @@ func (t *Template) ScreenEffects() []Effect {
 // renderOverlays renders all collected overlays after main content.
 func (t *Template) renderOverlays(buf *Buffer, screenW, screenH int16) {
 	for _, po := range t.pendingOverlays {
-		t.renderOverlay(buf, po.op, screenW, screenH)
+		t.renderOverlay(buf, po.op, po.exiting, screenW, screenH)
 	}
 }
 
-// renderOverlay renders a single overlay to the buffer.
-func (t *Template) renderOverlay(buf *Buffer, op *Op, screenW, screenH int16) {
+// renderOverlay renders a single overlay to the buffer. When exiting (its branch's
+// condition went false and it's only animating out), its modal router is released rather
+// than re-pushed, so a fading overlay can't orphan its router on the input stack.
+func (t *Template) renderOverlay(buf *Buffer, op *Op, exiting bool, screenW, screenH int16) {
 	ext := op.Ext.(*opOverlay)
 	if ext.childTmpl == nil {
 		return
@@ -8841,7 +8850,9 @@ func (t *Template) renderOverlay(buf *Buffer, op *Op, screenW, screenH int16) {
 	// Render the overlay content
 	// Re-layout with actual available space
 	childTmpl.pendingScreenEffects = childTmpl.pendingScreenEffects[:0]
-	childTmpl.setRouteActive(true)
+	// release the modal router while the overlay fades out (exiting), otherwise re-pushing
+	// it here every frame leaves it orphaned once the fade ends and renderOverlay stops.
+	childTmpl.setRouteActive(!exiting)
 	childTmpl.distributeWidths(overlayW, nil)
 	childTmpl.layout(overlayH)
 	childTmpl.distributeFlexGrow(overlayH)
