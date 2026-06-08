@@ -800,6 +800,7 @@ type textInput struct {
 	Style            Style  // Text style
 	PlaceholderStyle Style  // Placeholder style (zero = dim text)
 	CursorStyle      Style  // Cursor style (zero = reverse video)
+	MultiLine        bool   // wrap long text across lines instead of scrolling horizontally
 }
 
 // sliceHeader is the runtime representation of a slice.

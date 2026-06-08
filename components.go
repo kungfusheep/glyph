@@ -3335,6 +3335,9 @@ type InputC struct {
 
 	// blur callback (wired by Form for VOnBlur validation)
 	onBlur func()
+
+	// multiline wraps long text across lines instead of scrolling horizontally
+	multiline bool
 }
 
 // Input creates a text input with internal state.
@@ -3430,6 +3433,14 @@ func (i *InputC) Width(w any) *InputC {
 // Mask sets a password mask character.
 func (i *InputC) Mask(m rune) *InputC {
 	i.mask = m
+	return i
+}
+
+// MultiLine makes the input wrap long text across multiple lines (growing its height)
+// instead of scrolling on a single line. The value stays one string — wrapping is
+// visual — so submit/edit behaviour is unchanged.
+func (i *InputC) MultiLine() *InputC {
+	i.multiline = true
 	return i
 }
 
@@ -3565,6 +3576,7 @@ func (i *InputC) toTextInput() textInput {
 		Style:            i.style,
 		PlaceholderStyle: i.placeholderStyle,
 		CursorStyle:      i.cursorStyle,
+		MultiLine:        i.multiline,
 	}
 	// if managed by focus manager, use focused state for cursor visibility
 	if i.manager != nil {

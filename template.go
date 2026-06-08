@@ -2832,6 +2832,71 @@ type opTextInput struct {
 	style          Style
 	placeholderSty Style
 	cursorStyle    Style
+	multiline      bool // wrap long text across lines instead of scrolling horizontally
+}
+
+// value resolves the input's current text from whichever API is in use.
+func (ext *opTextInput) value() string {
+	if ext.fieldPtr != nil {
+		return ext.fieldPtr.Value
+	}
+	if ext.valuePtr != nil {
+		return *ext.valuePtr
+	}
+	return ""
+}
+
+// inLine is one wrapped display line of a multi-line input: display runes are
+// runes[start:end]; next is the start of the following line (skips a dropped break
+// space / newline) so a cursor index can be mapped to its line.
+type inLine struct{ start, end, next int }
+
+// inputWrapLines word-wraps runes to width: it breaks at the last space that fits,
+// hard-breaks words longer than width, and treats '\n' as a forced break. Always
+// returns at least one line.
+func inputWrapLines(runes []rune, width int) []inLine {
+	if width < 1 {
+		width = 1
+	}
+	var lines []inLine
+	n := len(runes)
+	start, lastSpace := 0, -1
+	for i := 0; i < n; {
+		switch {
+		case runes[i] == '\n':
+			lines = append(lines, inLine{start, i, i + 1})
+			start, lastSpace = i+1, -1
+			i++
+		case i-start >= width:
+			if lastSpace >= start {
+				lines = append(lines, inLine{start, lastSpace, lastSpace + 1})
+				start = lastSpace + 1
+			} else {
+				lines = append(lines, inLine{start, i, i}) // hard break mid-word
+				start = i
+			}
+			lastSpace = -1
+		default:
+			if runes[i] == ' ' {
+				lastSpace = i
+			}
+			i++
+		}
+	}
+	return append(lines, inLine{start, n, n})
+}
+
+// inputCursorPos maps a rune-index cursor to its (line, column) across wrapped lines.
+func inputCursorPos(lines []inLine, cursor int) (line, col int) {
+	for idx, ln := range lines {
+		if cursor < ln.next || idx == len(lines)-1 {
+			if col = cursor - ln.start; col < 0 {
+				col = 0
+			}
+			return idx, col
+		}
+	}
+	return 0, 0
 }
 
 type opOverlay struct {
@@ -3452,6 +3517,7 @@ func (t *Template) compileTextInput(v textInput, parent int16, depth int) int16 
 		style:          v.Style,
 		placeholderSty: v.PlaceholderStyle,
 		cursorStyle:    v.CursorStyle,
+		multiline:      v.MultiLine,
 	}
 
 	if ext.placeholderSty.Equal(Style{}) {
@@ -5944,8 +6010,15 @@ func (t *Template) layout(_ int16) {
 				}
 
 			case OpTextInput:
-				// TextInput is always 1 line
+				// single-line by default; a multiline input grows to its wrapped height
 				geom.H = 1
+				if ext, ok := op.Ext.(*opTextInput); ok && ext.multiline && geom.W > 0 {
+					if v := ext.value(); v != "" {
+						if n := len(inputWrapLines([]rune(v), int(geom.W))); n > 1 {
+							geom.H = int16(n)
+						}
+					}
+				}
 
 			case OpOverlay, OpScreenEffect:
 				// Overlays and screen effects take zero space in layout
@@ -8541,6 +8614,29 @@ func (t *Template) renderTextInput(buf *Buffer, op *Op, geom *Geom, absX, absY i
 	cursorRune := cursor
 	if cursorRune > len(displayRunes) {
 		cursorRune = len(displayRunes)
+	}
+
+	// multiline: wrap the value across lines instead of scrolling one line horizontally.
+	if ext.multiline {
+		lines := inputWrapLines(displayRunes, width)
+		curLine, curCol := inputCursorPos(lines, cursorRune)
+		for li, ln := range lines {
+			y := int(absY) + li
+			x := int(absX)
+			for ri := ln.start; ri < ln.end; ri++ {
+				style := textStyle
+				if showCursor && ri == cursorRune {
+					style = cursorStyle
+				}
+				buf.Set(x, y, Cell{Rune: displayRunes[ri], Style: style})
+				x++
+			}
+		}
+		// cursor sitting past the last character (its line has no rune to highlight)
+		if showCursor && cursorRune >= len(displayRunes) {
+			buf.Set(int(absX)+curCol, int(absY)+curLine, Cell{Rune: ' ', Style: cursorStyle})
+		}
+		return
 	}
 
 	scrollOffset := 0
