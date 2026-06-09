@@ -2839,6 +2839,7 @@ type opTextInput struct {
 	valuePtr       *string
 	cursorPtr      *int
 	focusedPtr     *bool
+	lastBoundValue string
 	placeholder    string
 	mask           rune
 	style          Style
@@ -8582,6 +8583,14 @@ func (t *Template) renderTextInput(buf *Buffer, op *Op, geom *Geom, absX, absY i
 	var value string
 	var cursor int
 	if ext.fieldPtr != nil {
+		if ext.valuePtr != nil {
+			bound := *ext.valuePtr
+			if bound != ext.lastBoundValue && bound != ext.fieldPtr.Value {
+				ext.fieldPtr.Value = bound
+				ext.fieldPtr.Cursor = len(bound)
+			}
+			ext.lastBoundValue = bound
+		}
 		value = ext.fieldPtr.Value
 		cursor = ext.fieldPtr.Cursor
 	} else {

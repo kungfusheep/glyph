@@ -3608,6 +3608,7 @@ func (i *InputC) toTextInput() textInput {
 		Field:            field,
 		FocusGroup:       i.focusGroup,
 		FocusIndex:       i.focusIndex,
+		Value:            i.boundValue,
 		Placeholder:      i.placeholder,
 		Width:            i.width,
 		Mask:             i.mask,

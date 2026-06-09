@@ -145,3 +145,22 @@ func TestFormInputFieldStateReceivesManagedTypingAndValidation(t *testing.T) {
 		t.Fatal("empty external field passed required validation")
 	}
 }
+
+func TestFormInputBoundValueChangeUpdatesEditableState(t *testing.T) {
+	var name string
+	form := Form(
+		Field("Name", Input(&name)),
+	)
+	app := NewApp()
+	app.SetView(VBox(form))
+	app.RenderNow()
+
+	name = "prefill"
+	app.RenderNow()
+	if !app.Input().Dispatch(riffkey.Key{Rune: 'x'}) {
+		t.Fatal("form input did not handle typed key")
+	}
+	if name != "prefillx" {
+		t.Fatalf("name = %q, want typing to append to programmatic bound value", name)
+	}
+}
