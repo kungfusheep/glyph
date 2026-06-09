@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	. "github.com/kungfusheep/glyph"
+	"github.com/kungfusheep/riffkey"
 )
 
 func TestInputBindsToString(t *testing.T) {
@@ -115,4 +116,32 @@ func TestFormCompilesWithValidation(t *testing.T) {
 		Field("Role", Radio(&role, "Admin", "User", "Guest")),
 		Field("Terms", Checkbox(&agree, "I accept").Validate(VTrue, VOnSubmit)),
 	)
+}
+
+func TestFormInputFieldStateReceivesManagedTypingAndValidation(t *testing.T) {
+	var name string
+	field := InputState{Value: "prefill", Cursor: len("prefill")}
+	var submitted bool
+	form := Form.LabelBold().OnSubmit(func(f *FormC) {
+		submitted = f.ValidateAll()
+	})(
+		Field("Name", Input(&name).Field(&field).Validate(VRequired, VOnSubmit)),
+	)
+	app := NewApp()
+	app.SetView(VBox(form))
+	app.RenderNow()
+
+	if !app.Input().Dispatch(riffkey.Key{Rune: 'x'}) {
+		t.Fatal("form input did not handle typed key")
+	}
+	if field.Value != "prefillx" || name != "prefillx" {
+		t.Fatalf("field/name = %q/%q, want typed external state and bound value", field.Value, name)
+	}
+	field.Clear()
+	if !app.Input().Dispatch(riffkey.Key{Special: riffkey.SpecialEnter}) {
+		t.Fatal("form submit was not handled")
+	}
+	if submitted {
+		t.Fatal("empty external field passed required validation")
+	}
 }

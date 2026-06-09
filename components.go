@@ -3371,7 +3371,7 @@ func (i *InputC) Err() string {
 // runValidation runs the validator and stores the result.
 func (i *InputC) runValidation() {
 	if i.validator != nil {
-		if err := i.validator(i.field.Value); err != nil {
+		if err := i.validator(i.State().Value); err != nil {
 			i.err = err.Error()
 		} else {
 			i.err = ""
@@ -3489,9 +3489,10 @@ func (i *InputC) textBinding() *textInputBinding { return i.declaredTIB }
 func (i *InputC) ManagedBy(fm *FocusManager) *InputC {
 	i.manager = fm
 	i.focused = false
+	field := i.State()
 	i.declaredTIB = &textInputBinding{
-		value:    &i.field.Value,
-		cursor:   &i.field.Cursor,
+		value:    &field.Value,
+		cursor:   &field.Cursor,
 		onChange: i.handleChange,
 	}
 	fm.Register(i)
