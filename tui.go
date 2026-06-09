@@ -794,9 +794,10 @@ type textInput struct {
 	FocusIndex int         // This field's index in the focus group
 
 	// Pointer-based API (for single fields)
-	Value   *string // Bound text value (ignored if Field is set)
-	Cursor  *int    // Cursor position (ignored if Field is set)
-	Focused *bool   // Show cursor only when true (ignored if FocusGroup is set)
+	Value     *string // Bound text value (ignored if Field is set)
+	Cursor    *int    // Cursor position (ignored if Field is set)
+	Focused   *bool   // Show cursor only when true (ignored if FocusGroup is set)
+	SyncBound bool    // Sync Value into Field when Field is Glyph-owned internal state
 
 	// Common options
 	Placeholder      string // Shown when value is empty

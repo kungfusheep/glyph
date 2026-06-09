@@ -177,6 +177,27 @@ func TestFormSubmitValidatesBeforeCallback(t *testing.T) {
 	}
 }
 
+func TestFormSubmitUsesBoundValueChangedBeforeRender(t *testing.T) {
+	var name string
+	var submitted bool
+	form := Form.OnSubmit(func(f *FormC) {
+		submitted = true
+	})(
+		Field("Name", Input(&name).Validate(VRequired, VOnSubmit)),
+	)
+	app := NewApp()
+	app.SetView(VBox(form))
+	app.RenderNow()
+
+	name = "prefill"
+	if !app.Input().Dispatch(riffkey.Key{Special: riffkey.SpecialEnter}) {
+		t.Fatal("form submit was not handled")
+	}
+	if !submitted {
+		t.Fatal("submit callback did not see bound value changed before render")
+	}
+}
+
 func TestFormInputBoundValueChangeUpdatesEditableState(t *testing.T) {
 	var name string
 	form := Form(

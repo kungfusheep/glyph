@@ -3408,6 +3408,7 @@ func (i *InputC) Err() string {
 
 // runValidation runs the validator and stores the result.
 func (i *InputC) runValidation() {
+	i.syncBoundValue()
 	if i.validator != nil {
 		if err := i.validator(i.State().Value); err != nil {
 			i.err = err.Error()
@@ -3415,6 +3416,18 @@ func (i *InputC) runValidation() {
 			i.err = ""
 		}
 	}
+}
+
+func (i *InputC) syncBoundValue() {
+	if i.boundValue == nil || i.externalField != nil {
+		return
+	}
+	state := i.State()
+	if state.Value == *i.boundValue {
+		return
+	}
+	state.Value = *i.boundValue
+	state.Cursor = len(*i.boundValue)
 }
 
 // Ref provides access to the component for external references.
@@ -3610,6 +3623,7 @@ func (i *InputC) toTextInput() textInput {
 		FocusGroup:       i.focusGroup,
 		FocusIndex:       i.focusIndex,
 		Value:            i.boundValue,
+		SyncBound:        i.boundValue != nil && i.externalField == nil,
 		Placeholder:      i.placeholder,
 		Width:            i.width,
 		Mask:             i.mask,
