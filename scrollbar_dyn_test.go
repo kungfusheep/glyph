@@ -67,3 +67,31 @@ func TestScrollbarDynTracksListWindow(t *testing.T) {
 		t.Fatal("thumb fills the whole track — it should be a partial, scrolled-down window")
 	}
 }
+
+// ScrollState reports SCREEN ROWS, not item counts — so the scrollbar is accurate when
+// items render at different heights (e.g. multi-line comments). Three 2-line items =
+// 6 content rows; an item-count metric would wrongly report 3.
+func TestScrollStateMeasuresRowsNotItems(t *testing.T) {
+	items := []string{"a", "b", "c"}
+	sel := 0
+	var off, vis, tot int
+	view := VBox.Height(10)( // tall enough that nothing is clipped
+		List(&items).
+			Selection(&sel).
+			Render(func(s *string) Component { return VBox(Text(s), Text("·")) }). // 2 rows each
+			ScrollState(&off, &vis, &tot),
+	)
+	tmpl := Build(view)
+	buf := NewBuffer(20, 10)
+	tmpl.Execute(buf, 20, 10)
+
+	if tot != 6 {
+		t.Fatalf("ScrollState total = %d, want 6 rows (3 items × 2 lines) — it's counting items, not rows", tot)
+	}
+	if vis != 6 {
+		t.Fatalf("ScrollState visible = %d, want 6 (all rows fit, nothing clipped)", vis)
+	}
+	if off != 0 {
+		t.Fatalf("ScrollState offset = %d, want 0 (top, unscrolled)", off)
+	}
+}

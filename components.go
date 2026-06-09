@@ -2249,11 +2249,12 @@ type ListC[T any] struct {
 	declaredBindings []binding
 }
 
-// ScrollState binds three *int that the list writes each render: the window's top
-// index (offset), the number of visible rows, and the total item count. Pair with
-// ScrollbarDyn(total, visible, offset) to put a live scrollbar beside a List — the
-// List manages its own scroll internally, so this is how an external scrollbar tracks
-// it (the List analogue of ScrollbarForLayer).
+// ScrollState binds three *int that the list writes each render, all in SCREEN ROWS:
+// the rows scrolled above the window (offset), the visible row count, and the total
+// content height. Rows (not item counts) so the scrollbar stays accurate when items
+// have different heights. Pair with ScrollbarDyn(total, visible, offset) to put a live
+// scrollbar beside a List — the List manages its own scroll internally, so this is how
+// an external scrollbar tracks it (the List analogue of ScrollbarForLayer).
 func (l *ListC[T]) ScrollState(offset, visible, total *int) *ListC[T] {
 	l.scrollOffsetPtr, l.scrollVisiblePtr, l.scrollTotalPtr = offset, visible, total
 	if l.cached != nil {

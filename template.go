@@ -8250,17 +8250,29 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		}
 	}
 
-	// ScrollState writeback: publish the finalized window so an external ScrollbarDyn
-	// can track this list (the List manages its own scroll, so this is the only handle).
+	// ScrollState writeback: publish the finalized window in SCREEN ROWS (summing each
+	// item's measured height), not item counts — rows are what the user sees scroll, so
+	// a ScrollbarDyn tracking these matches the visual exactly even when rows have
+	// different heights (e.g. multi-line comments). Matches the Layer scrollbar's model.
 	if ext.listPtr != nil {
+		totalRows, offRows, visRows := 0, 0, 0
+		for i := 0; i < visibleLen && i < len(ext.geoms); i++ {
+			h := int(ext.geoms[i].H)
+			totalRows += h
+			if i < startIdx {
+				offRows += h
+			} else if i < endIdx {
+				visRows += h
+			}
+		}
 		if ext.listPtr.scrollTotalPtr != nil {
-			*ext.listPtr.scrollTotalPtr = visibleLen
+			*ext.listPtr.scrollTotalPtr = totalRows
 		}
 		if ext.listPtr.scrollOffsetPtr != nil {
-			*ext.listPtr.scrollOffsetPtr = startIdx
+			*ext.listPtr.scrollOffsetPtr = offRows
 		}
 		if ext.listPtr.scrollVisiblePtr != nil {
-			*ext.listPtr.scrollVisiblePtr = endIdx - startIdx
+			*ext.listPtr.scrollVisiblePtr = visRows
 		}
 	}
 
