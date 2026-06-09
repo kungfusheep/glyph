@@ -603,6 +603,14 @@ type pendingOverlay struct {
 // SetApp links this template to an App for jump mode support.
 func (t *Template) SetApp(a *App) {
 	t.app = a
+	// wire the animation render-scheduler so this template's tweens can drive their
+	// own frames. Without it, t.animating starts no ticker (template.go: the ticker
+	// only spins when requestRender != nil) and animations freeze. SetView set this
+	// explicitly; named views (View/UpdateView) and scrollview children only get it
+	// here — so wiring it in SetApp keeps every template's animations alive.
+	if a != nil {
+		t.requestRender = a.RequestRender
+	}
 }
 
 func (t *Template) setJumpViewport(offsetX, offsetY, minY, maxY int) {
