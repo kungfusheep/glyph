@@ -6507,6 +6507,15 @@ func (t *Template) stretchIfContent(op *Op, newH int16) {
 	if rootOp.Kind == OpContainer || rootOp.Kind == OpLayer {
 		if rootOp.height() == 0 {
 			tmpl.geom[0].H = newH
+			// redistribute the branch's INTERNAL flex against the stretched height —
+			// the branch was laid out at content height (layout(0)), so without this
+			// its Grow children and height-0 stretch elements (scrollbars, vrules)
+			// keep the content-sized pass and never see the real height (e.g. a
+			// scrollbar inside an If-wrapped pane collapsing to ~0 rows). Mirrors
+			// propagateFlexToIf, which already does this on the VBox flex path.
+			if rootOp.Kind == OpContainer {
+				tmpl.distributeFlexGrow(newH)
+			}
 		}
 	}
 }
@@ -6615,8 +6624,12 @@ func (t *Template) distributeFlexInCol(idx int16, op *Op, rootH int16) {
 			childGeom.H = h
 		}
 
-		// Recalculate child positions with new heights
-		contentOffY := int16(op.Margin[0]) + op.Border.PadTop()
+		// Recalculate child positions with new heights. Must mirror layoutContainer's
+		// content offset exactly — margin + border + PADDING. Padding was missing here,
+		// so any column whose flex redistribution ran lost its top padding and children
+		// rode up over it (recap's "unfilled column's top padding collapses" workaround
+		// was this bug).
+		contentOffY := int16(op.Margin[0]) + op.Border.PadTop() + int16(op.Padding[0])
 		cursor := int16(0)
 		firstChild := true
 
