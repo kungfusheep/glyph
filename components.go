@@ -2242,8 +2242,26 @@ type ListC[T any] struct {
 	styleDyn         any
 	selectedStyleDyn any
 	selectedRef      *NodeRef
+	scrollOffsetPtr  *int // ScrollState writeback (see ScrollState)
+	scrollVisiblePtr *int
+	scrollTotalPtr   *int
 	cached           *selectionList // cached instance for consistent reference
 	declaredBindings []binding
+}
+
+// ScrollState binds three *int that the list writes each render: the window's top
+// index (offset), the number of visible rows, and the total item count. Pair with
+// ScrollbarDyn(total, visible, offset) to put a live scrollbar beside a List — the
+// List manages its own scroll internally, so this is how an external scrollbar tracks
+// it (the List analogue of ScrollbarForLayer).
+func (l *ListC[T]) ScrollState(offset, visible, total *int) *ListC[T] {
+	l.scrollOffsetPtr, l.scrollVisiblePtr, l.scrollTotalPtr = offset, visible, total
+	if l.cached != nil {
+		l.cached.scrollOffsetPtr = offset
+		l.cached.scrollVisiblePtr = visible
+		l.cached.scrollTotalPtr = total
+	}
+	return l
 }
 
 // List creates a navigable list from a bound slice.
@@ -2426,6 +2444,9 @@ func (l *ListC[T]) toSelectionList() *selectionList {
 			SelectedStyle: l.selectedStyle,
 			SelectedRef:   l.selectedRef,
 		}
+		sl.scrollOffsetPtr = l.scrollOffsetPtr
+		sl.scrollVisiblePtr = l.scrollVisiblePtr
+		sl.scrollTotalPtr = l.scrollTotalPtr
 		sl.StyleDyn = l.styleDyn
 		sl.SelectedStyleDyn = l.selectedStyleDyn
 		if l.render != nil {
@@ -2593,6 +2614,8 @@ func (t TabsC) MarginTRBL(a, b, c, d int16) TabsC { t.margin = [4]int16{a, b, c,
 type ScrollbarC struct {
 	contentSize   int
 	viewSize      int
+	contentPtr    *int
+	viewPtr       *int
 	position      *int
 	layer         *Layer
 	length        int16
@@ -2616,6 +2639,20 @@ func Scrollbar(contentSize, viewSize int, position *int) ScrollbarC {
 		position:    position,
 		trackChar:   '│',
 		thumbChar:   '█',
+	}
+}
+
+// ScrollbarDyn creates a scrollbar whose content size, viewport size, and position
+// are all read from *int pointers each frame — for content whose dimensions change at
+// runtime (e.g. a List bound via ListC.ScrollState). Mirrors ScrollbarForLayer but for
+// any caller that can supply the three live counts.
+func ScrollbarDyn(contentSize, viewSize, position *int) ScrollbarC {
+	return ScrollbarC{
+		contentPtr: contentSize,
+		viewPtr:    viewSize,
+		position:   position,
+		trackChar:  '│',
+		thumbChar:  '█',
 	}
 }
 

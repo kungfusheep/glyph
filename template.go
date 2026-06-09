@@ -2789,6 +2789,8 @@ type opRule struct {
 type opScrollbar struct {
 	contentSize   int
 	viewSize      int
+	contentPtr    *int // dynamic content size (overrides contentSize when set)
+	viewPtr       *int // dynamic viewport size (overrides viewSize when set)
 	posPtr        *int
 	layer         *Layer
 	horizontal    bool
@@ -4476,6 +4478,8 @@ func (t *Template) compileScrollbarC(v ScrollbarC, parent int16, depth int) int1
 	ext := &opScrollbar{
 		contentSize:   v.contentSize,
 		viewSize:      v.viewSize,
+		contentPtr:    v.contentPtr,
+		viewPtr:       v.viewPtr,
 		posPtr:        v.position,
 		layer:         v.layer,
 		horizontal:    v.horizontal,
@@ -8245,6 +8249,20 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		}
 	}
 
+	// ScrollState writeback: publish the finalized window so an external ScrollbarDyn
+	// can track this list (the List manages its own scroll, so this is the only handle).
+	if ext.listPtr != nil {
+		if ext.listPtr.scrollTotalPtr != nil {
+			*ext.listPtr.scrollTotalPtr = visibleLen
+		}
+		if ext.listPtr.scrollOffsetPtr != nil {
+			*ext.listPtr.scrollOffsetPtr = startIdx
+		}
+		if ext.listPtr.scrollVisiblePtr != nil {
+			*ext.listPtr.scrollVisiblePtr = endIdx - startIdx
+		}
+	}
+
 	spaces := ext.markerSpaces
 
 	rowW := geom.W
@@ -8970,6 +8988,12 @@ func (t *Template) renderScrollbar(buf *Buffer, op *Op, geom *Geom, absX, absY i
 	}
 	contentSize := ext.contentSize
 	viewSize := ext.viewSize
+	if ext.contentPtr != nil {
+		contentSize = *ext.contentPtr
+	}
+	if ext.viewPtr != nil {
+		viewSize = *ext.viewPtr
+	}
 	if ext.layer != nil {
 		pos = ext.layer.ScrollY()
 		contentSize = ext.layer.ContentHeight()

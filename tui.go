@@ -536,6 +536,11 @@ type selectionList struct {
 	len              int      // cached length for bounds checking
 	offset           int      // scroll offset for windowing
 	onMove           func()   // called after selection index changes
+	// ScrollState writeback: when set, renderSelectionList writes its computed window
+	// here each frame so an external Scrollbar (ScrollbarDyn) can track the list.
+	scrollOffsetPtr  *int // window top index
+	scrollVisiblePtr *int // visible row count
+	scrollTotalPtr   *int // total item count
 }
 
 // ensureVisible adjusts scroll offset so selected item is visible.
