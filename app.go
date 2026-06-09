@@ -1389,10 +1389,10 @@ func (a *App) EnterJumpMode() {
 	// Build label lookup
 	for _, target := range a.jumpMode.Targets {
 		jumpRouter.Handle(target.Label, func(_ riffkey.Match) {
+			a.ExitJumpMode()
 			if target.OnSelect != nil {
 				target.OnSelect()
 			}
-			a.ExitJumpMode()
 		})
 	}
 

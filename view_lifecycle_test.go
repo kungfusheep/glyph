@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	. "github.com/kungfusheep/glyph"
+	"github.com/kungfusheep/riffkey"
 )
 
 // Registering a view that contains a Form must not touch the global input
@@ -82,3 +83,36 @@ func TestViewWithoutFormPushesSingleFrame(t *testing.T) {
 	}
 }
 
+func TestJumpTargetCanPushFormViewWithoutLosingInput(t *testing.T) {
+	app := NewApp()
+	var name string
+	app.SetView(Jump(Text("new"), func() {
+		app.PushView("modal")
+	}))
+	app.View("modal", VBox(Form(
+		Field("name", Input(&name)),
+	)))
+	app.JumpKey("f")
+
+	if !app.Input().Dispatch(riffkey.Key{Rune: 'f'}) {
+		t.Fatal("jump key was not handled")
+	}
+	if !app.JumpModeActive() || len(app.JumpMode().Targets) == 0 {
+		t.Fatalf("jump mode active=%t targets=%d, want visible jump target", app.JumpModeActive(), len(app.JumpMode().Targets))
+	}
+	label := app.JumpMode().Targets[0].Label
+	for _, r := range label {
+		if !app.Input().Dispatch(riffkey.Key{Rune: r}) {
+			t.Fatalf("jump label %q was not handled", label)
+		}
+	}
+	if app.JumpModeActive() {
+		t.Fatal("jump mode still active after selecting target")
+	}
+	if !app.Input().Dispatch(riffkey.Key{Rune: 'x'}) {
+		t.Fatal("form input did not handle typed key after jump target pushed view")
+	}
+	if name != "x" {
+		t.Fatalf("name = %q, want modal form input to receive text after jump selection", name)
+	}
+}
