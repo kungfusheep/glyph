@@ -408,3 +408,39 @@ func TestOnModalNestedConditionRoutesSiblingFilterListBinding(t *testing.T) {
 		t.Fatalf("hidden overlay modal should pop input frame: %d -> %d", baseDepth, app.Input().Depth())
 	}
 }
+
+func TestOnModalSwitchesFromElseBranchToThenBranch(t *testing.T) {
+	app := NewApp()
+	confirming := false
+	normalHits := 0
+	confirmHits := 0
+
+	app.SetView(VBox(
+		If(&confirming).
+			Then(On.Modal(Key("y", func() { confirmHits++ }))).
+			Else(On.Modal(Key("d", func() { normalHits++; confirming = true }))),
+	))
+
+	baseDepth := app.Input().Depth()
+	app.render()
+	if app.Input().Depth() != baseDepth+1 {
+		t.Fatalf("else modal should push one input frame: %d -> %d", baseDepth, app.Input().Depth())
+	}
+	if !dispatchRune(app, 'd') {
+		t.Fatal("expected else branch handler to handle d")
+	}
+	if normalHits != 1 || confirmHits != 0 {
+		t.Fatalf("else branch mismatch: normal=%d confirm=%d", normalHits, confirmHits)
+	}
+
+	app.render()
+	if app.Input().Depth() != baseDepth+1 {
+		t.Fatalf("branch swap should keep one modal input frame: %d -> %d", baseDepth, app.Input().Depth())
+	}
+	if !dispatchRune(app, 'y') {
+		t.Fatal("expected then branch handler to handle y after branch swap")
+	}
+	if normalHits != 1 || confirmHits != 1 {
+		t.Fatalf("then branch mismatch: normal=%d confirm=%d", normalHits, confirmHits)
+	}
+}

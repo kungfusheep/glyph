@@ -511,8 +511,14 @@ func setRouteBranchActive(branches []*Template, activeIdx int) {
 		if tmpl == nil {
 			continue
 		}
-		tmpl.setRouteActive(idx == activeIdx)
+		if idx != activeIdx {
+			tmpl.setRouteActive(false)
+		}
 	}
+	if activeIdx < 0 || activeIdx >= len(branches) || branches[activeIdx] == nil {
+		return
+	}
+	branches[activeIdx].setRouteActive(true)
 }
 
 func (t *Template) setRouteActive(active bool) {
