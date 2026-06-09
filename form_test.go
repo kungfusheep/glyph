@@ -123,7 +123,7 @@ func TestFormInputFieldStateReceivesManagedTypingAndValidation(t *testing.T) {
 	field := InputState{Value: "prefill", Cursor: len("prefill")}
 	var submitted bool
 	form := Form.LabelBold().OnSubmit(func(f *FormC) {
-		submitted = f.ValidateAll()
+		submitted = true
 	})(
 		Field("Name", Input(&name).Field(&field).Validate(VRequired, VOnSubmit)),
 	)
@@ -143,6 +143,37 @@ func TestFormInputFieldStateReceivesManagedTypingAndValidation(t *testing.T) {
 	}
 	if submitted {
 		t.Fatal("empty external field passed required validation")
+	}
+}
+
+func TestFormSubmitValidatesBeforeCallback(t *testing.T) {
+	var name string
+	var submitted bool
+	form := Form.OnSubmit(func(f *FormC) {
+		submitted = true
+	})(
+		Field("Name", Input(&name).Validate(VRequired, VOnSubmit)),
+	)
+	app := NewApp()
+	app.SetView(VBox(form))
+	app.RenderNow()
+
+	if !app.Input().Dispatch(riffkey.Key{Special: riffkey.SpecialEnter}) {
+		t.Fatal("form submit was not handled")
+	}
+	if submitted {
+		t.Fatal("submit callback fired for invalid form")
+	}
+	for _, r := range "ok" {
+		if !app.Input().Dispatch(riffkey.Key{Rune: r}) {
+			t.Fatalf("typing %q into form was not handled", r)
+		}
+	}
+	if !app.Input().Dispatch(riffkey.Key{Special: riffkey.SpecialEnter}) {
+		t.Fatal("valid form submit was not handled")
+	}
+	if !submitted {
+		t.Fatal("submit callback did not fire for valid form")
 	}
 }
 

@@ -1399,7 +1399,6 @@ func ExampleFormFn_onSubmit() {
 	var terms bool
 
 	tree := Form.LabelBold().OnSubmit(func(f *FormC) {
-		_ = f.ValidateAll()
 	})(
 		Field("Name", Input(&name).Validate(VRequired)),
 		Field("Email", Input(&email).Validate(VEmail)),

@@ -14,12 +14,8 @@ func main() {
 	status := "Tab: next | j/k: radio | Space: checkbox | Enter: submit"
 
 	register := func(f *FormC) {
-		if f.ValidateAll() {
-			roles := []string{"Admin", "User", "Guest"}
-			status = fmt.Sprintf("Registered: %s <%s> as %s", name, email, roles[role])
-		} else {
-			status = "Please fix the errors above"
-		}
+		roles := []string{"Admin", "User", "Guest"}
+		status = fmt.Sprintf("Registered: %s <%s> as %s", name, email, roles[role])
 	}
 
 	form := Form.LabelBold().OnSubmit(register)(
