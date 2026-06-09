@@ -685,6 +685,12 @@ func (a *App) Router() *riffkey.Router {
 	return a.router
 }
 
+// CurrentView returns the name of the active named view, or "" for a SetView app
+// (or before RunFrom/Go has activated one).
+func (a *App) CurrentView() string {
+	return a.currentView
+}
+
 // Input returns the riffkey input for modal handling (push/pop).
 func (a *App) Input() *riffkey.Input {
 	return a.input
