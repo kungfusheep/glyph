@@ -67,6 +67,7 @@ func (fm *FocusManager) Register(f focusable) *FocusManager {
 	// create handler for this item
 	if tib != nil {
 		h := riffkey.NewTextHandler(tib.value, tib.cursor)
+		h.AllowNewlines = tib.multiline
 		h.OnChange = tib.onChange
 		fm.handlers = append(fm.handlers, h)
 	} else {

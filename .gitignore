@@ -55,3 +55,5 @@
 # OS
 .DS_Store
 CLAUDE.local.md
+go.work
+go.work.sum

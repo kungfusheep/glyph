@@ -59,9 +59,10 @@ func (o OnC) routeBindings() []binding { return o.declaredBindings }
 
 // textInputBinding represents an InputC that wants unmatched keys routed to it.
 type textInputBinding struct {
-	value    *string
-	cursor   *int
-	onChange func(string) // optional callback when value changes
+	value     *string
+	cursor    *int
+	onChange  func(string) // optional callback when value changes
+	multiline bool         // field accepts Alt+Enter/Ctrl+J newlines (TextHandler.AllowNewlines)
 }
 
 // ============================================================================
@@ -3492,6 +3493,11 @@ func (i *InputC) Mask(m rune) *InputC {
 // visual — so submit/edit behaviour is unchanged.
 func (i *InputC) MultiLine() *InputC {
 	i.multiline = true
+	// Bind() may already have snapshotted the binding — keep it in sync so the
+	// call order (Bind().MultiLine() vs MultiLine().Bind()) does not matter.
+	if i.declaredTIB != nil {
+		i.declaredTIB.multiline = true
+	}
 	return i
 }
 
@@ -3526,9 +3532,10 @@ func (i *InputC) Bind() *InputC {
 		field = i.externalField
 	}
 	i.declaredTIB = &textInputBinding{
-		value:    &field.Value,
-		cursor:   &field.Cursor,
-		onChange: i.handleChange,
+		value:     &field.Value,
+		cursor:    &field.Cursor,
+		onChange:  i.handleChange,
+		multiline: i.multiline,
 	}
 	return i
 }
@@ -3542,9 +3549,10 @@ func (i *InputC) ManagedBy(fm *FocusManager) *InputC {
 	i.focused = false
 	field := i.State()
 	i.declaredTIB = &textInputBinding{
-		value:    &field.Value,
-		cursor:   &field.Cursor,
-		onChange: i.handleChange,
+		value:     &field.Value,
+		cursor:    &field.Cursor,
+		onChange:  i.handleChange,
+		multiline: i.multiline,
 	}
 	fm.Register(i)
 	return i

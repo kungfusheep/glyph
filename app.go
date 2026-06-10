@@ -364,6 +364,7 @@ func (a *App) wireComponentBindings(tmpl *Template, router *riffkey.Router) {
 	} else if tmpl.pendingTIB != nil {
 		th := riffkey.NewTextHandler(tmpl.pendingTIB.value, tmpl.pendingTIB.cursor)
 		th.OnChange = tmpl.pendingTIB.onChange
+		th.AllowNewlines = tmpl.pendingTIB.multiline
 		router.HandleUnmatched(th.HandleKey)
 		router.NoCounts()
 	}
