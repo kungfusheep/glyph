@@ -682,6 +682,14 @@ type richTextNode struct {
 	charWrap bool
 }
 
+// CharWrap switches the rich text to character-exact wrapping: every rune is laid
+// down verbatim (word mode normalizes prose whitespace — drops leading, collapses
+// runs). Use for code, diffs, and anything where indentation is content.
+func (r richTextNode) CharWrap() richTextNode {
+	r.charWrap = true
+	return r
+}
+
 // Rich creates a RichText from a mix of strings and Spans.
 // Plain strings get default styling, Spans keep their styling.
 //
@@ -694,7 +702,7 @@ type richTextNode struct {
 // construction updates the render next frame.
 //
 //	Rich(&statusSpans)  // live spans, mutate slice to update
-func Rich(parts ...any) Component {
+func Rich(parts ...any) richTextNode {
 	if len(parts) == 1 {
 		switch v := parts[0].(type) {
 		case *[]Span:
