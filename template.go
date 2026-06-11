@@ -8712,13 +8712,20 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 
 	// If jump mode is active, register this target. Labels are painted by the
 	// app after the final visible frame is composed. Targets outside the
-	// buffer or the active vertical clip never drew anything (the span jump
-	// path clips the same way), so they must not register either.
+	// buffer, the active vertical clip, or the jump viewport never drew
+	// anything visible (the span jump path filters the same way), so they
+	// must not register either. Layer offsets translate buffer-local
+	// positions to screen positions.
 	if t.app != nil && t.app.JumpModeActive() {
 		if absY < 0 || int(absY) >= buf.Height() || absX < 0 || int(absX) >= buf.Width() {
 			return
 		}
 		if t.clipMaxY > 0 && absY >= t.clipMaxY {
+			return
+		}
+		x := int(absX) + t.jumpOffsetX
+		y := int(absY) + t.jumpOffsetY
+		if t.jumpMaxY > t.jumpMinY && (y < t.jumpMinY || y >= t.jumpMaxY) {
 			return
 		}
 		ext := op.Ext.(*opJump)
@@ -8733,11 +8740,11 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 				if maxW < w {
 					w = maxW
 				}
-				ref := NodeRef{X: int(absX) + t.jumpOffsetX, Y: int(absY) + t.jumpOffsetY, W: int(w), H: max(1, int(geom.H))}
+				ref := NodeRef{X: x, Y: y, W: int(w), H: max(1, int(geom.H))}
 				onSelect = func() { fn(base, ref) }
 			}
 		}
-		t.app.AddJumpTarget(absX, absY, onSelect, ext.style)
+		t.app.AddJumpTarget(int16(x), int16(y), onSelect, ext.style)
 	}
 }
 

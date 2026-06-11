@@ -35,6 +35,11 @@ type ScrollViewC struct {
 
 	// cached sub-template, rebuilt on width change
 	childTmpl *Template
+
+	// deferred scroll target, applied once content has rendered so callers
+	// can position the view before the first frame.
+	pendingScroll    int
+	hasPendingScroll bool
 }
 
 type ScrollViewFn func(children ...Component) *ScrollViewC
@@ -246,6 +251,14 @@ func (sv *ScrollViewC) Refresh() {
 	sv.layer.Invalidate()
 }
 
+// ScrollTo positions the content at y once it has rendered. Safe to call
+// before the first frame, when the layer has no buffer to clamp against yet.
+func (sv *ScrollViewC) ScrollTo(y int) {
+	sv.pendingScroll = y
+	sv.hasPendingScroll = true
+	sv.layer.Invalidate()
+}
+
 func (t *Template) compileScrollViewC(v *ScrollViewC, parent int16, depth int) int16 {
 	layerView := LayerView(v.layer).Grow(v.flexGrow)
 	if v.scrollbar {
@@ -307,9 +320,15 @@ func (sv *ScrollViewC) render() {
 	if sv.layer.app != nil {
 		sv.childTmpl.SetApp(sv.layer.app)
 	}
+	scrollForViewport := sv.layer.scrollY
+	if sv.hasPendingScroll && sv.pendingScroll >= 0 {
+		// the deferred target takes effect this frame; register jump targets
+		// against the position the content is about to land on
+		scrollForViewport = sv.pendingScroll
+	}
 	sv.childTmpl.setJumpViewport(
 		sv.layer.screenX,
-		sv.layer.screenY-sv.layer.scrollY,
+		sv.layer.screenY-scrollForViewport,
 		sv.layer.screenY,
 		sv.layer.screenY+sv.layer.viewHeight,
 	)
@@ -336,5 +355,10 @@ func (sv *ScrollViewC) render() {
 
 	scrollY := sv.layer.ScrollY()
 	sv.layer.SetBuffer(buf)
+	if sv.hasPendingScroll {
+		sv.layer.ScrollTo(sv.pendingScroll)
+		sv.hasPendingScroll = false
+		return
+	}
 	sv.layer.ScrollTo(scrollY)
 }
