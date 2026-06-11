@@ -724,6 +724,8 @@ type OpDyn struct {
 	PercentWidth *float32
 	Gap          *int8
 	Fill         *Color
+	FillOff      uintptr
+	FillIsOff    bool
 	Opacity      *float64
 	OpacityOff   uintptr
 	OpacityIsOff bool
@@ -778,7 +780,20 @@ func (op *Op) gap() int8 {
 }
 
 func (op *Op) fill() Color {
+	return op.fillFor(nil)
+}
+
+// fillFor resolves the container fill, rebasing item-field pointers onto the
+// element currently being rendered (a raw pointer into the ForEach template
+// item would read the compile-time placeholder forever).
+func (op *Op) fillFor(elemBase unsafe.Pointer) Color {
 	if op.Dyn != nil {
+		if op.Dyn.FillIsOff {
+			if elemBase != nil {
+				return *(*Color)(unsafe.Pointer(uintptr(elemBase) + op.Dyn.FillOff))
+			}
+			return op.Fill
+		}
 		if p := op.Dyn.Fill; p != nil {
 			return *p
 		}
@@ -3923,7 +3938,13 @@ func (t *Template) applyContainerDynamics(idx int16, nodeRef *NodeRef, opacityMo
 	if fillCond != nil {
 		t.ensureOpDyn(idx).Fill = t.compileDynColor(fillCond, elemBase, elemSize)
 	} else if fillPtr != nil {
-		t.ensureOpDyn(idx).Fill = fillPtr
+		if elemBase != nil && isWithinRange(unsafe.Pointer(fillPtr), elemBase, elemSize) {
+			dyn := t.ensureOpDyn(idx)
+			dyn.FillOff = uintptr(unsafe.Pointer(fillPtr)) - uintptr(elemBase)
+			dyn.FillIsOff = true
+		} else {
+			t.ensureOpDyn(idx).Fill = fillPtr
+		}
 	}
 	if localStyleCond != nil {
 		t.ops[idx].LocalStyle = t.compileDynStyle(localStyleCond, nil, 0)
@@ -7527,7 +7548,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 
 		// Update inherited Fill - cascades through nested containers
 		oldInheritedFill := t.inheritedFill
-		opFill := op.fill()
+		opFill := op.fillFor(t.elemBase)
 		if op.CascadeStyle != nil && op.CascadeStyle.Fill.Mode != ColorDefault {
 			t.inheritedFill = op.CascadeStyle.Fill
 		} else if opFill.Mode != ColorDefault {
@@ -7682,7 +7703,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 				rootOp := &feExt.iterTmpl.ops[0]
 				if rootOp.Kind == OpContainer {
 					rootGeom := &feExt.iterTmpl.geom[0]
-					fillColor := rootOp.fill()
+					fillColor := rootOp.fillFor(elemPtr)
 					if fillColor.Mode != ColorDefault {
 						bx := int(itemAbsX) + int(rootOp.Margin[3])
 						by := int(itemAbsY) + int(rootOp.Margin[0])
@@ -8099,7 +8120,7 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 
 		// Update inherited Fill - cascades through nested containers
 		oldInheritedFill := t.inheritedFill
-		opFill := op.fill()
+		opFill := op.fillFor(elemBase)
 		if op.CascadeStyle != nil && op.CascadeStyle.Fill.Mode != ColorDefault {
 			t.inheritedFill = op.CascadeStyle.Fill
 		} else if opFill.Mode != ColorDefault {
@@ -8474,7 +8495,7 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 					rootOp := &ext.iterTmpl.ops[0]
 					if rootOp.Kind == OpContainer {
 						rootGeom := &ext.iterTmpl.geom[0]
-						fillColor := rootOp.fill()
+						fillColor := rootOp.fillFor(elemPtr)
 						if fillColor.Mode != ColorDefault {
 							bx := int(contentX) + int(rootOp.Margin[3])
 							by := y + int(rootOp.Margin[0])
