@@ -58,7 +58,12 @@ type App struct {
 	running        bool
 	renderMu       sync.Mutex
 	renderChan     chan struct{}
-	frameFlushed   atomic.Bool // set when input renders directly, cleared by debounce timer
+	// render generations: reqGen stamps every RequestRender; doneGen records the
+	// latest request generation a completed render covered. The debounce timer
+	// skips only when no request is newer than the last render, so an async
+	// request landing just after an input-driven flush is never discarded.
+	reqGen  atomic.Uint64
+	doneGen atomic.Uint64
 	forceFullFlush bool        // set by Go() to force full redraw on next frame
 	suspended      atomic.Bool // when set, render() is a no-op (terminal handed to an external program, e.g. $EDITOR)
 	effectsActive  bool        // previous frame used post-processing; clear pooled buffers fully
@@ -836,6 +841,7 @@ func (a *App) Template() *Template {
 // RequestRender marks that a render is needed.
 // Safe to call from any goroutine.
 func (a *App) RequestRender() {
+	a.reqGen.Add(1)
 	select {
 	case a.renderChan <- struct{}{}:
 	default:
@@ -880,6 +886,11 @@ func (a *App) render() {
 	}
 	a.renderMu.Lock()
 	defer a.renderMu.Unlock()
+
+	// capture before reading state: any request stamped after this point may
+	// carry state this frame won't include, so the debounce must re-render
+	coveredGen := a.reqGen.Load()
+	defer a.doneGen.Store(coveredGen)
 
 	var t0, t1 time.Time
 	if DebugTiming {
@@ -1216,7 +1227,6 @@ func (a *App) run(startView string) error {
 	// signal debounce timer to skip its next frame since we just rendered
 	err := a.input.Run(a.reader, func(handled bool) {
 		if a.running {
-			a.frameFlushed.Store(true)
 			// drain any pending render request so the debounce timer won't double-render
 			select {
 			case <-a.renderChan:
@@ -1261,8 +1271,10 @@ func (a *App) handleRenderRequests() {
 			if !a.running {
 				return
 			}
-			// skip if input already rendered this frame
-			if a.frameFlushed.CompareAndSwap(true, false) {
+			// skip only when the last completed render already covered every
+			// request; a request stamped after that render carries newer state
+			// and must flush even if input rendered in between
+			if a.reqGen.Load() == a.doneGen.Load() {
 				continue
 			}
 			// drain any render request that arrived during the frame window
