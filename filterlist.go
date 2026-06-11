@@ -28,9 +28,10 @@ import (
 //	    }
 //	}()
 type FilterListC[T any] struct {
-	input  *InputC
-	list   *ListC[*T]
-	filter *FilterC[T]
+	onFilterChange func()
+	input          *InputC
+	list           *ListC[*T]
+	filter         *FilterC[T]
 
 	placeholder string
 	maxVisible  int
@@ -58,12 +59,22 @@ func FilterList[T any](source *[]T, extract func(*T) string) *FilterListC[T] {
 		cursor: &fl.input.field.Cursor,
 		onChange: func(string) {
 			fl.sync()
+			if fl.onFilterChange != nil {
+				fl.onFilterChange()
+			}
 		},
 	}
 	// default nav keys that don't conflict with text input
 	fl.list.BindNav("<C-n>", "<C-p>").
 		BindPageNav("<C-d>", "<C-u>")
 	fl.updateCounter()
+	return fl
+}
+
+// OnFilterChange registers a callback fired after the filter query changes
+// and the list has resynced — the mutation point for derived filter state.
+func (fl *FilterListC[T]) OnFilterChange(fn func()) *FilterListC[T] {
+	fl.onFilterChange = fn
 	return fl
 }
 

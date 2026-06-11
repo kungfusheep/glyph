@@ -1174,6 +1174,13 @@ func (a *App) run(startView string) error {
 		}
 	}
 
+	// The initial size is a resize event too: deliver it before the first
+	// frame so size-derived state never needs per-frame recomputation.
+	if a.onResize != nil {
+		size := a.screen.Size()
+		a.onResize(size.Width, size.Height)
+	}
+
 	// Handle resize
 	go a.handleResize()
 
