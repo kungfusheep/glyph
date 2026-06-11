@@ -8653,8 +8653,16 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 	}
 
 	// If jump mode is active, register this target. Labels are painted by the
-	// app after the final visible frame is composed.
+	// app after the final visible frame is composed. Targets outside the
+	// buffer or the active vertical clip never drew anything (the span jump
+	// path clips the same way), so they must not register either.
 	if t.app != nil && t.app.JumpModeActive() {
+		if absY < 0 || int(absY) >= buf.Height() || absX < 0 || int(absX) >= buf.Width() {
+			return
+		}
+		if t.clipMaxY > 0 && absY >= t.clipMaxY {
+			return
+		}
 		ext := op.Ext.(*opJump)
 		onSelect := ext.onSelect
 		if base := t.elemBase; base != nil {
