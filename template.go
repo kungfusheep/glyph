@@ -2516,6 +2516,33 @@ type opForEach struct {
 	elemSize  uintptr
 	elemIsPtr bool   // true when slice elements are pointers (e.g. []*T)
 	geoms     []Geom // per-item geometry, reused across frames
+
+	// optional render cap: hasLimit selects between limitStatic and limitPtr
+	// (limitPtr supports in-item *int via the same offset trick as slice).
+	hasLimit    bool
+	limitStatic int
+	limitPtr    sliceBinding // points at an int when set
+	remaining   sliceBinding // *int writeback: items excluded by the limit
+}
+
+// visibleLen clamps the iteration count by the configured limit and writes
+// the excluded count to the remaining binding. All iteration sites must use
+// this so geometry and render agree. 0 = render none, negative = unlimited.
+func (f *opForEach) visibleLen(elemBase unsafe.Pointer, sliceLen int) int {
+	n := sliceLen
+	if f.hasLimit {
+		lim := f.limitStatic
+		if p := f.limitPtr.ptrFor(elemBase); p != nil {
+			lim = *(*int)(p)
+		}
+		if lim >= 0 && lim < n {
+			n = lim
+		}
+	}
+	if p := f.remaining.ptrFor(elemBase); p != nil {
+		*(*int)(p) = sliceLen - n
+	}
+	return n
 }
 
 type sliceBinding struct {
@@ -3764,7 +3791,7 @@ func (t *Template) compileMatch(mn matchNodeInterface, parent int16, depth int, 
 	}, depth)
 }
 
-func (t *Template) compileForEach(items any, render any, parent int16, depth int, elemBase unsafe.Pointer, parentElemSize uintptr) int16 {
+func (t *Template) compileForEach(items any, render any, limit any, remaining *int, parent int16, depth int, elemBase unsafe.Pointer, parentElemSize uintptr) int16 {
 	// Analyze slice
 	sliceRV := reflect.ValueOf(items)
 	if sliceRV.Kind() != reflect.Ptr {
@@ -3812,15 +3839,31 @@ func (t *Template) compileForEach(items any, render any, parent int16, depth int
 
 	iterTmpl := t.compileSubTemplate(templateResult, dummyBase, compileSize)
 
+	ext := &opForEach{
+		iterTmpl:  iterTmpl,
+		slice:     newSliceBinding(slicePtr, elemBase, parentElemSize),
+		elemSize:  elemSize,
+		elemIsPtr: elemIsPtr,
+	}
+	switch lim := limit.(type) {
+	case nil:
+	case int:
+		ext.hasLimit = true
+		ext.limitStatic = lim
+	case *int:
+		ext.hasLimit = true
+		ext.limitPtr = newSliceBinding(unsafe.Pointer(lim), elemBase, parentElemSize)
+	default:
+		panic("ForEach.Limit: accepts int or *int")
+	}
+	if remaining != nil {
+		ext.remaining = newSliceBinding(unsafe.Pointer(remaining), elemBase, parentElemSize)
+	}
+
 	op := Op{
 		Kind:   OpForEach,
 		Parent: parent,
-		Ext: &opForEach{
-			iterTmpl:  iterTmpl,
-			slice:     newSliceBinding(slicePtr, elemBase, parentElemSize),
-			elemSize:  elemSize,
-			elemIsPtr: elemIsPtr,
-		},
+		Ext:    ext,
 	}
 
 	return t.addOp(op, depth)
@@ -6778,18 +6821,19 @@ func (t *Template) layoutForEach(_ int16, op *Op, availW int16) (totalH, maxW in
 	if !ok {
 		return 0, 0
 	}
-	if sliceHdr.Len == 0 {
+	visible := feExt.visibleLen(t.elemBase, sliceHdr.Len)
+	if visible == 0 {
 		return 0, 0
 	}
 
 	// Ensure we have enough geometry slots for items
-	if cap(feExt.geoms) < sliceHdr.Len {
-		feExt.geoms = make([]Geom, sliceHdr.Len)
+	if cap(feExt.geoms) < visible {
+		feExt.geoms = make([]Geom, visible)
 	}
-	feExt.geoms = feExt.geoms[:sliceHdr.Len]
+	feExt.geoms = feExt.geoms[:visible]
 
 	cursor := int16(0)
-	for i := 0; i < sliceHdr.Len; i++ {
+	for i := 0; i < visible; i++ {
 		// Get element pointer for this item
 		elemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*feExt.elemSize)
 		if feExt.elemIsPtr {
@@ -6830,17 +6874,18 @@ func (t *Template) layoutForEachRow(_ int16, op *Op, availW int16, gap int8) (ma
 	if !ok {
 		return 0, 0
 	}
-	if sliceHdr.Len == 0 {
+	visible := feExt.visibleLen(t.elemBase, sliceHdr.Len)
+	if visible == 0 {
 		return 0, 0
 	}
 
-	if cap(feExt.geoms) < sliceHdr.Len {
-		feExt.geoms = make([]Geom, sliceHdr.Len)
+	if cap(feExt.geoms) < visible {
+		feExt.geoms = make([]Geom, visible)
 	}
-	feExt.geoms = feExt.geoms[:sliceHdr.Len]
+	feExt.geoms = feExt.geoms[:visible]
 
 	cursor := int16(0)
-	for i := 0; i < sliceHdr.Len; i++ {
+	for i := 0; i < visible; i++ {
 		elemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*feExt.elemSize)
 		if feExt.elemIsPtr {
 			elemPtr = *(*unsafe.Pointer)(elemPtr)

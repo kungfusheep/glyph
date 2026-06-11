@@ -2205,24 +2205,87 @@ var Overlay OverlayFn = func(children ...Component) OverlayC {
 // ============================================================================
 
 type ForEachC[T any] struct {
-	items    *[]T
-	template func(item *T) Component
+	items     *[]T
+	template  func(item *T) Component
+	limit     any  // int or *int; nil = unlimited
+	remaining *int // written each frame with the count of items not rendered
 }
 
 // ForEach renders a template for each item in a slice.
-// template: func(item *T) Component. return a component tree for each item.
+// render: func(item *T) Component. return a component tree for each item.
 // Pointer fields inside *T are reactive; mutate and re-render to update.
 //
 //	ForEach(&todos, func(t *Todo) Component {
 //	    return HBox(Text(&t.Name), Text(&t.Status))
 //	})
-func ForEach[T any](items *[]T, template func(item *T) Component) ForEachC[T] {
-	return ForEachC[T]{items: items, template: template}
+//
+// Omit the render func to configure first, then supply it with the final call:
+//
+//	ForEach(&todos).Limit(&visible).Remaining(&more)(func(t *Todo) Component {
+//	    return Text(&t.Name)
+//	})
+func ForEach[T any](items *[]T, render ...func(item *T) Component) ForEachC[T] {
+	fe := ForEachC[T]{items: items}
+	if len(render) > 1 {
+		panic("ForEach: multiple render funcs — pass exactly one")
+	}
+	if len(render) == 1 {
+		fe.template = render[0]
+	}
+	return fe
+}
+
+// ForEachFn is the configured form of ForEach: call it with the render func
+// to complete the component. Config methods decorate it, VBoxFn-style.
+type ForEachFn[T any] func(render func(item *T) Component) ForEachC[T]
+
+// Limit caps how many items render. Accepts int or *int (re-read every frame).
+// 0 renders none; negative means unlimited.
+func (f ForEachC[T]) Limit(n any) ForEachFn[T] {
+	return func(render func(item *T) Component) ForEachC[T] {
+		f.template = render
+		f.limit = n
+		return f
+	}
+}
+
+// Remaining binds an *int written each frame with the count of items the
+// limit excluded. Inside a parent ForEach, bind a field on the parent item
+// for a per-item count.
+func (f ForEachC[T]) Remaining(c *int) ForEachFn[T] {
+	return func(render func(item *T) Component) ForEachC[T] {
+		f.template = render
+		f.remaining = c
+		return f
+	}
+}
+
+// Limit caps how many items render. Accepts int or *int (re-read every frame).
+// 0 renders none; negative means unlimited.
+func (f ForEachFn[T]) Limit(n any) ForEachFn[T] {
+	return func(render func(item *T) Component) ForEachC[T] {
+		fe := f(render)
+		fe.limit = n
+		return fe
+	}
+}
+
+// Remaining binds an *int written each frame with the count of items the
+// limit excluded.
+func (f ForEachFn[T]) Remaining(c *int) ForEachFn[T] {
+	return func(render func(item *T) Component) ForEachC[T] {
+		fe := f(render)
+		fe.remaining = c
+		return fe
+	}
 }
 
 // compileTo implements forEachCompiler for template compilation.
 func (f ForEachC[T]) compileTo(t *Template, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
-	return t.compileForEach(f.items, f.template, parent, depth, elemBase, elemSize)
+	if f.template == nil {
+		panic("ForEach: missing render func — pass it as the second argument or complete the config chain by calling it with one")
+	}
+	return t.compileForEach(f.items, f.template, f.limit, f.remaining, parent, depth, elemBase, elemSize)
 }
 
 // ============================================================================

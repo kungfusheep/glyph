@@ -7123,3 +7123,168 @@ func TestFitContentDashboardWidgetsContributeIntrinsicWidth(t *testing.T) {
 		t.Fatalf("expected leader content to render inside fit-content dashboard, got %q", line)
 	}
 }
+
+func TestForEachLimitStatic(t *testing.T) {
+	type Item struct{ Label string }
+	items := []Item{{"one"}, {"two"}, {"three"}, {"four"}}
+
+	tmpl := Build(VBox(
+		ForEach(&items).Limit(2)(func(item *Item) Component {
+			return Text(&item.Label)
+		}),
+	))
+
+	buf := NewBuffer(20, 6)
+	tmpl.Execute(buf, 20, 6)
+
+	if got, want := strings.TrimSpace(buf.GetLine(0)), "one"; got != want {
+		t.Fatalf("line 0 = %q, want %q\n%s", got, want, buf.String())
+	}
+	if got, want := strings.TrimSpace(buf.GetLine(1)), "two"; got != want {
+		t.Fatalf("line 1 = %q, want %q\n%s", got, want, buf.String())
+	}
+	if got := strings.TrimSpace(buf.GetLine(2)); got != "" {
+		t.Fatalf("line 2 = %q, want empty (limit 2)\n%s", got, buf.String())
+	}
+}
+
+func TestForEachLimitPointerRereadEachFrame(t *testing.T) {
+	type Item struct{ Label string }
+	items := []Item{{"one"}, {"two"}, {"three"}}
+	limit := 1
+
+	tmpl := Build(VBox(
+		ForEach(&items).Limit(&limit)(func(item *Item) Component {
+			return Text(&item.Label)
+		}),
+	))
+
+	buf := NewBuffer(20, 5)
+	tmpl.Execute(buf, 20, 5)
+	if got := strings.TrimSpace(buf.GetLine(1)); got != "" {
+		t.Fatalf("frame 1 line 1 = %q, want empty (limit 1)", got)
+	}
+
+	limit = 3
+	buf2 := NewBuffer(20, 5)
+	tmpl.Execute(buf2, 20, 5)
+	if got, want := strings.TrimSpace(buf2.GetLine(2)), "three"; got != want {
+		t.Fatalf("frame 2 line 2 = %q, want %q (limit raised to 3)\n%s", got, want, buf2.String())
+	}
+}
+
+func TestForEachRemainingWriteback(t *testing.T) {
+	type Item struct{ Label string }
+	items := []Item{{"a"}, {"b"}, {"c"}, {"d"}, {"e"}}
+	remaining := -1
+
+	tmpl := Build(VBox(
+		ForEach(&items).Limit(2).Remaining(&remaining)(func(item *Item) Component {
+			return Text(&item.Label)
+		}),
+	))
+
+	buf := NewBuffer(20, 8)
+	tmpl.Execute(buf, 20, 8)
+	if remaining != 3 {
+		t.Fatalf("remaining = %d, want 3", remaining)
+	}
+
+	items = items[:2]
+	buf2 := NewBuffer(20, 8)
+	tmpl.Execute(buf2, 20, 8)
+	if remaining != 0 {
+		t.Fatalf("remaining after shrink = %d, want 0", remaining)
+	}
+}
+
+func TestForEachLimitEdgeCases(t *testing.T) {
+	type Item struct{ Label string }
+	items := []Item{{"a"}, {"b"}}
+
+	// limit 0 renders nothing
+	zero := Build(VBox(
+		ForEach(&items).Limit(0)(func(item *Item) Component { return Text(&item.Label) }),
+	))
+	buf := NewBuffer(10, 4)
+	zero.Execute(buf, 10, 4)
+	if got := strings.TrimSpace(buf.GetLine(0)); got != "" {
+		t.Fatalf("limit 0: line 0 = %q, want empty", got)
+	}
+
+	// negative limit means unlimited
+	neg := Build(VBox(
+		ForEach(&items).Limit(-1)(func(item *Item) Component { return Text(&item.Label) }),
+	))
+	buf2 := NewBuffer(10, 4)
+	neg.Execute(buf2, 10, 4)
+	if got, want := strings.TrimSpace(buf2.GetLine(1)), "b"; got != want {
+		t.Fatalf("negative limit: line 1 = %q, want %q", got, want)
+	}
+
+	// limit beyond len renders all, remaining 0
+	remaining := -1
+	over := Build(VBox(
+		ForEach(&items).Limit(99).Remaining(&remaining)(func(item *Item) Component { return Text(&item.Label) }),
+	))
+	buf3 := NewBuffer(10, 4)
+	over.Execute(buf3, 10, 4)
+	if got, want := strings.TrimSpace(buf3.GetLine(1)), "b"; got != want {
+		t.Fatalf("limit 99: line 1 = %q, want %q", got, want)
+	}
+	if remaining != 0 {
+		t.Fatalf("limit 99: remaining = %d, want 0", remaining)
+	}
+}
+
+func TestForEachLimitRemainingPerItemFields(t *testing.T) {
+	type Cell struct {
+		Name   string
+		Events []string
+		Max    int
+		More   int
+	}
+	cells := []Cell{
+		{Name: "mon", Events: []string{"e1", "e2", "e3", "e4"}, Max: 2},
+		{Name: "tue", Events: []string{"e5"}, Max: 2},
+	}
+
+	tmpl := Build(VBox(
+		ForEach(&cells, func(c *Cell) Component {
+			return VBox(
+				Text(&c.Name),
+				ForEach(&c.Events).Limit(&c.Max).Remaining(&c.More)(func(e *string) Component {
+					return Text(e)
+				}),
+			)
+		}),
+	))
+
+	buf := NewBuffer(20, 10)
+	tmpl.Execute(buf, 20, 10)
+
+	want := []string{"mon", "e1", "e2", "tue", "e5"}
+	for i, w := range want {
+		if got := strings.TrimSpace(buf.GetLine(i)); got != w {
+			t.Fatalf("line %d = %q, want %q\n%s", i, got, w, buf.String())
+		}
+	}
+	if cells[0].More != 2 {
+		t.Fatalf("cells[0].More = %d, want 2", cells[0].More)
+	}
+	if cells[1].More != 0 {
+		t.Fatalf("cells[1].More = %d, want 0", cells[1].More)
+	}
+}
+
+func TestForEachMissingRenderPanics(t *testing.T) {
+	type Item struct{ Label string }
+	items := []Item{{"a"}}
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for ForEach without render func")
+		}
+	}()
+	Build(VBox(ForEach(&items)))
+}
