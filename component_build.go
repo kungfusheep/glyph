@@ -34,6 +34,7 @@ func (t *TextViewC) Build() Component        { return t }
 func (s *ScrollViewC) Build() Component      { return s }
 func (f *FilterLogC) Build() Component       { return f }
 func (f *FormC) Build() Component            { return f }
+func (tr *TriggerC) Build() Component        { return tr }
 func (f *FilterListC[T]) Build() Component   { return f }
 func (f ForEachC[T]) Build() Component       { return f }
 func (l *ListC[T]) Build() Component         { return l }

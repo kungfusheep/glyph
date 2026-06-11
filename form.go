@@ -101,6 +101,12 @@ var Form FormFn = func(fields ...FormField) *FormC {
 					binding{pattern: "j", handler: func() { ctrl.Next() }},
 					binding{pattern: "k", handler: func() { ctrl.Prev() }},
 				)
+			case *TriggerC:
+				f.fm.Register(fc)
+				f.fm.ItemBindings(
+					binding{pattern: "<Space>", handler: ctrl.Activate},
+					binding{pattern: "<Enter>", handler: ctrl.Activate},
+				)
 			default:
 				f.fm.Register(fc)
 			}
