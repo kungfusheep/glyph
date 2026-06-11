@@ -10,6 +10,7 @@ type TextViewC struct {
 	layer            *Layer
 	grow             float32
 	margin           [4]int16
+	wordWrap         bool
 	lastDataPtr      unsafe.Pointer
 	lastLen          int
 	lastWidth        int
@@ -18,8 +19,10 @@ type TextViewC struct {
 	flexGrowCond     conditionNode
 }
 
-// TextView creates a scrollable multi-line text display with word wrapping.
-// Content is re-wrapped automatically when the text or viewport width changes.
+// TextView creates a scrollable multi-line text display. Lines wrap at the
+// viewport width, breaking mid-word by default; WordWrap() switches to
+// word-boundary wrapping. Content is re-wrapped automatically when the text
+// or viewport width changes.
 func TextView(content *string) *TextViewC {
 	tv := &TextViewC{
 		content: content,
@@ -66,6 +69,13 @@ func (tv *TextViewC) MarginTRBL(t, r, b, l int16) *TextViewC {
 	return tv
 }
 
+// WordWrap switches wrapping to word boundaries — use for prose. The default
+// breaks at the exact viewport width, preserving runs and indentation.
+func (tv *TextViewC) WordWrap() *TextViewC {
+	tv.wordWrap = true
+	return tv
+}
+
 // Layer returns the underlying layer for external scroll wiring.
 func (tv *TextViewC) Layer() *Layer { return tv.layer }
 
@@ -103,7 +113,7 @@ func (tv *TextViewC) sync() {
 	tv.lastLen = len(c)
 	tv.lastWidth = w
 
-	lines := wrapText(c, w, true)
+	lines := wrapText(c, w, !tv.wordWrap)
 	if len(lines) == 0 {
 		lines = []string{""}
 	}

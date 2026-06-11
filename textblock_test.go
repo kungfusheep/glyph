@@ -1,6 +1,9 @@
 package glyph
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTextBlock_WrapsText(t *testing.T) {
 	buf := NewBuffer(20, 10)
@@ -142,5 +145,39 @@ func TestTextBlock_InsideScrollView(t *testing.T) {
 	}
 	if got := buf.GetLine(4); got != "body line three" {
 		t.Errorf("line 4: got %q, want %q", got, "body line three")
+	}
+}
+
+func TestTextViewDefaultCharWrapThroughTemplate(t *testing.T) {
+	content := "alpha beta gamma"
+	tmpl := Build(VBox.Width(10).Height(4)(
+		TextView(&content).Grow(1),
+	))
+
+	buf := NewBuffer(10, 4)
+	tmpl.Execute(buf, 10, 4)
+
+	if got, want := buf.GetLine(0), "alpha beta"; got != want {
+		t.Fatalf("line 0 = %q, want %q\n%s", got, want, buf.String())
+	}
+	if got, want := strings.TrimRight(buf.GetLine(1), " "), " gamma"; got != want {
+		t.Fatalf("line 1 = %q, want %q (char wrap preserves the leading space)\n%s", got, want, buf.String())
+	}
+}
+
+func TestTextViewWordWrapThroughTemplate(t *testing.T) {
+	content := "alpha beta gamma"
+	tmpl := Build(VBox.Width(10).Height(4)(
+		TextView(&content).WordWrap().Grow(1),
+	))
+
+	buf := NewBuffer(10, 4)
+	tmpl.Execute(buf, 10, 4)
+
+	if got, want := buf.GetLine(0), "alpha beta"; got != want {
+		t.Fatalf("line 0 = %q, want %q\n%s", got, want, buf.String())
+	}
+	if got, want := strings.TrimRight(buf.GetLine(1), " "), "gamma"; got != want {
+		t.Fatalf("line 1 = %q, want %q (word wrap drops the break space)\n%s", got, want, buf.String())
 	}
 }
