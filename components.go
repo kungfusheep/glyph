@@ -1809,17 +1809,32 @@ func (s SparklineC) MarginTRBL(a, b, c, d int16) SparklineC {
 // ============================================================================
 
 type JumpC struct {
-	child    any
-	onSelect func()
-	style    Style
-	margin   [4]int16
-	padding  [4]int16
+	child           any
+	onSelect        func()
+	onSelectItem    func(unsafe.Pointer)
+	onSelectItemRef func(unsafe.Pointer, NodeRef)
+	style           Style
+	margin          [4]int16
+	padding         [4]int16
 }
 
 // Jump wraps a child component as a jump target.
 // When jump mode is active, a label appears at this position; typing it calls onSelect.
 func Jump(child Component, onSelect func()) JumpC {
 	return JumpC{child: child, onSelect: onSelect}
+}
+
+// JumpItem wraps a child as a jump target inside a ForEach render func: when
+// the label is typed, onSelect receives the item this rendered instance was
+// bound to. Use it instead of carrying Span slices with per-item closures.
+func JumpItem[T any](child Component, onSelect func(*T)) JumpC {
+	return JumpC{child: child, onSelectItem: func(p unsafe.Pointer) { onSelect((*T)(p)) }}
+}
+
+// JumpItemRef is JumpItem plus the rendered geometry of the target, for
+// anchoring overlays beside the selected item.
+func JumpItemRef[T any](child Component, onSelect func(*T, NodeRef)) JumpC {
+	return JumpC{child: child, onSelectItemRef: func(p unsafe.Pointer, ref NodeRef) { onSelect((*T)(p), ref) }}
 }
 
 // Style sets the component style.

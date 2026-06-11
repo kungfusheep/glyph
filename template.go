@@ -2983,8 +2983,10 @@ type opLayer struct {
 }
 
 type opJump struct {
-	onSelect func()
-	style    Style
+	onSelect        func()
+	onSelectItem    func(unsafe.Pointer)
+	onSelectItemRef func(unsafe.Pointer, NodeRef)
+	style           Style
 }
 
 type opScreenEffect struct {
@@ -4373,7 +4375,7 @@ func (t *Template) compileSparklineC(v SparklineC, parent int16, depth int) int1
 }
 
 func (t *Template) compileJumpC(v JumpC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
-	ext := &opJump{onSelect: v.onSelect, style: v.style}
+	ext := &opJump{onSelect: v.onSelect, onSelectItem: v.onSelectItem, onSelectItemRef: v.onSelectItemRef, style: v.style}
 	idx := t.addOp(Op{
 		Kind:       OpJump,
 		Parent:     parent,
@@ -8654,7 +8656,22 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 	// app after the final visible frame is composed.
 	if t.app != nil && t.app.JumpModeActive() {
 		ext := op.Ext.(*opJump)
-		t.app.AddJumpTarget(absX, absY, ext.onSelect, ext.style)
+		onSelect := ext.onSelect
+		if base := t.elemBase; base != nil {
+			if ext.onSelectItem != nil {
+				fn := ext.onSelectItem
+				onSelect = func() { fn(base) }
+			} else if ext.onSelectItemRef != nil {
+				fn := ext.onSelectItemRef
+				w := geom.W
+				if maxW < w {
+					w = maxW
+				}
+				ref := NodeRef{X: int(absX) + t.jumpOffsetX, Y: int(absY) + t.jumpOffsetY, W: int(w), H: max(1, int(geom.H))}
+				onSelect = func() { fn(base, ref) }
+			}
+		}
+		t.app.AddJumpTarget(absX, absY, onSelect, ext.style)
 	}
 }
 
