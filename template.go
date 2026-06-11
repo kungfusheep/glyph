@@ -2488,7 +2488,9 @@ const (
 	textOff
 	textFn
 	textIntPtr
+	textIntOff
 	textFloat64Ptr
+	textFloat64Off
 )
 
 type opIf struct {
@@ -2674,8 +2676,12 @@ func (tx *opText) resolve(elemBase unsafe.Pointer) string {
 		return tx.fnCached
 	case textIntPtr:
 		return strconv.Itoa(*tx.intPtr)
+	case textIntOff:
+		return strconv.Itoa(*(*int)(unsafe.Pointer(uintptr(elemBase) + tx.off)))
 	case textFloat64Ptr:
 		return strconv.FormatFloat(*tx.float64Ptr, 'f', -1, 64)
+	case textFloat64Off:
+		return strconv.FormatFloat(*(*float64)(unsafe.Pointer(uintptr(elemBase) + tx.off)), 'f', -1, 64)
 	default:
 		return tx.static
 	}
@@ -2701,8 +2707,18 @@ func (tx *opText) textWidth(elemBase unsafe.Pointer) int16 {
 		return 0
 	case textIntPtr:
 		return int16(len(strconv.Itoa(*tx.intPtr)))
+	case textIntOff:
+		if elemBase != nil {
+			return int16(len(strconv.Itoa(*(*int)(unsafe.Pointer(uintptr(elemBase) + tx.off)))))
+		}
+		return 1
 	case textFloat64Ptr:
 		return int16(len(strconv.FormatFloat(*tx.float64Ptr, 'f', -1, 64)))
+	case textFloat64Off:
+		if elemBase != nil {
+			return int16(len(strconv.FormatFloat(*(*float64)(unsafe.Pointer(uintptr(elemBase) + tx.off)), 'f', -1, 64)))
+		}
+		return 1
 	default:
 		return int16(StringWidth(tx.static))
 	}
@@ -4055,11 +4071,21 @@ func (t *Template) compileTextC(v TextC, parent int16, depth int, elemBase unsaf
 		ext.mode = textFn
 		ext.fn = val
 	case *int:
-		ext.mode = textIntPtr
-		ext.intPtr = val
+		if elemBase != nil && isWithinRange(unsafe.Pointer(val), elemBase, elemSize) {
+			ext.mode = textIntOff
+			ext.off = uintptr(unsafe.Pointer(val)) - uintptr(elemBase)
+		} else {
+			ext.mode = textIntPtr
+			ext.intPtr = val
+		}
 	case *float64:
-		ext.mode = textFloat64Ptr
-		ext.float64Ptr = val
+		if elemBase != nil && isWithinRange(unsafe.Pointer(val), elemBase, elemSize) {
+			ext.mode = textFloat64Off
+			ext.off = uintptr(unsafe.Pointer(val)) - uintptr(elemBase)
+		} else {
+			ext.mode = textFloat64Ptr
+			ext.float64Ptr = val
+		}
 	}
 
 	// compile dynamic style: whole style > individual FG/BG
