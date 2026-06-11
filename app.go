@@ -1308,15 +1308,25 @@ func reopenStdin() {
 // handleResize watches for terminal resize events.
 func (a *App) handleResize() {
 	for size := range a.screen.ResizeChan() {
-		if a.pool != nil {
-			a.pool.Resize(size.Width, size.Height)
-		}
-		if a.onResize != nil {
-			a.onResize(size.Width, size.Height)
-		}
-		a.forceFullFlush = true
+		a.applyResize(size.Width, size.Height)
 		a.RequestRender()
 	}
+}
+
+// applyResize mutates the pool and runs the OnResize callback under the render
+// lock so an in-flight Execute never sees a torn buffer (cells/width/height/
+// dirtyRows swap non-atomically in Buffer.Resize). OnResize callbacks must not
+// render synchronously (RenderNow) — that would deadlock; RequestRender is fine.
+func (a *App) applyResize(width, height int) {
+	a.renderMu.Lock()
+	defer a.renderMu.Unlock()
+	if a.pool != nil {
+		a.pool.Resize(width, height)
+	}
+	if a.onResize != nil {
+		a.onResize(width, height)
+	}
+	a.forceFullFlush = true
 }
 
 // Size returns the current screen size.
