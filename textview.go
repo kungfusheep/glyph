@@ -103,7 +103,7 @@ func (tv *TextViewC) sync() {
 	tv.lastLen = len(c)
 	tv.lastWidth = w
 
-	lines := wrapText(c, w)
+	lines := wrapText(c, w, true)
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
@@ -507,8 +507,11 @@ func wrapDrawChar(s string, buf *Buffer, x, y, width, maxLines int, style Style)
 	return row + 1
 }
 
-// wrapText returns character-wrapped lines as strings (test compat).
-func wrapText(s string, width int) []string {
+// wrapText returns wrapped lines as strings (test compat).
+func wrapText(s string, width int, charWrap bool) []string {
+	if !charWrap {
+		return wrapTextWord(s, width)
+	}
 	if width <= 0 {
 		return nil
 	}

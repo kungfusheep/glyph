@@ -19,6 +19,32 @@ func TestTextBlock_WrapsText(t *testing.T) {
 	}
 }
 
+func TestWrapText_WordModeKeepsWordsTogether(t *testing.T) {
+	lines := wrapText("alpha beta gamma", 10, false)
+	want := []string{"alpha beta", "gamma"}
+	if len(lines) != len(want) {
+		t.Fatalf("len(lines) = %d, want %d: %#v", len(lines), len(want), lines)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("line %d = %q, want %q", i, lines[i], want[i])
+		}
+	}
+}
+
+func TestWrapText_CharModeBreaksAtWidth(t *testing.T) {
+	lines := wrapText("alpha beta gamma", 10, true)
+	want := []string{"alpha beta", " gamma"}
+	if len(lines) != len(want) {
+		t.Fatalf("len(lines) = %d, want %d: %#v", len(lines), len(want), lines)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("line %d = %q, want %q", i, lines[i], want[i])
+		}
+	}
+}
+
 func TestTextBlock_MultipleLines(t *testing.T) {
 	buf := NewBuffer(40, 10)
 	tmpl := Build(VBox(

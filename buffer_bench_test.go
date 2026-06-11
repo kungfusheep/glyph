@@ -435,14 +435,14 @@ var benchWrapText = strings.Repeat("The quick brown fox jumps over the lazy dog.
 func BenchmarkWrapTextChar(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = wrapText(benchWrapText, 80)
+		_ = wrapText(benchWrapText, 80, true)
 	}
 }
 
 func BenchmarkWrapTextWord(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = wrapTextWord(benchWrapText, 80)
+		_ = wrapText(benchWrapText, 80, false)
 	}
 }
 
@@ -485,7 +485,7 @@ func BenchmarkWrapWriteChar(b *testing.B) {
 	style := DefaultStyle()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		lines := wrapText(benchWrapText, 80)
+		lines := wrapText(benchWrapText, 80, true)
 		for j, line := range lines {
 			if j >= 20 {
 				break
