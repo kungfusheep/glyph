@@ -1153,6 +1153,9 @@ func (t *Template) compileStyleDyn(baseStyle Style, styleDyn, fgDyn, bgDyn any, 
 		}
 		*storage = s
 	}
+	// prime the storage so the very first frame renders live values instead
+	// of the zero base style (branch evals only run once a branch is active)
+	eval()
 	if elemBase != nil && elemSize > 0 {
 		t.itemEvals = append(t.itemEvals, eval)
 	} else {
@@ -3215,9 +3218,9 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	case SpacerC:
 		return t.compileSpacerC(v, parent, depth)
 	case HRuleC:
-		return t.compileHRuleC(v, parent, depth)
+		return t.compileHRuleC(v, parent, depth, elemBase, elemSize)
 	case VRuleC:
-		return t.compileVRuleC(v, parent, depth)
+		return t.compileVRuleC(v, parent, depth, elemBase, elemSize)
 	case ProgressC:
 		return t.compileProgressC(v, parent, depth, elemBase, elemSize)
 	case SpinnerC:
@@ -4200,13 +4203,13 @@ func (t *Template) compileSpacerC(v SpacerC, parent int16, depth int) int16 {
 	return idx
 }
 
-func (t *Template) compileHRuleC(v HRuleC, parent int16, depth int) int16 {
+func (t *Template) compileHRuleC(v HRuleC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	char := v.char
 	if char == 0 {
 		char = '─'
 	}
 	ext := &opRule{char: char, style: v.style, extend: v.extend}
-	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, nil, 0)
+	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, elemBase, elemSize)
 	return t.addOp(Op{
 		Kind:   OpHRule,
 		Parent: parent,
@@ -4215,13 +4218,13 @@ func (t *Template) compileHRuleC(v HRuleC, parent int16, depth int) int16 {
 	}, depth)
 }
 
-func (t *Template) compileVRuleC(v VRuleC, parent int16, depth int) int16 {
+func (t *Template) compileVRuleC(v VRuleC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	char := v.char
 	if char == 0 {
 		char = '│'
 	}
 	ext := &opRule{char: char, style: v.style, extend: v.extend}
-	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, nil, 0)
+	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, elemBase, elemSize)
 	idx := t.addOp(Op{
 		Kind:   OpVRule,
 		Parent: parent,
