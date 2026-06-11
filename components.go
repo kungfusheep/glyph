@@ -1012,7 +1012,10 @@ func (t TextC) MarginTRBL(a, b, c, d int16) TextC { t.style.margin = [4]int16{a,
 //
 //	Textf("Hello ", Bold("world"), "!")
 //	Textf("Name: ", Bold(&it.Name), " Status: ", &it.Status)  // ForEach compatible
-func Textf(parts ...any) Component {
+//
+// Returns a rich text node, so wrapping can be tuned: Textf(...).CharWrap()
+// switches to character-exact wrapping for truncation in fixed-height rows.
+func Textf(parts ...any) richTextNode {
 	spans := make([]Span, 0, len(parts))
 	ptrs := make([]*string, 0, len(parts))
 	hasPtrs := false

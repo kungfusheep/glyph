@@ -7218,6 +7218,18 @@ func blendBackingRuneFG(backFG, bg Color, opacity float64, defaultStyle Style) C
 	return Lerp(backFG, bg, opacity)
 }
 
+// clipLines returns the rows available for wrapped text starting at absY,
+// bounded by the buffer bottom and any active vertical clip.
+func (t *Template) clipLines(buf *Buffer, absY int16) int {
+	maxLines := buf.Height() - int(absY)
+	if t.clipMaxY > 0 {
+		if avail := int(t.clipMaxY) - int(absY); avail < maxLines {
+			maxLines = avail
+		}
+	}
+	return maxLines
+}
+
 func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16) {
 	if idx < 0 || int(idx) >= len(t.ops) {
 		return
@@ -7281,7 +7293,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		}
 		style := t.effectiveStyle(baseStyle)
 		raw := ext.resolve(t.elemBase)
-		maxLines := buf.Height() - int(absY)
+		maxLines := t.clipLines(buf, absY)
 		if maxLines > 0 {
 			wrapTextDraw(raw, buf, int(absX), int(absY), int(contentW), maxLines, style, ext.charWrap)
 		}
@@ -7301,7 +7313,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		spans := ext.resolve(t.elemBase)
 		if spans != nil {
 			spans = styleSpans(spans, t.effectiveStyle)
-			maxLines := buf.Height() - int(absY)
+			maxLines := t.clipLines(buf, absY)
 			if maxLines > 0 {
 				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap, t.richSpanJumpFunc(buf))
 			}
@@ -7912,7 +7924,7 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 		}
 		style := mergeStyle(baseStyle)
 		raw := ext.resolve(elemBase)
-		maxLines := buf.Height() - int(absY)
+		maxLines := t.clipLines(buf, absY)
 		if maxLines > 0 {
 			wrapTextDraw(raw, buf, int(absX), int(absY), int(contentW), maxLines, style, ext.charWrap)
 		}
@@ -7932,7 +7944,7 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 		spans := ext.resolve(elemBase)
 		if spans != nil {
 			spans = styleSpans(spans, mergeStyle)
-			maxLines := buf.Height() - int(absY)
+			maxLines := t.clipLines(buf, absY)
 			if maxLines > 0 {
 				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap, t.richSpanJumpFunc(buf))
 			}
@@ -8149,6 +8161,14 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 			contentW -= op.Border.PadH()
 		}
 
+		// Set vertical clip for children (content area bottom)
+		oldClipMaxY := t.clipMaxY
+		contentBottom := boxY + boxH
+		contentBottom -= op.Border.PadBottom()
+		if t.clipMaxY == 0 || contentBottom < t.clipMaxY {
+			t.clipMaxY = contentBottom
+		}
+
 		oldRefOpacity := t.refOpacity
 		oldRefOpacitySet := t.refOpacitySet
 		t.refOpacity = effectiveRefOpacity
@@ -8164,9 +8184,10 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 			t.renderSubOp(buf, i, absX, absY, contentW, elemBase)
 		}
 
-		// Restore inherited style and fill
+		// Restore inherited style, fill, and clip
 		t.inheritedStyle = oldInheritedStyle
 		t.inheritedFill = oldInheritedFill
+		t.clipMaxY = oldClipMaxY
 		t.refOpacity = oldRefOpacity
 		t.refOpacitySet = oldRefOpacitySet
 
