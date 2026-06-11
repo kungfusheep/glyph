@@ -5134,6 +5134,18 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 		return intrinsicW
 	}
 
+	// Jump is a transparent wrapper: it measures as its children.
+	if op.Kind == OpJump {
+		var w int16
+		for i := op.ChildStart; i < op.ChildEnd; i++ {
+			if t.ops[i].Parent != idx {
+				continue
+			}
+			w += t.computeIntrinsicWidthWithBase(i, elemBase)
+		}
+		return w + op.marginH()
+	}
+
 	// For text, compute string width
 	if op.Kind == OpText {
 		return op.Ext.(*opText).textWidth(elemBase) + op.marginH()
@@ -5605,8 +5617,21 @@ func (t *Template) distributeHBoxChildWidths(idx int16, op *Op, availW int16, el
 			totalFlex += fg
 			flexChildren = append(flexChildren, i)
 			flexGrowValues = append(flexGrowValues, fg)
-		} else if !effectiveOp.FitContent && !effectiveOp.ContentSized && (effectiveOp.Kind == OpContainer || effectiveOp.Kind == OpJump) && effectiveOp.width() == 0 && effectiveOp.percentWidth() == 0 {
-			// Container/Jump without explicit width or fixed-content children - implicit flex
+		} else if effectiveOp.Kind == OpJump && effectiveOp.width() == 0 {
+			// Jump is a transparent wrapper: when its content measures, size
+			// to it so flex siblings don't starve it to zero width.
+			if w := t.computeIntrinsicWidthWithBase(i, elemBase); w > 0 {
+				if w > availW {
+					w = availW
+				}
+				childGeom.W = w
+				usedW += w
+				fixedWidthCount++
+			} else {
+				implicitFlexChildren = append(implicitFlexChildren, i)
+			}
+		} else if !effectiveOp.FitContent && !effectiveOp.ContentSized && effectiveOp.Kind == OpContainer && effectiveOp.width() == 0 && effectiveOp.percentWidth() == 0 {
+			// Container without explicit width or fixed-content children - implicit flex
 			implicitFlexChildren = append(implicitFlexChildren, i)
 		} else {
 			// Non-flex child with explicit or content-based width
