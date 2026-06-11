@@ -5113,6 +5113,17 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 		return op.Ext.(*opText).textWidth(elemBase) + op.marginH()
 	}
 
+	// Rich text measures its natural single-line span width, so branches and
+	// wrappers holding a Textf/Rich report real space instead of zero.
+	if op.Kind == OpRichText {
+		spans := op.Ext.(*opRichText).resolve(elemBase)
+		w := 0
+		for _, span := range spans {
+			w += StringWidth(span.Text)
+		}
+		return int16(w) + op.marginH()
+	}
+
 	switch op.Kind {
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
