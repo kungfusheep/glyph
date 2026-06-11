@@ -1866,14 +1866,15 @@ func (j JumpC) PaddingTRBL(a, b, c, d int16) JumpC { j.padding = [4]int16{a, b, 
 // ============================================================================
 
 type LayerViewC struct {
-	layer        *Layer
-	viewHeight   int16
-	viewWidth    int16
-	flexGrow     float32
-	margin       [4]int16
-	padding      [4]int16
-	flexGrowPtr  *float32
-	flexGrowCond any
+	layer         *Layer
+	viewHeight    int16
+	viewHeightPtr *int16
+	viewWidth     int16
+	flexGrow      float32
+	margin        [4]int16
+	padding       [4]int16
+	flexGrowPtr   *float32
+	flexGrowCond  any
 }
 
 // LayerView displays a scrollable, pre-rendered layer within the view tree.
@@ -1885,6 +1886,12 @@ func LayerView(layer *Layer) LayerViewC {
 // Height sets a fixed height.
 func (l LayerViewC) Height(h int16) LayerViewC {
 	l.viewHeight = h
+	return l
+}
+
+// HeightPtr binds the viewport height to a pointer re-read every frame.
+func (l LayerViewC) HeightPtr(p *int16) LayerViewC {
+	l.viewHeightPtr = p
 	return l
 }
 

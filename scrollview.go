@@ -15,6 +15,7 @@ type ScrollViewC struct {
 	layer     *Layer
 	children  []Component
 	flexGrow  float32
+	heightPtr *int16
 	margin    [4]int16
 	scrollbar bool
 
@@ -65,6 +66,16 @@ func (f ScrollViewFn) Grow(g any) ScrollViewFn {
 		case int:
 			sv.flexGrow = float32(val)
 		}
+		return sv
+	}
+}
+
+// Height binds the viewport height to a pointer re-read every frame, for
+// scroll regions inside content-sized parents where Grow cannot size them.
+func (f ScrollViewFn) Height(p *int16) ScrollViewFn {
+	return func(children ...Component) *ScrollViewC {
+		sv := f(children...)
+		sv.heightPtr = p
 		return sv
 	}
 }
@@ -263,6 +274,9 @@ func (t *Template) compileScrollViewC(v *ScrollViewC, parent int16, depth int) i
 	layerView := LayerView(v.layer).Grow(v.flexGrow)
 	if v.scrollbar {
 		layerView = LayerView(v.layer).Grow(1)
+	}
+	if v.heightPtr != nil {
+		layerView = layerView.HeightPtr(v.heightPtr)
 	}
 	if v.margin != [4]int16{} && !v.scrollbar {
 		layerView = layerView.MarginTRBL(v.margin[0], v.margin[1], v.margin[2], v.margin[3])

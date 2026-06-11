@@ -4450,6 +4450,9 @@ func (t *Template) compileLayerViewC(v LayerViewC, parent int16, depth int) int1
 		Padding:  v.padding,
 		Ext:      ext,
 	}, depth)
+	if v.viewHeightPtr != nil {
+		t.ensureOpDyn(idx).Height = v.viewHeightPtr
+	}
 	if v.flexGrowCond != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -6138,7 +6141,9 @@ func (t *Template) layout(_ int16) {
 
 			case OpLayer:
 				ext := op.Ext.(*opLayer)
-				if ext.height > 0 {
+				if h := op.height(); h > 0 {
+					geom.H = h
+				} else if ext.height > 0 {
 					geom.H = ext.height
 				} else if op.flexGrow() > 0 {
 					geom.H = 1
