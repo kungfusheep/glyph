@@ -107,8 +107,11 @@ func (fl *FilterListC[T]) textBinding() *textInputBinding {
 }
 
 func (fl *FilterListC[T]) sync() {
+	// the query changed, so the filtered set is a new list: selection returns to
+	// the top (fzf's behaviour). A clamped stale index would silently point at an
+	// arbitrary item in the new results.
 	fl.filter.Update(fl.input.Value())
-	fl.list.ClampSelection()
+	fl.list.SetIndex(0)
 	fl.updateCounter()
 }
 

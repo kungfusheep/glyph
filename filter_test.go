@@ -227,7 +227,7 @@ func TestFilterSourceChanges(t *testing.T) {
 	}
 }
 
-func TestFilterListClampsSelectionOnSync(t *testing.T) {
+func TestFilterListResetsSelectionOnSync(t *testing.T) {
 	items := []string{
 		"Go", "Rust", "Python", "JavaScript", "TypeScript",
 		"Ruby", "Java", "C", "C++", "C#",
@@ -240,19 +240,20 @@ func TestFilterListClampsSelectionOnSync(t *testing.T) {
 		t.Fatalf("expected index 7, got %d", fl.list.Index())
 	}
 
-	// simulate typing "o", triggers onChange which calls sync()
+	// typing changes the query → the filtered set is a NEW list, so selection
+	// returns to the top (fzf's behaviour) instead of a stale clamped index
+	// pointing at an arbitrary item in the new results.
 	fl.input.SetValue("o")
 	fl.sync()
 
 	if fl.Filter().Len() != 2 {
 		t.Fatalf("expected 2 filtered items, got %d", fl.Filter().Len())
 	}
-	// selection must be clamped to last valid index
-	if fl.list.Index() != 1 {
-		t.Errorf("expected selection clamped to 1, got %d", fl.list.Index())
+	if fl.list.Index() != 0 {
+		t.Errorf("expected selection reset to 0 on query change, got %d", fl.list.Index())
 	}
 	if sel := fl.Selected(); sel == nil {
-		t.Error("Selected() returned nil after clamp")
+		t.Error("Selected() returned nil after query change")
 	}
 }
 
