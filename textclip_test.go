@@ -57,6 +57,56 @@ func TestRichText_ClippedInForEachRow(t *testing.T) {
 	}
 }
 
+// an If branch must size offset-bound text from the item's real content and
+// never paint past its parent's edge — inside ForEach the placeholder width
+// (textWidth with nil base) used to cap branches at 10 cells, and outside it
+// the branch's own intrinsic width let text bleed past fixed-width boxes.
+func TestIfBranchText_ClampedToParentWidth(t *testing.T) {
+	type row struct {
+		Time  string
+		Title string
+	}
+	rows := []row{{Time: "", Title: "Antidisestablishmentarianism Review"}}
+
+	buf := NewBuffer(40, 2)
+	tmpl := Build(VBox(
+		ForEach(&rows, func(r *row) Component {
+			return HBox.Height(1)(
+				Text("|").Width(1),
+				HBox.Width(19)(
+					If(&r.Time).
+						Then(Textf(&r.Time, " ", &r.Title).CharWrap()).
+						Else(Text(&r.Title)),
+				),
+			)
+		}),
+	))
+	tmpl.Execute(buf, 40, 2)
+
+	if got := buf.GetLine(0); got != "|Antidisestablishmen" {
+		t.Errorf("foreach: got %q, want %q", got, "|Antidisestablishmen")
+	}
+
+	buf2 := NewBuffer(40, 2)
+	title := "Antidisestablishmentarianism Review"
+	empty := ""
+	tmpl2 := Build(VBox(
+		HBox.Height(1)(
+			Text("|").Width(1),
+			HBox.Width(19)(
+				If(&empty).
+					Then(Textf(&empty, " ", &title).CharWrap()).
+					Else(Text(&title)),
+			),
+		),
+	))
+	tmpl2.Execute(buf2, 40, 2)
+
+	if got := buf2.GetLine(0); got != "|Antidisestablishmen" {
+		t.Errorf("plain: got %q, want %q", got, "|Antidisestablishmen")
+	}
+}
+
 // CharWrap on Textf fills the single visible line character-exact instead of
 // stopping at the last word boundary that fits.
 func TestTextf_CharWrapTruncatesAtWidth(t *testing.T) {

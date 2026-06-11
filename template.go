@@ -5372,7 +5372,13 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 			// computeIntrinsicWidth handles both ContentSized containers and
 			// leaf nodes (OpText, etc.) that have a computable fixed width.
 			// Falls back to 0 for truly flexible content (Space, unsized containers).
-			intrinsicW := templateIntrinsicWidth(subTmpl)
+			// measure with elemBase so offset-bound text resolves its real
+			// content (a nil base returns a placeholder width), and clamp to
+			// the available space so the branch never claims past its parent.
+			intrinsicW := templateIntrinsicWidthWithBase(subTmpl, elemBase)
+			if availW > 0 && intrinsicW > availW {
+				intrinsicW = availW
+			}
 			if intrinsicW > 0 {
 				subTmpl.distributeWidths(intrinsicW, elemBase)
 				geom.W = intrinsicW
@@ -7230,6 +7236,15 @@ func (t *Template) clipLines(buf *Buffer, absY int16) int {
 	return maxLines
 }
 
+// branchBudget clamps a branch's render width to the space remaining in the
+// parent's budget, so a branch never paints past its container's edge.
+func branchBudget(geomW, maxW, absX, globalX int16) int16 {
+	if avail := maxW - (absX - globalX); avail < geomW {
+		return avail
+	}
+	return geomW
+}
+
 func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16) {
 	if idx < 0 || int(idx) >= len(t.ops) {
 		return
@@ -7626,7 +7641,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
 		branches, requested := ifBranches(ifExt, t.elemBase)
-		t.renderSelectedBranch(buf, branches, requested, ifExt.selector(t.elemBase), absX, absY, geom.W, t.elemBase)
+		t.renderSelectedBranch(buf, branches, requested, ifExt.selector(t.elemBase), absX, absY, branchBudget(geom.W, maxW, absX, globalX), t.elemBase)
 
 	case OpForEach:
 		// Render each item using iterGeoms for positioning
@@ -7681,12 +7696,12 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 	case OpSwitch:
 		swExt := op.Ext.(*opSwitch)
 		branches, requested := switchBranches(swExt, t.elemBase)
-		t.renderSelectedBranch(buf, branches, requested, swExt.selector(t.elemBase), absX, absY, geom.W, t.elemBase)
+		t.renderSelectedBranch(buf, branches, requested, swExt.selector(t.elemBase), absX, absY, branchBudget(geom.W, maxW, absX, globalX), t.elemBase)
 
 	case OpMatch:
 		mExt := op.Ext.(*opMatch)
 		branches, requested := matchBranches(mExt, t.elemBase)
-		t.renderSelectedBranch(buf, branches, requested, mExt.selector(t.elemBase), absX, absY, geom.W, t.elemBase)
+		t.renderSelectedBranch(buf, branches, requested, mExt.selector(t.elemBase), absX, absY, branchBudget(geom.W, maxW, absX, globalX), t.elemBase)
 	}
 }
 
@@ -8198,7 +8213,7 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 	case OpIf:
 		ifExt := op.Ext.(*opIf)
 		branches, requested := ifBranches(ifExt, elemBase)
-		t.renderSelectedBranch(buf, branches, requested, ifExt.selector(elemBase), absX, absY, geom.W, elemBase)
+		t.renderSelectedBranch(buf, branches, requested, ifExt.selector(elemBase), absX, absY, branchBudget(geom.W, maxW, absX, globalX), elemBase)
 
 	case OpForEach:
 		// Nested ForEach - render with nested element base
@@ -8229,12 +8244,12 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 	case OpSwitch:
 		swExt := op.Ext.(*opSwitch)
 		branches, requested := switchBranches(swExt, elemBase)
-		t.renderSelectedBranch(buf, branches, requested, swExt.selector(elemBase), absX, absY, geom.W, elemBase)
+		t.renderSelectedBranch(buf, branches, requested, swExt.selector(elemBase), absX, absY, branchBudget(geom.W, maxW, absX, globalX), elemBase)
 
 	case OpMatch:
 		mExt := op.Ext.(*opMatch)
 		branches, requested := matchBranches(mExt, elemBase)
-		t.renderSelectedBranch(buf, branches, requested, mExt.selector(elemBase), absX, absY, geom.W, elemBase)
+		t.renderSelectedBranch(buf, branches, requested, mExt.selector(elemBase), absX, absY, branchBudget(geom.W, maxW, absX, globalX), elemBase)
 	}
 }
 
