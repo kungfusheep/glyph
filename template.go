@@ -2771,6 +2771,7 @@ type opRichText struct {
 	spansPtr    *[]Span
 	off         uintptr
 	spanStrOffs []uintptr
+	spanStrPtrs []*string // global *string spans; typed so the GC pins them
 	charWrap    bool
 }
 
@@ -2788,7 +2789,7 @@ func (rt *opRichText) resolve(elemBase unsafe.Pointer) []Span {
 		spans = rt.staticSpans
 	}
 	if rt.spanStrOffs != nil {
-		return resolveSpanStrs(spans, rt.spanStrOffs, elemBase)
+		return resolveSpanStrs(spans, rt.spanStrOffs, rt.spanStrPtrs, elemBase)
 	}
 	return spans
 }
@@ -3403,29 +3404,29 @@ func (t *Template) compileRichText(v richTextNode, parent int16, depth int, elem
 		ext.mode = richStatic
 	}
 
-	// compute per-span *string offsets for Textf
-	if v.spanPtrs != nil && elemBase != nil {
+	// compute per-span *string bindings for Textf: in-item pointers become
+	// offsets from elemBase; anything else stays a real *string so the GC
+	// pins the allocation (raw uintptr storage trips checkptr and doesn't pin)
+	if v.spanPtrs != nil {
 		noOffset := ^uintptr(0)
 		offs := make([]uintptr, len(v.spanPtrs))
+		var ptrs []*string
 		for i, ptr := range v.spanPtrs {
-			if ptr != nil && isWithinRange(unsafe.Pointer(ptr), elemBase, elemSize) {
+			offs[i] = noOffset
+			if ptr == nil {
+				continue
+			}
+			if elemBase != nil && isWithinRange(unsafe.Pointer(ptr), elemBase, elemSize) {
 				offs[i] = uintptr(unsafe.Pointer(ptr)) - uintptr(elemBase)
 			} else {
-				offs[i] = noOffset
+				if ptrs == nil {
+					ptrs = make([]*string, len(v.spanPtrs))
+				}
+				ptrs[i] = ptr
 			}
 		}
 		ext.spanStrOffs = offs
-	} else if v.spanPtrs != nil {
-		noOffset := ^uintptr(0)
-		offs := make([]uintptr, len(v.spanPtrs))
-		for i, ptr := range v.spanPtrs {
-			if ptr != nil {
-				offs[i] = uintptr(unsafe.Pointer(ptr))
-			} else {
-				offs[i] = noOffset
-			}
-		}
-		ext.spanStrOffs = offs
+		ext.spanStrPtrs = ptrs
 	}
 
 	return t.addOp(Op{
@@ -3436,25 +3437,22 @@ func (t *Template) compileRichText(v richTextNode, parent int16, depth int, elem
 }
 
 // resolveSpanStrs returns a copy of spans with dynamic *string values re-read.
-// elemBase is the ForEach element pointer (nil when outside ForEach).
-// When elemBase is nil, offs[i] stores the raw uintptr of the *string.
-// When elemBase is non-nil, offs[i] stores the offset from elemBase.
-// ^uintptr(0) sentinel means that span's text is static.
-func resolveSpanStrs(spans []Span, offs []uintptr, elemBase unsafe.Pointer) []Span {
+// In-item spans carry an offset from elemBase in offs[i]; spans bound to
+// pointers outside the item carry a typed *string in ptrs[i] (GC-pinned).
+// ^uintptr(0) with a nil ptr means that span's text is static.
+func resolveSpanStrs(spans []Span, offs []uintptr, ptrs []*string, elemBase unsafe.Pointer) []Span {
 	noOffset := ^uintptr(0)
 	resolved := make([]Span, len(spans))
 	copy(resolved, spans)
 	for i, off := range offs {
-		if off == noOffset {
+		if ptrs != nil && ptrs[i] != nil {
+			resolved[i].Text = *ptrs[i]
 			continue
 		}
-		var ptr *string
-		if elemBase != nil {
-			ptr = (*string)(unsafe.Pointer(uintptr(elemBase) + off))
-		} else {
-			ptr = (*string)(unsafe.Pointer(off))
+		if off == noOffset || elemBase == nil {
+			continue
 		}
-		resolved[i].Text = *ptr
+		resolved[i].Text = *(*string)(unsafe.Pointer(uintptr(elemBase) + off))
 	}
 	return resolved
 }
