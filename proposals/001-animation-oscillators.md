@@ -74,6 +74,14 @@ near zero; adding a manual hold reopens the always-on-ticker door.
 - touches Execute's tail next to the new render-generation logic (a3068bf);
   the protocol test plus a gated-spinner test must both stay green.
 
+## phase-2 notes (out of scope, recorded)
+
+- restart-phase-on-activation via render-identity keyed state (the spinGlowPhase shape).
+- per-item mount/unmount animation inside ForEach (raised by mail): item enter/exit
+  is branch-retention territory — likely rides the existing retained-branch tween
+  lifecycle once runtime state is keyed by render identity. Adoption detail for the
+  notification feed; not a blocker for 001.
+
 ## migration
 
 mail deletes its app-level animator and both standing tickers; demos drop frame
