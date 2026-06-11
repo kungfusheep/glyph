@@ -59,9 +59,7 @@ func FilterList[T any](source *[]T, extract func(*T) string) *FilterListC[T] {
 		cursor: &fl.input.field.Cursor,
 		onChange: func(string) {
 			fl.sync()
-			if fl.onFilterChange != nil {
-				fl.onFilterChange()
-			}
+			fl.filterChanged()
 		},
 	}
 	// default nav keys that don't conflict with text input
@@ -73,9 +71,17 @@ func FilterList[T any](source *[]T, extract func(*T) string) *FilterListC[T] {
 
 // OnFilterChange registers a callback fired after the filter query changes
 // and the list has resynced — the mutation point for derived filter state.
+// Fires for every mutation path (typing, SetQuery, Clear) but only when the
+// query actually changed; read the new state via Query()/Filter()/Selected().
 func (fl *FilterListC[T]) OnFilterChange(fn func()) *FilterListC[T] {
 	fl.onFilterChange = fn
 	return fl
+}
+
+func (fl *FilterListC[T]) filterChanged() {
+	if fl.onFilterChange != nil {
+		fl.onFilterChange()
+	}
 }
 
 // toTemplate returns the template tree for compilation.
@@ -331,10 +337,14 @@ func (fl *FilterListC[T]) SelectedIndex() int {
 
 // Clear resets the filter and input.
 func (fl *FilterListC[T]) Clear() {
+	had := fl.input.Value() != ""
 	fl.input.Clear()
 	fl.filter.Reset()
 	fl.list.ClampSelection()
 	fl.updateCounter()
+	if had {
+		fl.filterChanged()
+	}
 }
 
 // Active reports whether a filter query is currently applied.
@@ -344,8 +354,12 @@ func (fl *FilterListC[T]) Active() bool {
 
 // SetQuery sets the filter query directly and syncs the list.
 func (fl *FilterListC[T]) SetQuery(q string) {
+	if fl.input.Value() == q {
+		return
+	}
 	fl.input.SetValue(q)
 	fl.sync()
+	fl.filterChanged()
 }
 
 // Query returns the current filter query string.
@@ -360,6 +374,7 @@ func (fl *FilterListC[T]) DeleteCharBefore() {
 		runes := []rune(v)
 		fl.input.SetValue(string(runes[:len(runes)-1]))
 		fl.sync()
+		fl.filterChanged()
 	}
 }
 
