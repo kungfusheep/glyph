@@ -7593,6 +7593,11 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		text := applyTransform(raw, style.Transform)
 		x := int(absX)
 		drawW := int(maxW - (absX - globalX))
+		// an explicit width (static or dynamic binding) clips the content:
+		// declared size means what it says, matching container behaviour
+		if w := op.width(); w > 0 && int(w) < drawW {
+			drawW = int(w)
+		}
 		if drawW <= 0 {
 			return
 		}
@@ -8223,6 +8228,10 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 		text := applyTransform(raw, style.Transform)
 		x := int(absX)
 		drawW := int(maxW - (absX - globalX))
+		// an explicit width (static or dynamic binding) clips the content
+		if w := op.width(); w > 0 && int(w) < drawW {
+			drawW = int(w)
+		}
 		if drawW <= 0 {
 			return
 		}
