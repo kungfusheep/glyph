@@ -154,6 +154,8 @@ func (f VBoxFn) Fill(c any) VBoxFn {
 			v.fillCond = val
 		case tweenNode:
 			v.fillCond = val
+	case OscC:
+			v.fillCond = val
 		}
 		return v
 	}
@@ -172,6 +174,8 @@ func (f VBoxFn) Style(s any) VBoxFn {
 		case conditionNode:
 			v.localStyleCond = val
 		case tweenNode:
+			v.localStyleCond = val
+	case OscC:
 			v.localStyleCond = val
 		}
 		return v
@@ -223,6 +227,8 @@ func (f VBoxFn) Gap(g any) VBoxFn {
 			v.gapCond = val
 		case tweenNode:
 			v.gapCond = val
+	case OscC:
+			v.gapCond = val
 		}
 		return v
 	}
@@ -251,6 +257,8 @@ func (f VBoxFn) BorderFG(c any) VBoxFn {
 		case valueBranchNode:
 			v.borderFGDyn = val
 		case tweenNode:
+			v.borderFGDyn = val
+	case OscC:
 			v.borderFGDyn = val
 		}
 		return v
@@ -292,6 +300,8 @@ func (f VBoxFn) Width(w any) VBoxFn {
 			v.widthCond = val
 		case tweenNode:
 			v.widthCond = val
+	case OscC:
+			v.widthCond = val
 		}
 		return v
 	}
@@ -313,6 +323,8 @@ func (f VBoxFn) Height(h any) VBoxFn {
 		case valueBranchNode:
 			v.heightCond = val
 		case tweenNode:
+			v.heightCond = val
+	case OscC:
 			v.heightCond = val
 		}
 		return v
@@ -344,6 +356,8 @@ func (f VBoxFn) WidthPct(pct any) VBoxFn {
 			v.percentWidthCond = val
 		case tweenNode:
 			v.percentWidthCond = val
+	case OscC:
+			v.percentWidthCond = val
 		}
 		return v
 	}
@@ -367,6 +381,8 @@ func (f VBoxFn) Grow(g any) VBoxFn {
 		case valueBranchNode:
 			v.flexGrowCond = val
 		case tweenNode:
+			v.flexGrowCond = val
+	case OscC:
 			v.flexGrowCond = val
 		}
 		return v
@@ -513,6 +529,8 @@ func (f HBoxFn) Fill(c any) HBoxFn {
 			h.fillCond = val
 		case tweenNode:
 			h.fillCond = val
+	case OscC:
+			h.fillCond = val
 		}
 		return h
 	}
@@ -531,6 +549,8 @@ func (f HBoxFn) Style(s any) HBoxFn {
 		case conditionNode:
 			h.localStyleCond = val
 		case tweenNode:
+			h.localStyleCond = val
+	case OscC:
 			h.localStyleCond = val
 		}
 		return h
@@ -582,6 +602,8 @@ func (f HBoxFn) Gap(g any) HBoxFn {
 			h.gapCond = val
 		case tweenNode:
 			h.gapCond = val
+	case OscC:
+			h.gapCond = val
 		}
 		return h
 	}
@@ -610,6 +632,8 @@ func (f HBoxFn) BorderFG(c any) HBoxFn {
 		case valueBranchNode:
 			h.borderFGDyn = val
 		case tweenNode:
+			h.borderFGDyn = val
+	case OscC:
 			h.borderFGDyn = val
 		}
 		return h
@@ -651,6 +675,8 @@ func (f HBoxFn) Width(w any) HBoxFn {
 			h.widthCond = val
 		case tweenNode:
 			h.widthCond = val
+	case OscC:
+			h.widthCond = val
 		}
 		return h
 	}
@@ -672,6 +698,8 @@ func (f HBoxFn) Height(h any) HBoxFn {
 		case valueBranchNode:
 			c.heightCond = val
 		case tweenNode:
+			c.heightCond = val
+	case OscC:
 			c.heightCond = val
 		}
 		return c
@@ -703,6 +731,8 @@ func (f HBoxFn) WidthPct(pct any) HBoxFn {
 			h.percentWidthCond = val
 		case tweenNode:
 			h.percentWidthCond = val
+	case OscC:
+			h.percentWidthCond = val
 		}
 		return h
 	}
@@ -726,6 +756,8 @@ func (f HBoxFn) Grow(g any) HBoxFn {
 		case valueBranchNode:
 			h.flexGrowCond = val
 		case tweenNode:
+			h.flexGrowCond = val
+	case OscC:
 			h.flexGrowCond = val
 		}
 		return h
@@ -886,6 +918,8 @@ func (t TextC) Style(s any) TextC {
 		t.styleDyn = val
 	case tweenNode:
 		t.styleDyn = val
+	case OscC:
+		t.styleDyn = val
 	}
 	return t
 }
@@ -903,6 +937,8 @@ func (t TextC) FG(c any) TextC {
 		t.fgDyn = val
 	case tweenNode:
 		t.fgDyn = val
+	case OscC:
+		t.fgDyn = val
 	}
 	return t
 }
@@ -919,6 +955,8 @@ func (t TextC) BG(c any) TextC {
 	case valueBranchNode:
 		t.bgDyn = val
 	case tweenNode:
+		t.bgDyn = val
+	case OscC:
 		t.bgDyn = val
 	}
 	return t
@@ -990,6 +1028,8 @@ func (t TextC) Width(w any) TextC {
 	case valueBranchNode:
 		t.widthCond = val
 	case tweenNode:
+		t.widthCond = val
+	case OscC:
 		t.widthCond = val
 	}
 	return t
@@ -1103,6 +1143,8 @@ func (s SpacerC) Width(w any) SpacerC {
 		s.widthCond = val
 	case tweenNode:
 		s.widthCond = val
+	case OscC:
+		s.widthCond = val
 	}
 	return s
 }
@@ -1119,6 +1161,8 @@ func (s SpacerC) Height(h any) SpacerC {
 	case conditionNode:
 		s.heightCond = val
 	case tweenNode:
+		s.heightCond = val
+	case OscC:
 		s.heightCond = val
 	}
 	return s
@@ -1150,6 +1194,8 @@ func (s SpacerC) Grow(g any) SpacerC {
 	case conditionNode:
 		s.flexGrowCond = val
 	case tweenNode:
+		s.flexGrowCond = val
+	case OscC:
 		s.flexGrowCond = val
 	}
 	return s
@@ -1205,6 +1251,8 @@ func (h HRuleC) Style(s any) HRuleC {
 		h.styleDyn = val
 	case tweenNode:
 		h.styleDyn = val
+	case OscC:
+		h.styleDyn = val
 	}
 	return h
 }
@@ -1220,6 +1268,8 @@ func (h HRuleC) FG(c any) HRuleC {
 		h.fgDyn = val
 	case tweenNode:
 		h.fgDyn = val
+	case OscC:
+		h.fgDyn = val
 	}
 	return h
 }
@@ -1234,6 +1284,8 @@ func (h HRuleC) BG(c any) HRuleC {
 	case conditionNode:
 		h.bgDyn = val
 	case tweenNode:
+		h.bgDyn = val
+	case OscC:
 		h.bgDyn = val
 	}
 	return h
@@ -1289,6 +1341,8 @@ func (v VRuleC) Style(s any) VRuleC {
 		v.styleDyn = val
 	case tweenNode:
 		v.styleDyn = val
+	case OscC:
+		v.styleDyn = val
 	}
 	return v
 }
@@ -1304,6 +1358,8 @@ func (v VRuleC) FG(c any) VRuleC {
 		v.fgDyn = val
 	case tweenNode:
 		v.fgDyn = val
+	case OscC:
+		v.fgDyn = val
 	}
 	return v
 }
@@ -1318,6 +1374,8 @@ func (v VRuleC) BG(c any) VRuleC {
 	case conditionNode:
 		v.bgDyn = val
 	case tweenNode:
+		v.bgDyn = val
+	case OscC:
 		v.bgDyn = val
 	}
 	return v
@@ -1340,6 +1398,8 @@ func (v VRuleC) Height(h any) VRuleC {
 	case valueBranchNode:
 		v.heightCond = val
 	case tweenNode:
+		v.heightCond = val
+	case OscC:
 		v.heightCond = val
 	}
 	return v
@@ -1390,6 +1450,8 @@ func (p ProgressC) Width(w any) ProgressC {
 		p.widthCond = val
 	case tweenNode:
 		p.widthCond = val
+	case OscC:
+		p.widthCond = val
 	}
 	return p
 }
@@ -1404,6 +1466,8 @@ func (p ProgressC) Style(s any) ProgressC {
 	case conditionNode:
 		p.styleDyn = val
 	case tweenNode:
+		p.styleDyn = val
+	case OscC:
 		p.styleDyn = val
 	}
 	return p
@@ -1420,6 +1484,8 @@ func (p ProgressC) FG(c any) ProgressC {
 		p.fgDyn = val
 	case tweenNode:
 		p.fgDyn = val
+	case OscC:
+		p.fgDyn = val
 	}
 	return p
 }
@@ -1434,6 +1500,8 @@ func (p ProgressC) BG(c any) ProgressC {
 	case conditionNode:
 		p.bgDyn = val
 	case tweenNode:
+		p.bgDyn = val
+	case OscC:
 		p.bgDyn = val
 	}
 	return p
@@ -1464,6 +1532,7 @@ func (p ProgressC) MarginTRBL(a, b, c, d int16) ProgressC {
 type SpinnerC struct {
 	frame    *int
 	frames   []string
+	fps      float64
 	style    Style
 	styleDyn any
 	fgDyn    any
@@ -1472,8 +1541,27 @@ type SpinnerC struct {
 
 // Spinner creates an animated spinner bound to a frame counter.
 // Increment *frame and re-render to advance the animation.
-func Spinner(frame *int) SpinnerC {
-	return SpinnerC{frame: frame, frames: SpinnerBraille}
+// Spinner renders an animated activity indicator. With no argument it
+// self-animates from the frame clock at ~12fps and marks the template
+// animating while rendered: an If-gated spinner runs exactly while visible,
+// with no app-side ticker or counter (ADR 1). Pass a *int to drive the
+// frame index manually instead.
+func Spinner(frame ...*int) SpinnerC {
+	s := SpinnerC{frames: SpinnerBraille}
+	if len(frame) > 1 {
+		panic("Spinner: pass at most one frame pointer")
+	}
+	if len(frame) == 1 {
+		s.frame = frame[0]
+	}
+	return s
+}
+
+// Fps sets the self-animating frame rate (default 12). Ignored when a frame
+// pointer is supplied.
+func (s SpinnerC) Fps(fps float64) SpinnerC {
+	s.fps = fps
+	return s
 }
 
 // Frames sets the animation frames.
@@ -1493,6 +1581,8 @@ func (s SpinnerC) Style(st any) SpinnerC {
 		s.styleDyn = val
 	case tweenNode:
 		s.styleDyn = val
+	case OscC:
+		s.styleDyn = val
 	}
 	return s
 }
@@ -1508,6 +1598,8 @@ func (s SpinnerC) FG(c any) SpinnerC {
 		s.fgDyn = val
 	case tweenNode:
 		s.fgDyn = val
+	case OscC:
+		s.fgDyn = val
 	}
 	return s
 }
@@ -1522,6 +1614,8 @@ func (s SpinnerC) BG(c any) SpinnerC {
 	case conditionNode:
 		s.bgDyn = val
 	case tweenNode:
+		s.bgDyn = val
+	case OscC:
 		s.bgDyn = val
 	}
 	return s
@@ -1578,6 +1672,8 @@ func (l LeaderC) Width(w any) LeaderC {
 		l.widthCond = val
 	case tweenNode:
 		l.widthCond = val
+	case OscC:
+		l.widthCond = val
 	}
 	return l
 }
@@ -1599,6 +1695,8 @@ func (l LeaderC) Style(s any) LeaderC {
 		l.styleDyn = val
 	case tweenNode:
 		l.styleDyn = val
+	case OscC:
+		l.styleDyn = val
 	}
 	return l
 }
@@ -1614,6 +1712,8 @@ func (l LeaderC) FG(c any) LeaderC {
 		l.fgDyn = val
 	case tweenNode:
 		l.fgDyn = val
+	case OscC:
+		l.fgDyn = val
 	}
 	return l
 }
@@ -1628,6 +1728,8 @@ func (l LeaderC) BG(c any) LeaderC {
 	case conditionNode:
 		l.bgDyn = val
 	case tweenNode:
+		l.bgDyn = val
+	case OscC:
 		l.bgDyn = val
 	}
 	return l
@@ -1711,6 +1813,8 @@ func (s SparklineC) Width(w any) SparklineC {
 		s.widthCond = val
 	case tweenNode:
 		s.widthCond = val
+	case OscC:
+		s.widthCond = val
 	}
 	return s
 }
@@ -1729,6 +1833,8 @@ func (s SparklineC) Height(h any) SparklineC {
 	case conditionNode:
 		s.heightCond = val
 	case tweenNode:
+		s.heightCond = val
+	case OscC:
 		s.heightCond = val
 	}
 	return s
@@ -1752,6 +1858,8 @@ func (s SparklineC) Style(st any) SparklineC {
 		s.styleDyn = val
 	case tweenNode:
 		s.styleDyn = val
+	case OscC:
+		s.styleDyn = val
 	}
 	return s
 }
@@ -1767,6 +1875,8 @@ func (s SparklineC) FG(c any) SparklineC {
 		s.fgDyn = val
 	case tweenNode:
 		s.fgDyn = val
+	case OscC:
+		s.fgDyn = val
 	}
 	return s
 }
@@ -1781,6 +1891,8 @@ func (s SparklineC) BG(c any) SparklineC {
 	case conditionNode:
 		s.bgDyn = val
 	case tweenNode:
+		s.bgDyn = val
+	case OscC:
 		s.bgDyn = val
 	}
 	return s
@@ -1915,6 +2027,8 @@ func (l LayerViewC) Grow(g any) LayerViewC {
 	case conditionNode:
 		l.flexGrowCond = val
 	case tweenNode:
+		l.flexGrowCond = val
+	case OscC:
 		l.flexGrowCond = val
 	}
 	return l
@@ -2672,6 +2786,8 @@ func (t TabsC) Gap(g any) TabsC {
 		t.gapCond = val
 	case tweenNode:
 		t.gapCond = val
+	case OscC:
+		t.gapCond = val
 	}
 	return t
 }
@@ -2791,6 +2907,8 @@ func (s ScrollbarC) TrackStyle(st any) ScrollbarC {
 		s.trackStyleDyn = val
 	case tweenNode:
 		s.trackStyleDyn = val
+	case OscC:
+		s.trackStyleDyn = val
 	}
 	return s
 }
@@ -2805,6 +2923,8 @@ func (s ScrollbarC) ThumbStyle(st any) ScrollbarC {
 	case conditionNode:
 		s.thumbStyleDyn = val
 	case tweenNode:
+		s.thumbStyleDyn = val
+	case OscC:
 		s.thumbStyleDyn = val
 	}
 	return s
@@ -3056,6 +3176,8 @@ func (r *RadioC) Gap(g any) *RadioC {
 		r.gapCond = val
 	case tweenNode:
 		r.gapCond = val
+	case OscC:
+		r.gapCond = val
 	}
 	return r
 }
@@ -3236,6 +3358,8 @@ func (c *CheckListC[T]) Gap(g any) *CheckListC[T] {
 	case conditionNode:
 		c.gapCond = val
 	case tweenNode:
+		c.gapCond = val
+	case OscC:
 		c.gapCond = val
 	}
 	return c
@@ -3565,6 +3689,8 @@ func (i *InputC) Width(w any) *InputC {
 	case conditionNode:
 		i.widthCond = val
 	case tweenNode:
+		i.widthCond = val
+	case OscC:
 		i.widthCond = val
 	}
 	return i

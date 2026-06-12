@@ -197,6 +197,8 @@ type Template struct {
 	// frame timing — single timestamp per frame, shared by all animations
 	frameTime time.Time
 	animating bool
+	oscEpoch  time.Time        // first-frame stamp; oscillators derive from frameTime-oscEpoch
+	nowFn     func() time.Time // test injection point; nil means time.Now
 
 	// animation ticker — runs at ~60fps only while animations are active
 	animTicker    *time.Ticker
@@ -1027,6 +1029,8 @@ func (t *Template) compileDynFloat32(v any, elemBase unsafe.Pointer, elemSize ui
 		return t.compileBranchFloat32(c)
 	case tweenNode:
 		return t.compileTweenFloat32(c, elemBase, elemSize)
+	case OscC:
+		return t.compileOscFloat32(c)
 	}
 	return nil
 }
@@ -1041,6 +1045,8 @@ func (t *Template) compileDynFloat64(v any, elemBase unsafe.Pointer, elemSize ui
 		return t.compileBranchFloat64(c)
 	case tweenNode:
 		return t.compileTweenFloat64(c, nil, elemBase, elemSize)
+	case OscC:
+		return t.compileOscFloat64(c)
 	}
 	return nil
 }
@@ -1079,6 +1085,8 @@ func (t *Template) compileDynColor(v any, elemBase unsafe.Pointer, elemSize uint
 		return t.compileBranchColor(c, elemBase, elemSize)
 	case tweenNode:
 		return t.compileTweenColor(c, elemBase, elemSize)
+	case OscC:
+		return t.compileOscColor(c)
 	}
 	return nil
 }
@@ -1633,6 +1641,49 @@ func (t *Template) compileTweenFloat32(tw tweenNode, elemBase unsafe.Pointer, el
 			return func() float64 { return float64(*outPtr) }
 		},
 	)
+	return storage
+}
+
+// compileOscFloat64 registers a frame evaluator deriving the oscillator's
+// value from the shared frame clock. Resolving marks the template animating,
+// so the gated ticker runs exactly while an oscillator is reachable (ADR 1).
+func (t *Template) compileOscFloat64(o OscC) *float64 {
+	root := t.evalRoot()
+	storage := new(float64)
+	var acc oscAccum
+	osc := o
+	eval := func() {
+		root.animating = true
+		*storage = osc.resolve(root.frameTime.Sub(root.oscEpoch), &acc)
+	}
+	root.evals = append(root.evals, eval)
+	return storage
+}
+
+func (t *Template) compileOscFloat32(o OscC) *float32 {
+	root := t.evalRoot()
+	storage := new(float32)
+	var acc oscAccum
+	osc := o
+	eval := func() {
+		root.animating = true
+		*storage = float32(osc.resolve(root.frameTime.Sub(root.oscEpoch), &acc))
+	}
+	root.evals = append(root.evals, eval)
+	return storage
+}
+
+func (t *Template) compileOscColor(o OscC) *Color {
+	root := t.evalRoot()
+	storage := new(Color)
+	var acc oscAccum
+	osc := o
+	eval := func() {
+		root.animating = true
+		v := osc.resolve(root.frameTime.Sub(root.oscEpoch), &acc)
+		*storage = Lerp(osc.colA, osc.colB, v)
+	}
+	root.evals = append(root.evals, eval)
 	return storage
 }
 
@@ -2843,8 +2894,28 @@ type opCounter struct {
 type opSpinner struct {
 	framePtr *int
 	frames   []string
+	selfFps  float64 // >0: self-animating from the frame clock (ADR 1)
 	style    Style
 	stylePtr *Style
+}
+
+// frameIndex resolves the spinner's current frame. Self-animating spinners
+// derive it from the frame clock and mark the template animating — computed
+// at render time, so visible means animating and hidden costs nothing.
+func (s *opSpinner) frameIndex(t *Template) (int, bool) {
+	n := len(s.frames)
+	if n == 0 {
+		return 0, false
+	}
+	if s.selfFps > 0 {
+		root := t.evalRoot()
+		root.animating = true
+		return oscStepIndex(root.frameTime.Sub(root.oscEpoch), s.selfFps, n), true
+	}
+	if s.framePtr != nil {
+		return *s.framePtr % n, true
+	}
+	return 0, false
 }
 
 type opRule struct {
@@ -4302,7 +4373,14 @@ func (t *Template) compileSpinnerC(v SpinnerC, parent int16, depth int) int16 {
 	if frames == nil {
 		frames = SpinnerBraille
 	}
-	ext := &opSpinner{framePtr: v.frame, frames: frames, style: v.style}
+	selfFps := 0.0
+	if v.frame == nil {
+		selfFps = v.fps
+		if selfFps <= 0 {
+			selfFps = 12
+		}
+	}
+	ext := &opSpinner{framePtr: v.frame, frames: frames, selfFps: selfFps, style: v.style}
 	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, nil, 0)
 	return t.addOp(Op{
 		Kind:   OpSpinner,
@@ -5019,7 +5097,14 @@ func (t *Template) Execute(buf *Buffer, screenW, screenH int16) {
 	t.pendingScreenEffects = t.pendingScreenEffects[:0]
 
 	// Phase 0: Evaluate reactive bindings (conditions, animations)
-	t.frameTime = time.Now()
+	if t.nowFn != nil {
+		t.frameTime = t.nowFn()
+	} else {
+		t.frameTime = time.Now()
+	}
+	if t.oscEpoch.IsZero() {
+		t.oscEpoch = t.frameTime
+	}
 	t.animating = false
 	for _, eval := range t.evals {
 		eval()
@@ -7547,8 +7632,7 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 
 	case OpSpinner:
 		ext := op.Ext.(*opSpinner)
-		if ext.framePtr != nil && len(ext.frames) > 0 {
-			frameIdx := *ext.framePtr % len(ext.frames)
+		if frameIdx, ok := ext.frameIndex(t); ok {
 			frame := ext.frames[frameIdx]
 			baseStyle := ext.style
 			if ext.stylePtr != nil {
@@ -8120,8 +8204,7 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 
 	case OpSpinner:
 		ext := op.Ext.(*opSpinner)
-		if ext.framePtr != nil && len(ext.frames) > 0 {
-			frameIdx := *ext.framePtr % len(ext.frames)
+		if frameIdx, ok := ext.frameIndex(t); ok {
 			frame := ext.frames[frameIdx]
 			spinBaseStyle := ext.style
 			if ext.stylePtr != nil {

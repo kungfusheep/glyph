@@ -1021,6 +1021,7 @@ func (a *App) render() {
 		if ppBG.Mode == ColorDefault {
 			ppBG = a.defaultStyle.BG
 		}
+		var animReq bool
 		ppCtx := PostContext{
 			Width:     size.Width,
 			Height:    int(renderHeight),
@@ -1029,12 +1030,16 @@ func (a *App) render() {
 			Time:      now.Sub(a.startTime),
 			DefaultFG: ppFG,
 			DefaultBG: ppBG,
+			animReq:   &animReq,
 		}
 		for _, pp := range treeEffects {
 			pp.Apply(buf, ppCtx)
 		}
 		for _, pp := range a.postProcess {
 			pp.Apply(buf, ppCtx)
+		}
+		if animReq {
+			a.RequestRender()
 		}
 		buf.MarkAllDirty()
 		a.frameCount++

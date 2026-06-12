@@ -31,6 +31,8 @@ func (d *dynFloat64) set(v any) {
 		d.dyn = val
 	case tweenNode:
 		d.dyn = val
+	case OscC:
+		d.dyn = val
 	}
 }
 
@@ -83,6 +85,8 @@ func (d *dynInt) set(v any) {
 		d.dyn = val
 	case tweenNode:
 		d.dyn = val
+	case OscC:
+		d.dyn = val
 	}
 }
 
@@ -115,6 +119,8 @@ func (d *dynColor) set(v any) {
 	case conditionNode:
 		d.dyn = val
 	case tweenNode:
+		d.dyn = val
+	case OscC:
 		d.dyn = val
 	}
 }

@@ -135,6 +135,18 @@ type PostContext struct {
 	// Mode == ColorRGB when detected, ColorDefault when unknown.
 	DefaultFG Color
 	DefaultBG Color
+
+	animReq *bool // set via RequestAnimation; framework schedules another frame
+}
+
+// RequestAnimation tells the framework this effect is mid-animation and
+// needs another frame. Coalesced: one extra frame per render regardless of
+// how many effects request it; an effect animates by requesting each frame
+// until it settles (ADR 1).
+func (c PostContext) RequestAnimation() {
+	if c.animReq != nil {
+		*c.animReq = true
+	}
 }
 
 // EachCell wraps a per-cell transform into a Effect.
