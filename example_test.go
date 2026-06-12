@@ -2448,3 +2448,34 @@ func ExampleIn() {
 	// │hello             │
 	// ╰──────────────────╯
 }
+
+// Oscillator bound to a container width.
+// Osc derives its value from the frame clock; Phase picks the cycle position,
+// Range maps the waveform into columns. Bind oscillators anywhere a dynamic
+// value is accepted: FG, BG, Fill, Opacity, Width, effect Strength.
+func ExampleOsc() {
+	// example:
+	bar := HBox.Width(Osc(1).Saw().Phase(0.5).Range(1, 12))(Text("████████████"))
+	tree := HBox(bar, Text("|"))
+	// :example
+
+	renderAndPrint("Osc", tree, 16, 1)
+	// Output: ███████|
+}
+
+// Focusable trigger field inside a form.
+// Trigger wraps display content as a form control: it joins the Tab cycle,
+// and Enter or Space fires OnActivate — for fields whose value is chosen
+// elsewhere, like pickers and dialogs.
+func ExampleTrigger() {
+	// example:
+	calendarLabel := "work"
+	openPicker := func() {}
+	tree := Form(
+		Field("calendar", Trigger(Text(&calendarLabel)).OnActivate(openPicker)),
+	)
+	// :example
+
+	renderAndPrint("Trigger", tree, 24, 2)
+	// Output: ▸calendar: work
+}
