@@ -8,7 +8,6 @@
 
 # 001 — oscillators and self-gated animation
 
-status: proposed — awaiting Pete's approval
 consumers: mail (Ada, m108), all fleet apps via skill rule "tick only while animating"
 related: recap inbox #270 (oscillator design), a3068bf (render generations)
 
