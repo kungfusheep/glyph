@@ -444,3 +444,56 @@ func TestOnModalSwitchesFromElseBranchToThenBranch(t *testing.T) {
 		t.Fatalf("then branch mismatch: normal=%d confirm=%d", normalHits, confirmHits)
 	}
 }
+
+// the calendar m298 handoff: a Form (FocusManager-managed Input) inside an
+// If+Overlay must get keyboard focus activated when the overlay shows, and
+// release it symmetrically when it hides — the FM rides the same visibility
+// edges as the modal router.
+func TestOnModalRoutesFormInputBinding(t *testing.T) {
+	app := NewApp()
+	showOverlay := false
+	var title string
+
+	app.SetView(VBox(
+		If(&showOverlay).Then(
+			Overlay.Centered()(
+				VBox(
+					On.Modal(Key("<Esc>", func() { showOverlay = false })),
+					Form(
+						Field("title", Input(&title).Bind()),
+					),
+				),
+			),
+		),
+	))
+
+	baseDepth := app.Input().Depth()
+	app.render()
+	if dispatchRune(app, 'a') {
+		t.Fatal("hidden modal form handled key")
+	}
+	if title != "" {
+		t.Fatalf("hidden form input changed value: %q", title)
+	}
+
+	showOverlay = true
+	app.render()
+	if !dispatchRune(app, 'a') {
+		t.Fatal("expected focused form input to handle typed rune")
+	}
+	if title != "a" {
+		t.Fatalf("expected form input value %q, got %q", "a", title)
+	}
+
+	showOverlay = false
+	app.render()
+	if app.Input().Depth() != baseDepth {
+		t.Fatalf("hiding the overlay must unwind both FM and modal frames: %d -> %d", baseDepth, app.Input().Depth())
+	}
+	if dispatchRune(app, 'b') {
+		t.Fatal("hidden form input still handling keys after close")
+	}
+	if title != "a" {
+		t.Fatalf("hidden form input mutated after close: %q", title)
+	}
+}

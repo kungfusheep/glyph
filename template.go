@@ -552,6 +552,18 @@ func (t *Template) setRouteActive(active bool) {
 			t.routeRouter.Disable()
 		}
 	}
+	// the focus manager rides the same visibility edges as the modal router.
+	// Stack discipline: on show the modal router pushes first, the focused
+	// field's sub-router above it (the input gets first crack, modal keys
+	// like Esc sit below); on hide they pop in reverse — FM first, modal
+	// second — including the retained exit/fade path, so nothing orphans.
+	fm := t.pendingFocusManager
+	if !active && fm != nil && fm.pushed {
+		if fm.pop != nil {
+			fm.pop()
+		}
+		fm.pushed = false
+	}
 	if t.routeModalRouter != nil {
 		app := t.evalRoot().app
 		if active && !t.routeModalPushed {
@@ -567,6 +579,9 @@ func (t *Template) setRouteActive(active bool) {
 			t.routeModalRouter.Disable()
 			t.routeModalPushed = false
 		}
+	}
+	if active && fm != nil && !fm.pushed {
+		fm.initialPush()
 	}
 }
 
