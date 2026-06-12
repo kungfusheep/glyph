@@ -64,6 +64,13 @@ type App struct {
 	// request landing just after an input-driven flush is never discarded.
 	reqGen  atomic.Uint64
 	doneGen atomic.Uint64
+
+	// Apply queue: closures pushed by goroutines, drained at frame top under
+	// the render lock before any reads (ADR 2). Double-buffered for zero
+	// steady-state allocation.
+	applyMu      sync.Mutex
+	applied      []func()
+	applyScratch []func()
 	forceFullFlush bool        // set by Go() to force full redraw on next frame
 	suspended      atomic.Bool // when set, render() is a no-op (terminal handed to an external program, e.g. $EDITOR)
 	effectsActive  bool        // previous frame used post-processing; clear pooled buffers fully
@@ -840,6 +847,45 @@ func (a *App) Template() *Template {
 
 // RequestRender marks that a render is needed.
 // Safe to call from any goroutine.
+// Apply enqueues fn to run on the render thread at the top of the next
+// frame, under the render lock, before any reads — the safe place to push a
+// goroutine's result into bound state (ADR 2):
+//
+//	go func() {
+//	    result := fetch()
+//	    app.Apply(func() {
+//	        if key == current { rows = result }
+//	    })
+//	}()
+//
+// Closures run in apply order, exactly once. A closure applied during the
+// drain runs NEXT frame (anti-livelock: a self-applying chain cannot wedge a
+// frame). Closures may spawn goroutines but must never render (RenderNow
+// would deadlock on the render lock) and never block.
+func (a *App) Apply(fn func()) {
+	a.applyMu.Lock()
+	a.applied = append(a.applied, fn)
+	a.applyMu.Unlock()
+	a.RequestRender()
+}
+
+// drainApplies runs the queued apply closures. Called inside render() under
+// renderMu at frame top; the batch is swapped out first, so closures applied
+// during the drain land in the next batch.
+func (a *App) drainApplies() {
+	a.applyMu.Lock()
+	batch := a.applied
+	a.applied = a.applyScratch[:0]
+	a.applyMu.Unlock()
+	for i, fn := range batch {
+		fn()
+		batch[i] = nil
+	}
+	a.applyMu.Lock()
+	a.applyScratch = batch
+	a.applyMu.Unlock()
+}
+
 func (a *App) RequestRender() {
 	a.reqGen.Add(1)
 	select {
@@ -891,6 +937,10 @@ func (a *App) render() {
 	// carry state this frame won't include, so the debounce must re-render
 	coveredGen := a.reqGen.Load()
 	defer a.doneGen.Store(coveredGen)
+
+	// apply queued state pushes first — frame top, under the lock, before
+	// any reads (ADR 2)
+	a.drainApplies()
 
 	var t0, t1 time.Time
 	if DebugTiming {
