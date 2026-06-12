@@ -75,3 +75,95 @@ func TestToastExitWithInOutVocabulary(t *testing.T) {
 		t.Fatal("still animating after exit completed and item removed")
 	}
 }
+
+// regression for the frozen per-item watch target: a tween watching an ITEM
+// FIELD inside ForEach must follow each element's value, not the compile-time
+// dummy's. This is the field-watch form of the toast fade.
+func TestPerItemTweenWatchesItemField(t *testing.T) {
+	type Toast struct {
+		Msg   string
+		Alpha float64
+	}
+	toasts := []Toast{{Msg: "first", Alpha: 1}, {Msg: "second", Alpha: 1}}
+	completed := 0
+
+	fade := Animate.Duration(200 * time.Millisecond).Ease(EaseLinear).
+		OnComplete(func() { completed++ })
+
+	tmpl := Build(VBox(
+		ForEach(&toasts, func(to *Toast) Component {
+			return HBox.Opacity(fade(&to.Alpha))(Text(&to.Msg))
+		}),
+	))
+
+	base := time.Unix(6000, 0)
+	clock := base
+	tmpl.nowFn = func() time.Time { return clock }
+
+	buf := NewBuffer(20, 4)
+	tmpl.Execute(buf, 20, 4)
+
+	toasts[0].Alpha = 0 // TTL event on the first item only
+
+	clock = base.Add(50 * time.Millisecond)
+	buf2 := NewBuffer(20, 4)
+	tmpl.Execute(buf2, 20, 4)
+	if !tmpl.Animating() {
+		t.Fatal("per-item field tween did not animate; watch target frozen on the dummy")
+	}
+
+	clock = base.Add(400 * time.Millisecond)
+	buf3 := NewBuffer(20, 4)
+	tmpl.Execute(buf3, 20, 4)
+	if completed != 1 {
+		t.Fatalf("OnComplete fired %d times, want exactly 1 (first item only)", completed)
+	}
+	if tmpl.Animating() {
+		t.Fatal("still animating after the single fade settled")
+	}
+}
+
+// same regression, Color flavour: Fill tween watching an item colour field.
+func TestPerItemColorTweenWatchesItemField(t *testing.T) {
+	type Row struct {
+		Label string
+		Tone  Color
+	}
+	rows := []Row{{Label: "a", Tone: RGB(0, 0, 0)}, {Label: "b", Tone: RGB(0, 0, 0)}}
+
+	tmpl := Build(VBox(
+		ForEach(&rows, func(r *Row) Component {
+			return HBox.Height(1).Fill(Animate.Duration(200*time.Millisecond).Ease(EaseLinear)(&r.Tone))(
+				Text(&r.Label),
+			)
+		}),
+	))
+
+	base := time.Unix(7000, 0)
+	clock := base
+	tmpl.nowFn = func() time.Time { return clock }
+
+	buf := NewBuffer(10, 4)
+	tmpl.Execute(buf, 10, 4)
+
+	rows[0].Tone = RGB(200, 0, 0) // event on the first row only
+
+	clock = base.Add(50 * time.Millisecond)
+	buf2 := NewBuffer(10, 4)
+	tmpl.Execute(buf2, 10, 4)
+	if !tmpl.Animating() {
+		t.Fatal("per-item colour tween did not animate; watch target frozen on the dummy")
+	}
+
+	clock = base.Add(400 * time.Millisecond)
+	buf3 := NewBuffer(10, 4)
+	tmpl.Execute(buf3, 10, 4)
+	bg0 := buf3.Get(2, 0).Style.BG
+	if bg0.R != 200 || bg0.G != 0 {
+		t.Fatalf("row 0 settled fill = %+v, want (200,0,0)", bg0)
+	}
+	bg1 := buf3.Get(2, 1).Style.BG
+	if bg1.R != 0 {
+		t.Fatalf("row 1 fill = %+v, want untouched black", bg1)
+	}
+}

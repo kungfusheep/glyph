@@ -1736,6 +1736,31 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 
 	inForEach := elemBase != nil && elemSize > 0
 	if inForEach {
+		// item-field targets compiled against the dummy element must rebase
+		// per rendered element, like every other per-item binding; a raw
+		// pointer would read the compile-time placeholder forever
+		watchOff, watchInItem := uintptr(0), false
+		if isWithinRange(unsafe.Pointer(watchPtr), elemBase, elemSize) {
+			watchOff = uintptr(unsafe.Pointer(watchPtr)) - uintptr(elemBase)
+			watchInItem = true
+		}
+		readWatch := func(key unsafe.Pointer) float64 {
+			if watchInItem {
+				return *(*float64)(unsafe.Pointer(uintptr(key) + watchOff))
+			}
+			return *watchPtr
+		}
+		outOff, outInItem := uintptr(0), false
+		if outWatchPtr != nil && isWithinRange(unsafe.Pointer(outWatchPtr), elemBase, elemSize) {
+			outOff = uintptr(unsafe.Pointer(outWatchPtr)) - uintptr(elemBase)
+			outInItem = true
+		}
+		readOut := func(key unsafe.Pointer) float64 {
+			if outInItem {
+				return *(*float64)(unsafe.Pointer(uintptr(key) + outOff))
+			}
+			return *outWatchPtr
+		}
 		items := make(map[unsafe.Pointer]*perItemFloat64State)
 		t.itemEvals = append(t.itemEvals, func() {
 			key := t.elemBase
@@ -1744,7 +1769,7 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 			}
 			state, ok := items[key]
 			if !ok {
-				initial := *watchPtr
+				initial := readWatch(key)
 				state = &perItemFloat64State{
 					lastTarget:      initial,
 					startVal:        initial,
@@ -1763,7 +1788,7 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 			if durPtr != nil {
 				dur = *durPtr
 			}
-			target := *watchPtr
+			target := readWatch(key)
 			now := root.frameTime
 
 			if outTw != nil && t.isExitRenderingFor(key) {
@@ -1771,7 +1796,7 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 				if outDurPtr != nil {
 					outDur = *outDurPtr
 				}
-				outTarget := *outWatchPtr
+				outTarget := readOut(key)
 				if state.exitComplete {
 					state.current = outTarget
 					*storage = state.current
@@ -2183,19 +2208,49 @@ func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer,
 	// detect ForEach context
 	inForEach := elemBase != nil && elemSize > 0
 
+	// item-field targets compiled against the dummy element rebase per
+	// rendered element (t.elemBase at run time); raw pointers would read
+	// the compile-time placeholder forever
+	watchOff, watchInItem := uintptr(0), false
+	if inForEach && isWithinRange(unsafe.Pointer(watchPtr), elemBase, elemSize) {
+		watchOff = uintptr(unsafe.Pointer(watchPtr)) - uintptr(elemBase)
+		watchInItem = true
+	}
+	readWatch := func() Color {
+		if watchInItem {
+			if key := t.elemBase; key != nil {
+				return *(*Color)(unsafe.Pointer(uintptr(key) + watchOff))
+			}
+		}
+		return *watchPtr
+	}
+	outOff, outInItem := uintptr(0), false
+	if inForEach && outWatchPtr != nil && isWithinRange(unsafe.Pointer(outWatchPtr), elemBase, elemSize) {
+		outOff = uintptr(unsafe.Pointer(outWatchPtr)) - uintptr(elemBase)
+		outInItem = true
+	}
+	readOut := func() Color {
+		if outInItem {
+			if key := t.elemBase; key != nil {
+				return *(*Color)(unsafe.Pointer(uintptr(key) + outOff))
+			}
+		}
+		return *outWatchPtr
+	}
+
 	run := func(state *perItemColorState, exiting bool) {
 		dur := durVal
 		if durPtr != nil {
 			dur = *durPtr
 		}
-		target := *watchPtr
+		target := readWatch()
 		now := root.frameTime
 		if outTw != nil && exiting {
 			outDur := outDurVal
 			if outDurPtr != nil {
 				outDur = *outDurPtr
 			}
-			outTarget := *outWatchPtr
+			outTarget := readOut()
 			if state.exitComplete {
 				state.current = outTarget
 				*storage = state.current
@@ -2294,7 +2349,7 @@ func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer,
 		}
 		t.itemEvals = append(t.itemEvals, func() {
 			key := t.elemBase
-			target := *watchPtr
+			target := readWatch()
 			state, ok := items[key]
 			if !ok {
 				state = &perItemColorState{lastTarget: target, startVal: target, current: target, needsFirstFrame: hasFrom}
@@ -2358,19 +2413,49 @@ func (t *Template) compileTweenStyle(tw tweenNode, elemBase unsafe.Pointer, elem
 	// detect ForEach context
 	inForEach := elemBase != nil && elemSize > 0
 
+	// item-field targets compiled against the dummy element rebase per
+	// rendered element (t.elemBase at run time); raw pointers would read
+	// the compile-time placeholder forever
+	styleWatchOff, styleWatchInItem := uintptr(0), false
+	if inForEach && isWithinRange(unsafe.Pointer(watchPtr), elemBase, elemSize) {
+		styleWatchOff = uintptr(unsafe.Pointer(watchPtr)) - uintptr(elemBase)
+		styleWatchInItem = true
+	}
+	readWatch := func() Style {
+		if styleWatchInItem {
+			if key := t.elemBase; key != nil {
+				return *(*Style)(unsafe.Pointer(uintptr(key) + styleWatchOff))
+			}
+		}
+		return *watchPtr
+	}
+	styleOutOff, styleOutInItem := uintptr(0), false
+	if inForEach && outWatchPtr != nil && isWithinRange(unsafe.Pointer(outWatchPtr), elemBase, elemSize) {
+		styleOutOff = uintptr(unsafe.Pointer(outWatchPtr)) - uintptr(elemBase)
+		styleOutInItem = true
+	}
+	readOut := func() Style {
+		if styleOutInItem {
+			if key := t.elemBase; key != nil {
+				return *(*Style)(unsafe.Pointer(uintptr(key) + styleOutOff))
+			}
+		}
+		return *outWatchPtr
+	}
+
 	run := func(state *perItemStyleState, exiting bool) {
 		dur := durVal
 		if durPtr != nil {
 			dur = *durPtr
 		}
-		target := *watchPtr
+		target := readWatch()
 		now := root.frameTime
 		if outTw != nil && exiting {
 			outDur := outDurVal
 			if outDurPtr != nil {
 				outDur = *outDurPtr
 			}
-			outTarget := *outWatchPtr
+			outTarget := readOut()
 			if state.exitComplete {
 				state.current = outTarget
 				*storage = state.current
@@ -2461,7 +2546,7 @@ func (t *Template) compileTweenStyle(tw tweenNode, elemBase unsafe.Pointer, elem
 		items := make(map[unsafe.Pointer]*perItemStyleState)
 		t.itemEvals = append(t.itemEvals, func() {
 			key := t.elemBase
-			target := *watchPtr
+			target := readWatch()
 			state, ok := items[key]
 			if !ok {
 				state = &perItemStyleState{lastTarget: target, startVal: target, current: target, needsFirstFrame: hasFrom}
@@ -2474,7 +2559,7 @@ func (t *Template) compileTweenStyle(tw tweenNode, elemBase unsafe.Pointer, elem
 			run(state, t.isExitRenderingFor(key))
 		})
 	} else {
-		state := &perItemStyleState{lastTarget: *watchPtr, startVal: *storage, current: *storage, needsFirstFrame: hasFrom}
+		state := &perItemStyleState{lastTarget: readWatch(), startVal: *storage, current: *storage, needsFirstFrame: hasFrom}
 		if hasFrom {
 			state.startVal = fromVal
 			state.current = fromVal
