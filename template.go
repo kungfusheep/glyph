@@ -752,6 +752,12 @@ func (op *Op) width() int16 {
 	return op.Width
 }
 
+// hasDynWidth reports whether a dynamic width binding is present; a present
+// binding evaluating to 0 means "explicitly sized, currently zero", not unset.
+func (op *Op) hasDynWidth() bool {
+	return op.Dyn != nil && op.Dyn.Width != nil
+}
+
 func (op *Op) flexGrow() float32 {
 	if op.Dyn != nil {
 		if p := op.Dyn.FlexGrow; p != nil {
@@ -5522,6 +5528,10 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 	case OpContainer:
 		if w := op.width(); w > 0 {
 			geom.W = w
+		} else if op.hasDynWidth() {
+			// a present dynamic width binding means "explicitly sized,
+			// currently zero" — honour the zero, not full available width
+			geom.W = 0
 		} else if pw := op.percentWidth(); pw > 0 {
 			geom.W = int16(float32(availW) * pw)
 		} else if op.FitContent || (op.Parent >= 0 && op.ContentSized && t.ops[op.Parent].Kind == OpContainer && t.ops[op.Parent].IsRow) {
@@ -5634,7 +5644,7 @@ func (t *Template) distributeHBoxChildWidths(idx int16, op *Op, availW int16, el
 			} else {
 				implicitFlexChildren = append(implicitFlexChildren, i)
 			}
-		} else if !effectiveOp.FitContent && !effectiveOp.ContentSized && effectiveOp.Kind == OpContainer && effectiveOp.width() == 0 && effectiveOp.percentWidth() == 0 {
+		} else if !effectiveOp.FitContent && !effectiveOp.ContentSized && effectiveOp.Kind == OpContainer && effectiveOp.width() == 0 && effectiveOp.percentWidth() == 0 && !effectiveOp.hasDynWidth() {
 			// Container without explicit width or fixed-content children - implicit flex
 			implicitFlexChildren = append(implicitFlexChildren, i)
 		} else {
