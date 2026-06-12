@@ -1017,6 +1017,8 @@ func (t *Template) compileDynInt16(v any, elemBase unsafe.Pointer, elemSize uint
 		return t.compileBranchInt16(c)
 	case tweenNode:
 		return t.compileTweenInt16(c, elemBase, elemSize)
+	case OscC:
+		return t.compileOscInt16(c)
 	}
 	return nil
 }
@@ -1647,6 +1649,19 @@ func (t *Template) compileTweenFloat32(tw tweenNode, elemBase unsafe.Pointer, el
 // compileOscFloat64 registers a frame evaluator deriving the oscillator's
 // value from the shared frame clock. Resolving marks the template animating,
 // so the gated ticker runs exactly while an oscillator is reachable (ADR 1).
+func (t *Template) compileOscInt16(o OscC) *int16 {
+	root := t.evalRoot()
+	storage := new(int16)
+	var acc oscAccum
+	osc := o
+	eval := func() {
+		root.animating = true
+		*storage = int16(osc.resolve(root.frameTime.Sub(root.oscEpoch), &acc) + 0.5)
+	}
+	root.evals = append(root.evals, eval)
+	return storage
+}
+
 func (t *Template) compileOscFloat64(o OscC) *float64 {
 	root := t.evalRoot()
 	storage := new(float64)
