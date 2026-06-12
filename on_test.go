@@ -10,6 +10,14 @@ func dispatchRune(app *App, r rune) bool {
 	return app.Input().Dispatch(riffkey.Key{Rune: r})
 }
 
+func dispatchKey(app *App, name string) bool {
+	switch name {
+	case "<Escape>":
+		return app.Input().Dispatch(riffkey.Key{Special: riffkey.SpecialEscape})
+	}
+	return false
+}
+
 func TestOnRegistersViewScopedHandler(t *testing.T) {
 	app := NewApp()
 	hits := 0
@@ -495,5 +503,57 @@ func TestOnModalRoutesFormInputBinding(t *testing.T) {
 	}
 	if title != "a" {
 		t.Fatalf("hidden form input mutated after close: %q", title)
+	}
+}
+
+// the m305 follow-up: Escape must be able to dismiss a form-in-overlay. The
+// FM pushes on the show EDGE only — the user's blur (first Escape) stays
+// blurred instead of being re-pushed next frame, so the second Escape falls
+// through to the modal router and closes the overlay.
+func TestOnModalFormEscapeDismissesOverlay(t *testing.T) {
+	app := NewApp()
+	showOverlay := false
+	var title string
+
+	app.SetView(VBox(
+		If(&showOverlay).Then(
+			Overlay.Centered()(
+				VBox(
+					On.Modal(Key("<Escape>", func() { showOverlay = false })),
+					Form(
+						Field("title", Input(&title).Bind()),
+					),
+				),
+			),
+		),
+	))
+
+	baseDepth := app.Input().Depth()
+	showOverlay = true
+	app.render()
+	if !dispatchRune(app, 'a') || title != "a" {
+		t.Fatalf("focused form input not receiving keys; title=%q", title)
+	}
+
+	dispatchKey(app, "<Escape>") // blur the field
+	app.render()                 // a frame passes; blur must persist
+	if dispatchRune(app, 'b') && title == "ab" {
+		t.Fatal("input still focused after blur+render; FM re-pushed on visible frame")
+	}
+
+	dispatchKey(app, "<Escape>") // now reaches the modal router
+	app.render()
+	if showOverlay {
+		t.Fatal("second Escape did not dismiss the overlay")
+	}
+	if app.Input().Depth() != baseDepth {
+		t.Fatalf("depth not restored after dismiss: %d -> %d", baseDepth, app.Input().Depth())
+	}
+
+	// reopening restores focus from the top
+	showOverlay = true
+	app.render()
+	if !dispatchRune(app, 'x') {
+		t.Fatal("reopened form input not focused; show-edge latch failed to reset")
 	}
 }

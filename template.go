@@ -182,6 +182,7 @@ type Template struct {
 	routeAttached             bool
 	routeModalRouter          *riffkey.Router
 	routeModalPushed          bool
+	routeFMActive             bool // FM pushed for this visibility cycle; a user blur stays blurred until the branch toggles
 
 	// per-frame evaluators — conditions, animations, etc. run at start of Execute
 	evals []func()
@@ -554,15 +555,20 @@ func (t *Template) setRouteActive(active bool) {
 	}
 	// the focus manager rides the same visibility edges as the modal router.
 	// Stack discipline: on show the modal router pushes first, the focused
-	// field's sub-router above it (the input gets first crack, modal keys
-	// like Esc sit below); on hide they pop in reverse — FM first, modal
-	// second — including the retained exit/fade path, so nothing orphans.
+	// field's sub-router above it (the input gets first crack); on hide they
+	// pop in reverse — FM first, modal second — including the retained
+	// exit/fade path, so nothing orphans. The FM pushes on the SHOW EDGE
+	// only (routeFMActive latch): a user blur (Escape) stays blurred, so the
+	// next Escape reaches the modal router and can dismiss the overlay.
 	fm := t.pendingFocusManager
-	if !active && fm != nil && fm.pushed {
-		if fm.pop != nil {
-			fm.pop()
+	if !active && fm != nil && t.routeFMActive {
+		if fm.pushed {
+			if fm.pop != nil {
+				fm.pop()
+			}
+			fm.pushed = false
 		}
-		fm.pushed = false
+		t.routeFMActive = false
 	}
 	if t.routeModalRouter != nil {
 		app := t.evalRoot().app
@@ -580,8 +586,9 @@ func (t *Template) setRouteActive(active bool) {
 			t.routeModalPushed = false
 		}
 	}
-	if active && fm != nil && !fm.pushed {
+	if active && fm != nil && !t.routeFMActive {
 		fm.initialPush()
+		t.routeFMActive = true
 	}
 }
 
