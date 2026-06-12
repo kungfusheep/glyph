@@ -2616,16 +2616,16 @@ func (t *Template) resolveTweenTargetStyle(target any, elemBase unsafe.Pointer, 
 // opSparkline holds sparkline-specific data.
 type opSparkline struct {
 	values    []float64
-	valuesPtr *[]float64
+	valuesPtr sliceBinding // bound *[]float64; offset-resolved per ForEach element
 	min       float64
 	max       float64
 	style     Style
 	stylePtr  *Style
 }
 
-func (s *opSparkline) resolveValues() []float64 {
-	if s.valuesPtr != nil {
-		return *s.valuesPtr
+func (s *opSparkline) resolveValues(elemBase unsafe.Pointer) []float64 {
+	if p := s.valuesPtr.ptrFor(elemBase); p != nil {
+		return *(*[]float64)(p)
 	}
 	return s.values
 }
@@ -2636,7 +2636,7 @@ func (s *opSparkline) render(t *Template, buf *Buffer, x, y, w, h int16) {
 		baseStyle = *s.stylePtr
 	}
 	style := t.effectiveStyle(baseStyle)
-	vals := s.resolveValues()
+	vals := s.resolveValues(t.elemBase)
 	if len(vals) == 0 {
 		return
 	}
@@ -2647,9 +2647,9 @@ func (s *opSparkline) render(t *Template, buf *Buffer, x, y, w, h int16) {
 	}
 }
 
-func (s *opSparkline) dataLen() int {
-	if s.valuesPtr != nil {
-		return len(*s.valuesPtr)
+func (s *opSparkline) dataLen(elemBase unsafe.Pointer) int {
+	if p := s.valuesPtr.ptrFor(elemBase); p != nil {
+		return len(*(*[]float64)(p))
 	}
 	return len(s.values)
 }
@@ -2987,17 +2987,17 @@ type opLeader struct {
 	mode     uint8
 	label    string
 	value    string
-	valuePtr *string
-	intPtr   *int
-	floatPtr *float64
+	valuePtr sliceBinding // *string, offset-resolved per ForEach element
+	intPtr   sliceBinding // *int
+	floatPtr sliceBinding // *float64
 	fill     rune
 	style    Style
 	stylePtr *Style
 }
 
 type opCounter struct {
-	currentPtr   *int
-	totalPtr     *int
+	currentPtr   sliceBinding // *int, offset-resolved per ForEach element
+	totalPtr     sliceBinding // *int
 	prefix       string
 	streamingPtr *bool
 	framePtr     *int32
@@ -3005,7 +3005,7 @@ type opCounter struct {
 }
 
 type opSpinner struct {
-	framePtr *int
+	framePtr sliceBinding // manual *int frame index, offset-resolved per element
 	frames   []string
 	selfFps  float64 // >0: self-animating from the frame clock (ADR 1)
 	style    Style
@@ -3025,8 +3025,8 @@ func (s *opSpinner) frameIndex(t *Template) (int, bool) {
 		root.animating = true
 		return oscStepIndex(root.frameTime.Sub(root.oscEpoch), s.selfFps, n), true
 	}
-	if s.framePtr != nil {
-		return *s.framePtr % n, true
+	if p := s.framePtr.ptrFor(t.elemBase); p != nil {
+		return *(*int)(p) % n, true
 	}
 	return 0, false
 }
@@ -3047,9 +3047,9 @@ type opRule struct {
 type opScrollbar struct {
 	contentSize   int
 	viewSize      int
-	contentPtr    *int // dynamic content size (overrides contentSize when set)
-	viewPtr       *int // dynamic viewport size (overrides viewSize when set)
-	posPtr        *int
+	contentPtr    sliceBinding // dynamic content size *int (overrides contentSize when set)
+	viewPtr       sliceBinding // dynamic viewport size *int (overrides viewSize when set)
+	posPtr        sliceBinding // *int
 	layer         *Layer
 	horizontal    bool
 	trackChar     rune
@@ -3062,7 +3062,7 @@ type opScrollbar struct {
 
 type opTabs struct {
 	labels        []string
-	selectedPtr   *int
+	selectedPtr   sliceBinding // *int, offset-resolved per ForEach element
 	styleType     TabsStyle
 	gap           int
 	activeStyle   Style
@@ -3415,13 +3415,13 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	case ProgressC:
 		return t.compileProgressC(v, parent, depth, elemBase, elemSize)
 	case SpinnerC:
-		return t.compileSpinnerC(v, parent, depth)
+		return t.compileSpinnerC(v, parent, depth, elemBase, elemSize)
 	case LeaderC:
-		return t.compileLeaderC(v, parent, depth)
+		return t.compileLeaderC(v, parent, depth, elemBase, elemSize)
 	case counterC:
-		return t.compileCounterC(v, parent, depth)
+		return t.compileCounterC(v, parent, depth, elemBase, elemSize)
 	case SparklineC:
-		return t.compileSparklineC(v, parent, depth)
+		return t.compileSparklineC(v, parent, depth, elemBase, elemSize)
 	case JumpC:
 		return t.compileJumpC(v, parent, depth, elemBase, elemSize)
 	case LayerViewC:
@@ -3429,9 +3429,9 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	case OverlayC:
 		return t.compileOverlayC(v, parent, depth)
 	case TabsC:
-		return t.compileTabsC(v, parent, depth)
+		return t.compileTabsC(v, parent, depth, elemBase, elemSize)
 	case ScrollbarC:
-		return t.compileScrollbarC(v, parent, depth)
+		return t.compileScrollbarC(v, parent, depth, elemBase, elemSize)
 	case AutoTableC:
 		t.collectBindings(v)
 		return t.compileAutoTableC(v, parent, depth)
@@ -4481,7 +4481,7 @@ func (t *Template) compileProgressC(v ProgressC, parent int16, depth int, elemBa
 	return idx
 }
 
-func (t *Template) compileSpinnerC(v SpinnerC, parent int16, depth int) int16 {
+func (t *Template) compileSpinnerC(v SpinnerC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	frames := v.frames
 	if frames == nil {
 		frames = SpinnerBraille
@@ -4493,8 +4493,8 @@ func (t *Template) compileSpinnerC(v SpinnerC, parent int16, depth int) int16 {
 			selfFps = 12
 		}
 	}
-	ext := &opSpinner{framePtr: v.frame, frames: frames, selfFps: selfFps, style: v.style}
-	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, nil, 0)
+	ext := &opSpinner{framePtr: newSliceBinding(unsafe.Pointer(v.frame), elemBase, elemSize), frames: frames, selfFps: selfFps, style: v.style}
+	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, elemBase, elemSize)
 	return t.addOp(Op{
 		Kind:   OpSpinner,
 		Parent: parent,
@@ -4503,14 +4503,14 @@ func (t *Template) compileSpinnerC(v SpinnerC, parent int16, depth int) int16 {
 	}, depth)
 }
 
-func (t *Template) compileLeaderC(v LeaderC, parent int16, depth int) int16 {
+func (t *Template) compileLeaderC(v LeaderC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	fill := v.fill
 	if fill == 0 {
 		fill = '.'
 	}
 
 	ext := &opLeader{fill: fill, style: v.style}
-	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, nil, 0)
+	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, elemBase, elemSize)
 
 	switch label := v.label.(type) {
 	case string:
@@ -4525,13 +4525,13 @@ func (t *Template) compileLeaderC(v LeaderC, parent int16, depth int) int16 {
 		ext.value = val
 	case *string:
 		ext.mode = leaderPtr
-		ext.valuePtr = val
+		ext.valuePtr = newSliceBinding(unsafe.Pointer(val), elemBase, elemSize)
 	case *int:
 		ext.mode = leaderIntPtr
-		ext.intPtr = val
+		ext.intPtr = newSliceBinding(unsafe.Pointer(val), elemBase, elemSize)
 	case *float64:
 		ext.mode = leaderFloatPtr
-		ext.floatPtr = val
+		ext.floatPtr = newSliceBinding(unsafe.Pointer(val), elemBase, elemSize)
 	case int:
 		ext.mode = leaderStatic
 		ext.value = fmt.Sprintf("%d", val)
@@ -4564,10 +4564,10 @@ func (t *Template) compileLeaderC(v LeaderC, parent int16, depth int) int16 {
 	return idx
 }
 
-func (t *Template) compileCounterC(v counterC, parent int16, depth int) int16 {
+func (t *Template) compileCounterC(v counterC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	ext := &opCounter{
-		currentPtr:   v.current,
-		totalPtr:     v.total,
+		currentPtr:   newSliceBinding(unsafe.Pointer(v.current), elemBase, elemSize),
+		totalPtr:     newSliceBinding(unsafe.Pointer(v.total), elemBase, elemSize),
 		prefix:       v.prefix,
 		streamingPtr: v.streaming,
 		framePtr:     v.framePtr,
@@ -4581,14 +4581,14 @@ func (t *Template) compileCounterC(v counterC, parent int16, depth int) int16 {
 	}, depth)
 }
 
-func (t *Template) compileSparklineC(v SparklineC, parent int16, depth int) int16 {
+func (t *Template) compileSparklineC(v SparklineC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	ext := &opSparkline{min: v.min, max: v.max, style: v.style}
-	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, nil, 0)
+	ext.stylePtr = t.compileStyleDyn(v.style, v.styleDyn, v.fgDyn, v.bgDyn, elemBase, elemSize)
 	switch vals := v.values.(type) {
 	case []float64:
 		ext.values = vals
 	case *[]float64:
-		ext.valuesPtr = vals
+		ext.valuesPtr = newSliceBinding(unsafe.Pointer(vals), elemBase, elemSize)
 	}
 
 	op := Op{
@@ -4734,10 +4734,10 @@ func (t *Template) compileOverlayOffset(v any) *int16 {
 	return nil
 }
 
-func (t *Template) compileTabsC(v TabsC, parent int16, depth int) int16 {
+func (t *Template) compileTabsC(v TabsC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	ext := &opTabs{
 		labels:        v.labels,
-		selectedPtr:   v.selected,
+		selectedPtr:   newSliceBinding(unsafe.Pointer(v.selected), elemBase, elemSize),
 		styleType:     v.tabStyle,
 		gap:           int(v.gap),
 		activeStyle:   v.activeStyle,
@@ -4764,7 +4764,7 @@ func (t *Template) compileTabsC(v TabsC, parent int16, depth int) int16 {
 	return idx
 }
 
-func (t *Template) compileScrollbarC(v ScrollbarC, parent int16, depth int) int16 {
+func (t *Template) compileScrollbarC(v ScrollbarC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	trackChar := v.trackChar
 	thumbChar := v.thumbChar
 	if trackChar == 0 {
@@ -4780,9 +4780,9 @@ func (t *Template) compileScrollbarC(v ScrollbarC, parent int16, depth int) int1
 	ext := &opScrollbar{
 		contentSize:   v.contentSize,
 		viewSize:      v.viewSize,
-		contentPtr:    v.contentPtr,
-		viewPtr:       v.viewPtr,
-		posPtr:        v.position,
+		contentPtr:    newSliceBinding(unsafe.Pointer(v.contentPtr), elemBase, elemSize),
+		viewPtr:       newSliceBinding(unsafe.Pointer(v.viewPtr), elemBase, elemSize),
+		posPtr:        newSliceBinding(unsafe.Pointer(v.position), elemBase, elemSize),
 		layer:         v.layer,
 		horizontal:    v.horizontal,
 		trackChar:     trackChar,
@@ -5441,16 +5441,16 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 	case OpSparkline:
 		w := op.width()
 		if w == 0 {
-			w = int16(op.Ext.(*opSparkline).dataLen())
+			w = int16(op.Ext.(*opSparkline).dataLen(t.elemBase))
 		}
 		return w + op.marginH()
 	case OpCounter:
 		ext := op.Ext.(*opCounter)
 		var scratch [48]byte
 		b := append(scratch[:0], ext.prefix...)
-		b = strconv.AppendInt(b, int64(*ext.currentPtr), 10)
+		b = strconv.AppendInt(b, int64(*(*int)(ext.currentPtr.ptrFor(t.elemBase))), 10)
 		b = append(b, '/')
-		b = strconv.AppendInt(b, int64(*ext.totalPtr), 10)
+		b = strconv.AppendInt(b, int64(*(*int)(ext.totalPtr.ptrFor(t.elemBase))), 10)
 		return int16(len(b)) + op.marginH()
 	case OpSpinner:
 		return 1 + op.marginH()
@@ -5521,9 +5521,9 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 		ext := op.Ext.(*opCounter)
 		var scratch [48]byte
 		b := append(scratch[:0], ext.prefix...)
-		b = strconv.AppendInt(b, int64(*ext.currentPtr), 10)
+		b = strconv.AppendInt(b, int64(*(*int)(ext.currentPtr.ptrFor(t.elemBase))), 10)
 		b = append(b, '/')
-		b = strconv.AppendInt(b, int64(*ext.totalPtr), 10)
+		b = strconv.AppendInt(b, int64(*(*int)(ext.totalPtr.ptrFor(t.elemBase))), 10)
 		geom.W = int16(len(b))
 
 	case OpLeader:
@@ -5541,7 +5541,7 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 			if availW > 0 {
 				geom.W = availW
 			} else {
-				geom.W = int16(op.Ext.(*opSparkline).dataLen())
+				geom.W = int16(op.Ext.(*opSparkline).dataLen(t.elemBase))
 			}
 		}
 
@@ -8102,14 +8102,14 @@ func (t *Template) renderLeader(buf *Buffer, op *Op, absX, absY, maxW int16) {
 	var value string
 	switch ext.mode {
 	case leaderPtr:
-		value = applyTransform(*ext.valuePtr, style.Transform)
+		value = applyTransform(*(*string)(ext.valuePtr.ptrFor(t.elemBase)), style.Transform)
 	case leaderIntPtr:
 		var scratch [20]byte
-		b := strconv.AppendInt(scratch[:0], int64(*ext.intPtr), 10)
+		b := strconv.AppendInt(scratch[:0], int64(*(*int)(ext.intPtr.ptrFor(t.elemBase))), 10)
 		value = applyTransform(unsafe.String(&b[0], len(b)), style.Transform)
 	case leaderFloatPtr:
 		var scratch [32]byte
-		b := strconv.AppendFloat(scratch[:0], *ext.floatPtr, 'f', 1, 64)
+		b := strconv.AppendFloat(scratch[:0], *(*float64)(ext.floatPtr.ptrFor(t.elemBase)), 'f', 1, 64)
 		value = applyTransform(unsafe.String(&b[0], len(b)), style.Transform)
 	default:
 		value = applyTransform(ext.value, style.Transform)
@@ -8130,9 +8130,9 @@ func (t *Template) renderCounter(buf *Buffer, op *Op, absX, absY, maxW int16) {
 	} else {
 		b = append(scratch[:0], prefix...)
 	}
-	b = strconv.AppendInt(b, int64(*ext.currentPtr), 10)
+	b = strconv.AppendInt(b, int64(*(*int)(ext.currentPtr.ptrFor(t.elemBase))), 10)
 	b = append(b, '/')
-	b = strconv.AppendInt(b, int64(*ext.totalPtr), 10)
+	b = strconv.AppendInt(b, int64(*(*int)(ext.totalPtr.ptrFor(t.elemBase))), 10)
 	text := unsafe.String(&b[0], len(b))
 	buf.WriteStringFast(int(absX), int(absY), text, style, int(maxW))
 }
@@ -9375,8 +9375,8 @@ func (t *Template) renderOverlay(buf *Buffer, op *Op, exiting bool, screenW, scr
 func (t *Template) renderTabs(buf *Buffer, op *Op, geom *Geom, absX, absY int16) {
 	ext := op.Ext.(*opTabs)
 	selectedIdx := 0
-	if ext.selectedPtr != nil {
-		selectedIdx = *ext.selectedPtr
+	if p := ext.selectedPtr.ptrFor(t.elemBase); p != nil {
+		selectedIdx = *(*int)(p)
 	}
 
 	x := int(absX)
@@ -9456,16 +9456,16 @@ func (t *Template) renderScrollbar(buf *Buffer, op *Op, geom *Geom, absX, absY i
 	opacity, hasOpacity := t.opacityForOp(op)
 
 	pos := 0
-	if ext.posPtr != nil {
-		pos = *ext.posPtr
+	if p := ext.posPtr.ptrFor(t.elemBase); p != nil {
+		pos = *(*int)(p)
 	}
 	contentSize := ext.contentSize
 	viewSize := ext.viewSize
-	if ext.contentPtr != nil {
-		contentSize = *ext.contentPtr
+	if p := ext.contentPtr.ptrFor(t.elemBase); p != nil {
+		contentSize = *(*int)(p)
 	}
-	if ext.viewPtr != nil {
-		viewSize = *ext.viewPtr
+	if p := ext.viewPtr.ptrFor(t.elemBase); p != nil {
+		viewSize = *(*int)(p)
 	}
 	if ext.layer != nil {
 		pos = ext.layer.ScrollY()
