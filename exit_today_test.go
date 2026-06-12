@@ -167,3 +167,63 @@ func TestPerItemColorTweenWatchesItemField(t *testing.T) {
 		t.Fatalf("row 1 fill = %+v, want untouched black", bg1)
 	}
 }
+
+// pins the OnComplete safety contract: completions fire AFTER Execute's
+// reads finish, so a callback may mutate bound state — including removing
+// the completed item from the very slice its ForEach iterates.
+func TestOnCompleteMayMutateIteratedSlice(t *testing.T) {
+	type Toast struct {
+		Msg   string
+		Alive bool
+	}
+	var toasts []Toast
+	toasts = []Toast{{Msg: "first", Alive: true}, {Msg: "second", Alive: true}}
+
+	var tmpl *Template
+	tmpl = Build(VBox(
+		ForEach(&toasts, func(to *Toast) Component {
+			return If(&to.Alive).Then(
+				HBox.Opacity(In(1.0).Out(
+					Animate.Duration(100 * time.Millisecond).Ease(EaseLinear).
+						OnComplete(func() {
+							// remove dead items in place — the hazard case
+							live := toasts[:0]
+							for _, x := range toasts {
+								if x.Alive {
+									live = append(live, x)
+								}
+							}
+							toasts = live
+						})(0.0),
+				))(Text(&to.Msg)),
+			)
+		}),
+	))
+
+	base := time.Unix(8000, 0)
+	clock := base
+	tmpl.nowFn = func() time.Time { return clock }
+
+	buf := NewBuffer(20, 4)
+	tmpl.Execute(buf, 20, 4)
+
+	toasts[0].Alive = false
+
+	clock = base.Add(50 * time.Millisecond)
+	buf2 := NewBuffer(20, 4)
+	tmpl.Execute(buf2, 20, 4) // mid-fade
+
+	clock = base.Add(200 * time.Millisecond)
+	buf3 := NewBuffer(20, 4)
+	tmpl.Execute(buf3, 20, 4) // completion frame: callback mutates the slice AFTER reads
+	if len(toasts) != 1 {
+		t.Fatalf("len(toasts) = %d after completion, want 1 (callback ran)", len(toasts))
+	}
+
+	clock = base.Add(250 * time.Millisecond)
+	buf4 := NewBuffer(20, 4)
+	tmpl.Execute(buf4, 20, 4)
+	if got := buf4.GetLine(0); got != "second" {
+		t.Fatalf("after in-callback removal line 0 = %q, want survivor", got)
+	}
+}

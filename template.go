@@ -200,6 +200,12 @@ type Template struct {
 	oscEpoch  time.Time        // first-frame stamp; oscillators derive from frameTime-oscEpoch
 	nowFn     func() time.Time // test injection point; nil means time.Now
 
+	// completions defers tween OnComplete callbacks to the end of Execute:
+	// they fire on the render thread after the frame's reads finish, so a
+	// callback may safely mutate bound state — including the slice a ForEach
+	// is iterating — for the NEXT frame
+	completions []func()
+
 	// animation ticker — runs at ~60fps only while animations are active
 	animTicker    *time.Ticker
 	requestRender func()
@@ -212,6 +218,13 @@ type Template struct {
 type elemCompileContext struct {
 	base unsafe.Pointer
 	size uintptr
+}
+
+// deferComplete queues a tween completion callback to run after this frame's
+// Execute finishes. See the completions field for the safety contract.
+func (t *Template) deferComplete(fn func()) {
+	root := t.evalRoot()
+	root.completions = append(root.completions, fn)
 }
 
 // evalRoot returns the root template where evaluators should be registered.
@@ -1508,7 +1521,7 @@ func (t *Template) compileTweenScalar(tw tweenNode, elemBase unsafe.Pointer, ele
 				state.exitComplete = true
 				t.setExitLease(&state.exitLeaseActive, false)
 				if outOnComplete != nil {
-					outOnComplete()
+					t.deferComplete(outOnComplete)
 				}
 				return
 			}
@@ -1547,7 +1560,7 @@ func (t *Template) compileTweenScalar(tw tweenNode, elemBase unsafe.Pointer, ele
 			assign(state.current)
 			state.startTime = time.Time{}
 			if onComplete != nil {
-				onComplete()
+				t.deferComplete(onComplete)
 			}
 			return
 		}
@@ -1831,7 +1844,7 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 					state.exitComplete = true
 					t.setExitLease(&state.exitLeaseActive, false)
 					if outOnComplete != nil {
-						outOnComplete()
+						t.deferComplete(outOnComplete)
 					}
 					return
 				}
@@ -1884,7 +1897,7 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 				*storage = state.current
 				state.startTime = time.Time{}
 				if onComplete != nil {
-					onComplete()
+					t.deferComplete(onComplete)
 				}
 				return
 			}
@@ -1960,7 +1973,7 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 				exitComplete = true
 				t.setExitLease(&exitLeaseActive, false)
 				if outOnComplete != nil {
-					outOnComplete()
+					t.deferComplete(outOnComplete)
 				}
 				return
 			}
@@ -2028,7 +2041,7 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 			*storage = target
 			startTime = time.Time{}
 			if onComplete != nil {
-				onComplete()
+				t.deferComplete(onComplete)
 			}
 			return
 		}
@@ -2285,7 +2298,7 @@ func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer,
 				state.exitComplete = true
 				t.setExitLease(&state.exitLeaseActive, false)
 				if outOnComplete != nil {
-					outOnComplete()
+					t.deferComplete(outOnComplete)
 				}
 				return
 			}
@@ -2329,7 +2342,7 @@ func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer,
 			*storage = target
 			state.startTime = time.Time{}
 			if onComplete != nil {
-				onComplete()
+				t.deferComplete(onComplete)
 			}
 			return
 		}
@@ -2490,7 +2503,7 @@ func (t *Template) compileTweenStyle(tw tweenNode, elemBase unsafe.Pointer, elem
 				state.exitComplete = true
 				t.setExitLease(&state.exitLeaseActive, false)
 				if outOnComplete != nil {
-					outOnComplete()
+					t.deferComplete(outOnComplete)
 				}
 				return
 			}
@@ -2529,7 +2542,7 @@ func (t *Template) compileTweenStyle(tw tweenNode, elemBase unsafe.Pointer, elem
 			*storage = target
 			state.startTime = time.Time{}
 			if onComplete != nil {
-				onComplete()
+				t.deferComplete(onComplete)
 			}
 			return
 		}
@@ -5224,6 +5237,20 @@ func (t *Template) Execute(buf *Buffer, screenW, screenH int16) {
 
 	// Phase 4: Render overlays (after main content so they appear on top)
 	t.renderOverlays(buf, screenW, screenH)
+
+	// fire deferred tween completions now that the frame's reads are done;
+	// callbacks may mutate bound state (including ForEach slices) for the
+	// next frame, so request one when any ran
+	if len(t.completions) > 0 {
+		pending := t.completions
+		t.completions = t.completions[:0]
+		for _, fn := range pending {
+			fn()
+		}
+		if t.requestRender != nil {
+			t.requestRender()
+		}
+	}
 
 	// manage animation ticker — start at ~60fps when animating, stop when settled
 	if t.animating && t.animTicker == nil && t.requestRender != nil {
