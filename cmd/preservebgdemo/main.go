@@ -64,30 +64,36 @@ func main() {
 		)
 	}
 
-	// an underline drawn across a two-tone split, the focus-bar case
-	underline := func(decorate bool) Component {
-		u := Text("▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁").FG(mark).BG(chipBG)
+	// a marker bar drawn OVER a two-tone split via overlay — the focus-bar
+	// case, and the honest one: an overlay isn't in the split's container
+	// cascade, so its cells genuinely land over foreign-filled cells. Plain
+	// stamps chipBG across both panes (a uniform hole); PreserveBG keeps each
+	// pane's fill (stripe under the left half, banner under the right).
+	underline := func(decorate bool, ref *NodeRef) Component {
+		bar := Text("▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔").FG(mark).BG(chipBG)
 		if decorate {
-			u = Text("▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁").FG(mark).BG(chipBG).PreserveBG()
+			bar = bar.PreserveBG()
 		}
-		return VBox(
-			HBox.Height(1)(
-				HBox.Width(10).Fill(stripeA)(Text("  left").FG(dim)),
-				HBox.Width(10).Fill(banner)(Text("  right").FG(dim)),
-			),
-			u,
+		return Overlay.OnTop(ref)(bar)
+	}
+	split := func(ref *NodeRef) Component {
+		return HBox.Height(1).NodeRef(ref)(
+			HBox.Width(10).Fill(stripeA)(Text("  left").FG(dim)),
+			HBox.Width(10).Fill(banner)(Text("  right").FG(dim)),
 		)
 	}
 
-	column := func(title string, decorate bool) Component {
+	var leftRef, rightRef NodeRef
+	column := func(title string, decorate bool, ref *NodeRef) Component {
 		return VBox.Gap(1).WidthPct(0.5).PaddingVH(0, 1)(
 			Text(title).Bold().FG(Hex(0xFFFFFF)),
 			Text("striped list — badge over alternating fills").FG(dim),
 			stripes(decorate),
 			Text("banner — glyph over a solid bar").FG(dim),
 			bannerRow(decorate),
-			Text("underline — bar across a two-tone split").FG(dim),
-			underline(decorate),
+			Text("marker bar — overlaid across a two-tone split").FG(dim),
+			split(ref),
+			underline(decorate, ref),
 		)
 	}
 
@@ -100,8 +106,8 @@ func main() {
 				Text("[q] quit").FG(dim),
 			),
 			HBox.Gap(2)(
-				column("PLAIN — own background", false),
-				column("PRESERVEBG — background shows through", true),
+				column("PLAIN — own background", false, &leftRef),
+				column("PRESERVEBG — background shows through", true, &rightRef),
 			),
 		),
 	)
