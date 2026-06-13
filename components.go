@@ -1011,6 +1011,15 @@ func (t TextC) Strikethrough() TextC {
 	return t
 }
 
+// PreserveBG keeps the destination cell's background for this text's writes,
+// stamping only the rune and foreground over whatever sits beneath — a
+// decoration that carries no background of its own (underlines spanning
+// panes, badges over striped lists, glyphs over banners). ADR 4.
+func (t TextC) PreserveBG() TextC {
+	t.style.Attr |= AttrPreserveBG
+	return t
+}
+
 // Align sets the text alignment within its available width.
 func (t TextC) Align(a Align) TextC { t.style.Align = a; return t }
 

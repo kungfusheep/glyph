@@ -2965,6 +2965,7 @@ type opRichText struct {
 	spanStrOffs []uintptr
 	spanStrPtrs []*string // global *string spans; typed so the GC pins them
 	charWrap    bool
+	preserveBG  bool
 }
 
 func (rt *opRichText) resolve(elemBase unsafe.Pointer) []Span {
@@ -3598,7 +3599,7 @@ func (t *Template) compileBox(box Box, parent int16, depth int, elemBase unsafe.
 }
 
 func (t *Template) compileRichText(v richTextNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
-	ext := &opRichText{charWrap: v.charWrap}
+	ext := &opRichText{charWrap: v.charWrap, preserveBG: v.preserveBG}
 
 	switch spans := v.Spans.(type) {
 	case []Span:
@@ -7668,6 +7669,11 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		spans := ext.resolve(t.elemBase)
 		if spans != nil {
 			spans = styleSpans(spans, t.effectiveStyle)
+			if ext.preserveBG {
+				for i := range spans {
+					spans[i].Style.Attr |= AttrPreserveBG
+				}
+			}
 			maxLines := t.clipLines(buf, absY)
 			if maxLines > 0 {
 				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap, t.richSpanJumpFunc(buf))
@@ -8302,6 +8308,11 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 		spans := ext.resolve(elemBase)
 		if spans != nil {
 			spans = styleSpans(spans, mergeStyle)
+			if ext.preserveBG {
+				for i := range spans {
+					spans[i].Style.Attr |= AttrPreserveBG
+				}
+			}
 			maxLines := t.clipLines(buf, absY)
 			if maxLines > 0 {
 				wrapSpansDraw(spans, buf, int(absX), int(absY), int(contentW), maxLines, ext.charWrap, t.richSpanJumpFunc(buf))

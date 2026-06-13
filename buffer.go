@@ -90,6 +90,13 @@ func (b *Buffer) Set(x, y int, c Cell) {
 	idx := b.index(x, y)
 	existing := b.cells[idx]
 
+	// PreserveBG: keep the destination cell's background, then strip the
+	// write-mode bit so it never persists or emits (ADR 4)
+	if c.Style.Attr.Has(AttrPreserveBG) {
+		c.Style.BG = existing.Style.BG
+		c.Style.Attr = c.Style.Attr.Without(AttrPreserveBG)
+	}
+
 	// Merge border characters
 	if merged, ok := mergeBorders(existing.Rune, c.Rune); ok {
 		c.Rune = merged
@@ -111,7 +118,12 @@ func (b *Buffer) SetFast(x, y int, c Cell) {
 		return
 	}
 	c.Style = b.applyDefault(c.Style)
-	b.cells[y*b.width+x] = c
+	idx := y*b.width + x
+	if c.Style.Attr.Has(AttrPreserveBG) {
+		c.Style.BG = b.cells[idx].Style.BG
+		c.Style.Attr = c.Style.Attr.Without(AttrPreserveBG)
+	}
+	b.cells[idx] = c
 	if y > b.dirtyMaxY {
 		b.dirtyMaxY = y
 	}
@@ -144,9 +156,10 @@ func (b *Buffer) SetOpacity(x, y int, c Cell, opacity float64, mode OpacityMode)
 // the default style merge, dirty tracking, and base index computation.
 // Use when writing many runes to the same row — avoids per-cell overhead.
 type RowWriter struct {
-	cells []Cell // slice into the row (len == buffer width)
-	width int
-	style Style // already merged with buffer's default style
+	cells      []Cell // slice into the row (len == buffer width)
+	width      int
+	style      Style // already merged with buffer's default style
+	preserveBG bool  // keep each destination cell's BG (ADR 4)
 }
 
 // Row returns a writer for row y with the style precomputed and the row marked dirty.
@@ -160,10 +173,16 @@ func (b *Buffer) Row(y int, style Style) RowWriter {
 	}
 	b.dirtyRows[y] = true
 	base := y * b.width
+	merged := b.applyDefault(style)
+	preserveBG := merged.Attr.Has(AttrPreserveBG)
+	if preserveBG {
+		merged.Attr = merged.Attr.Without(AttrPreserveBG)
+	}
 	return RowWriter{
-		cells: b.cells[base : base+b.width],
-		width: b.width,
-		style: b.applyDefault(style),
+		cells:      b.cells[base : base+b.width],
+		width:      b.width,
+		style:      merged,
+		preserveBG: preserveBG,
 	}
 }
 
@@ -172,7 +191,11 @@ func (rw *RowWriter) Put(x int, r rune) {
 	if x < 0 || x >= rw.width {
 		return
 	}
-	rw.cells[x] = Cell{Rune: r, Style: rw.style}
+	cs := rw.style
+	if rw.preserveBG {
+		cs.BG = rw.cells[x].Style.BG
+	}
+	rw.cells[x] = Cell{Rune: r, Style: cs}
 }
 
 // Partial block characters for sub-character progress bar precision (1/8 to 8/8)
@@ -261,6 +284,10 @@ func (b *Buffer) WriteStringFast(x, y int, s string, style Style, maxWidth int) 
 	b.dirtyRows[y] = true
 
 	style = b.applyDefault(style)
+	preserveBG := style.Attr.Has(AttrPreserveBG)
+	if preserveBG {
+		style.Attr = style.Attr.Without(AttrPreserveBG)
+	}
 
 	base := y * b.width
 	written := 0
@@ -270,9 +297,17 @@ func (b *Buffer) WriteStringFast(x, y int, s string, style Style, maxWidth int) 
 			break
 		}
 		if x >= 0 {
-			b.cells[base+x] = Cell{Rune: r, Style: style}
+			cs := style
+			if preserveBG {
+				cs.BG = b.cells[base+x].Style.BG
+			}
+			b.cells[base+x] = Cell{Rune: r, Style: cs}
 			if rw == 2 && x+1 < b.width {
-				b.cells[base+x+1] = Cell{Rune: 0, Style: style}
+				cs2 := style
+				if preserveBG {
+					cs2.BG = b.cells[base+x+1].Style.BG
+				}
+				b.cells[base+x+1] = Cell{Rune: 0, Style: cs2}
 			}
 		}
 		x += rw
@@ -306,16 +341,28 @@ func (b *Buffer) WriteSpans(x, y int, spans []Span, maxWidth int) {
 	written := 0
 	for _, span := range spans {
 		ss := b.applyDefault(span.Style)
+		preserveBG := ss.Attr.Has(AttrPreserveBG)
+		if preserveBG {
+			ss.Attr = ss.Attr.Without(AttrPreserveBG)
+		}
 		for _, r := range span.Text {
 			rw := RuneWidth(r)
 			if written+rw > maxWidth || x+rw > b.width {
 				return
 			}
 			if x >= 0 {
-				b.cells[base+x] = Cell{Rune: r, Style: ss}
+				cs := ss
+				if preserveBG {
+					cs.BG = b.cells[base+x].Style.BG
+				}
+				b.cells[base+x] = Cell{Rune: r, Style: cs}
 				// for double-width chars, fill second cell with placeholder
 				if rw == 2 && x+1 < b.width {
-					b.cells[base+x+1] = Cell{Rune: 0, Style: ss}
+					cs2 := ss
+					if preserveBG {
+						cs2.BG = b.cells[base+x+1].Style.BG
+					}
+					b.cells[base+x+1] = Cell{Rune: 0, Style: cs2}
 				}
 			}
 			x += rw

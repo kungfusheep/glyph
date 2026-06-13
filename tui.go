@@ -18,6 +18,13 @@ const (
 	AttrBlink
 	AttrInverse
 	AttrStrikethrough
+
+	// AttrPreserveBG is a write-mode flag, not a visual attribute: a cell
+	// write carrying it keeps the destination cell's background instead of
+	// stamping the source's. The write path applies the rule then strips the
+	// bit, so it never persists on a cell or emits as an SGR escape. Bit 0 of
+	// the uint8 (the iota block above starts at bit 1). ADR 4.
+	AttrPreserveBG Attribute = 1 << 0
 )
 
 // TextTransform represents text case transformations.
@@ -677,9 +684,10 @@ type Span struct {
 // Constructed via Rich(...) or Textf(...).
 type richTextNode struct {
 	Flex
-	Spans    any       // []Span or *[]Span
-	spanPtrs []*string // per-span *string pointers for Textf (nil = static text)
-	charWrap bool
+	Spans      any       // []Span or *[]Span
+	spanPtrs   []*string // per-span *string pointers for Textf (nil = static text)
+	charWrap   bool
+	preserveBG bool
 }
 
 // CharWrap switches the rich text to character-exact wrapping: every rune is laid
@@ -687,6 +695,14 @@ type richTextNode struct {
 // runs). Use for code, diffs, and anything where indentation is content.
 func (r richTextNode) CharWrap() richTextNode {
 	r.charWrap = true
+	return r
+}
+
+// PreserveBG keeps the destination cell's background for every span's writes,
+// stamping rune and foreground over whatever sits beneath. Works for static
+// and live (*[]Span) content alike. ADR 4.
+func (r richTextNode) PreserveBG() richTextNode {
+	r.preserveBG = true
 	return r
 }
 
