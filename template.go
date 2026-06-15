@@ -1045,6 +1045,18 @@ func anyToInt8(v any) int8 {
 func (t *Template) compileDynInt16(v any, elemBase unsafe.Pointer, elemSize uintptr) *int16 {
 	switch c := v.(type) {
 	case *int16:
+		// a raw pointer into a ForEach element rebinds per item: read from the
+		// element being rendered each frame, not the compile-time placeholder.
+		if contextIdx, ptrOffset, inForEach := t.elemContextForPtr(uintptr(unsafe.Pointer(c)), elemBase, elemSize); inForEach {
+			storage := new(int16)
+			*storage = *c
+			t.itemEvals = append(t.itemEvals, func() {
+				if base := t.runtimeElemBase(contextIdx); base != nil {
+					*storage = *(*int16)(unsafe.Pointer(uintptr(base) + ptrOffset))
+				}
+			})
+			return storage
+		}
 		return c
 	case conditionNode:
 		return t.compileCondInt16(c)
@@ -1060,6 +1072,20 @@ func (t *Template) compileDynInt16(v any, elemBase unsafe.Pointer, elemSize uint
 
 func (t *Template) compileDynFloat32(v any, elemBase unsafe.Pointer, elemSize uintptr) *float32 {
 	switch c := v.(type) {
+	case *float32:
+		// a raw pointer into a ForEach element rebinds per item: read from the
+		// element being rendered each frame, not the compile-time placeholder.
+		if contextIdx, ptrOffset, inForEach := t.elemContextForPtr(uintptr(unsafe.Pointer(c)), elemBase, elemSize); inForEach {
+			storage := new(float32)
+			*storage = *c
+			t.itemEvals = append(t.itemEvals, func() {
+				if base := t.runtimeElemBase(contextIdx); base != nil {
+					*storage = *(*float32)(unsafe.Pointer(uintptr(base) + ptrOffset))
+				}
+			})
+			return storage
+		}
+		return c
 	case conditionNode:
 		return t.compileCondFloat32(c)
 	case valueBranchNode:
@@ -3430,7 +3456,7 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	case TextBlockC:
 		return t.compileTextBlockC(v, parent, depth, elemBase, elemSize)
 	case SpacerC:
-		return t.compileSpacerC(v, parent, depth)
+		return t.compileSpacerC(v, parent, depth, elemBase, elemSize)
 	case HRuleC:
 		return t.compileHRuleC(v, parent, depth, elemBase, elemSize)
 	case VRuleC:
@@ -4129,15 +4155,16 @@ func (t *Template) ensureOpDyn(idx int16) *OpDyn {
 
 func (t *Template) compileContainerFlex(percentWidth float32, width, height int16, flexGrow float32, fitContent bool, widthPtr, heightPtr *int16, percentWidthPtr, flexGrowPtr *float32, widthCond, heightCond, percentWidthCond, flexGrowCond any, elemBase unsafe.Pointer, elemSize uintptr) flex {
 	f := flex{
-		percentWidth:    percentWidth,
-		width:           width,
-		height:          height,
-		flexGrow:        flexGrow,
-		fitContent:      fitContent,
-		widthPtr:        widthPtr,
-		heightPtr:       heightPtr,
-		percentWidthPtr: percentWidthPtr,
-		flexGrowPtr:     flexGrowPtr,
+		percentWidth: percentWidth,
+		width:        width,
+		height:       height,
+		flexGrow:     flexGrow,
+		fitContent:   fitContent,
+		// raw item-field pointers rebind per ForEach element (frozen otherwise)
+		widthPtr:        t.compileDynInt16(widthPtr, elemBase, elemSize),
+		heightPtr:       t.compileDynInt16(heightPtr, elemBase, elemSize),
+		percentWidthPtr: t.compileDynFloat32(percentWidthPtr, elemBase, elemSize),
+		flexGrowPtr:     t.compileDynFloat32(flexGrowPtr, elemBase, elemSize),
 	}
 	if heightCond != nil {
 		f.heightPtr = t.compileDynInt16(heightCond, elemBase, elemSize)
@@ -4375,7 +4402,7 @@ func (t *Template) compileTextBlockC(v TextBlockC, parent int16, depth int, elem
 	}, depth)
 }
 
-func (t *Template) compileSpacerC(v SpacerC, parent int16, depth int) int16 {
+func (t *Template) compileSpacerC(v SpacerC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	grow := v.flexGrow
 	if grow == 0 && v.width == 0 && v.height == 0 && v.widthPtr == nil && v.heightPtr == nil && v.flexGrowPtr == nil && v.widthCond == nil && v.heightCond == nil && v.flexGrowCond == nil {
 		grow = 1
@@ -4396,19 +4423,19 @@ func (t *Template) compileSpacerC(v SpacerC, parent int16, depth int) int16 {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
 		if v.widthCond != nil {
-			t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond, nil, 0)
+			t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond, elemBase, elemSize)
 		} else if v.widthPtr != nil {
-			t.ops[idx].Dyn.Width = v.widthPtr
+			t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthPtr, elemBase, elemSize)
 		}
 		if v.heightCond != nil {
-			t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightCond, nil, 0)
+			t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightCond, elemBase, elemSize)
 		} else if v.heightPtr != nil {
-			t.ops[idx].Dyn.Height = v.heightPtr
+			t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightPtr, elemBase, elemSize)
 		}
 		if v.flexGrowCond != nil {
-			t.ops[idx].Dyn.FlexGrow = t.compileDynFloat32(v.flexGrowCond, nil, 0)
+			t.ops[idx].Dyn.FlexGrow = t.compileDynFloat32(v.flexGrowCond, elemBase, elemSize)
 		} else if v.flexGrowPtr != nil {
-			t.ops[idx].Dyn.FlexGrow = v.flexGrowPtr
+			t.ops[idx].Dyn.FlexGrow = t.compileDynFloat32(v.flexGrowPtr, elemBase, elemSize)
 		}
 	}
 	return idx

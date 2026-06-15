@@ -1054,3 +1054,43 @@ func TestSparklineGrowInsideBorderedVBox(t *testing.T) {
 		t.Errorf("label rendered above or on top border (row %d)", labelRow)
 	}
 }
+
+// TestForEachPerItemFlexPointersRebind guards the per-item binding rule for the
+// flex pointer surfaces: a *float32 Grow and a *int16 Width read from a ForEach
+// struct field must resolve to EACH element's value, not the compile-time
+// placeholder. Two rows with different values must render differently.
+func TestForEachPerItemFlexPointersRebind(t *testing.T) {
+	// per-item Grow: row 0 grow 0 (text left), row 1 grow 1 (text pushed right)
+	type grow struct {
+		lg    float32
+		label string
+	}
+	grows := []grow{{0, "AA"}, {1, "BB"}}
+	gt := Build(VBox.Width(20)(
+		ForEach(&grows, func(r *grow) Component {
+			return HBox.Width(20)(Space().Grow(&r.lg), Text(&r.label))
+		}),
+	))
+	gb := NewBuffer(20, 4)
+	gt.Execute(gb, 20, 4)
+	if a, b := strings.Index(gb.GetLine(0), "AA"), strings.Index(gb.GetLine(1), "BB"); a == b {
+		t.Errorf("per-item Grow frozen: both rows place text at col %d", a)
+	}
+
+	// per-item Width on a spacer: row 0 pad 0, row 1 pad 8
+	type pad struct {
+		w     int16
+		label string
+	}
+	pads := []pad{{0, "CC"}, {8, "DD"}}
+	pt := Build(VBox.Width(20)(
+		ForEach(&pads, func(r *pad) Component {
+			return HBox.Width(20)(Space().Width(&r.w), Text(&r.label))
+		}),
+	))
+	pb := NewBuffer(20, 4)
+	pt.Execute(pb, 20, 4)
+	if a, b := strings.Index(pb.GetLine(0), "CC"), strings.Index(pb.GetLine(1), "DD"); a == b {
+		t.Errorf("per-item spacer Width frozen: both rows place text at col %d", a)
+	}
+}
