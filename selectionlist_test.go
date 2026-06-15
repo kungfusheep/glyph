@@ -631,3 +631,78 @@ func TestSelectionListClampsSelectionAfterShrink(t *testing.T) {
 		t.Fatalf("expected remaining item to be selected, got %q", line)
 	}
 }
+
+// TestSelectionListUnboundedUpScrollHoldsViewport guards todo:65906d9f: an
+// unbounded List (MaxVisible==0) whose height is bounded by the clipped
+// viewport must hold the viewport while the cursor moves UP through the visible
+// window, scrolling only once the cursor pushes past the top edge — the same
+// sticky behaviour the bottom edge already had. The bug pinned the selection to
+// the bottom every frame, so moving up scrolled the viewport one row per move.
+func TestSelectionListUnboundedUpScrollHoldsViewport(t *testing.T) {
+	items := make([]string, 25)
+	for i := range items {
+		items[i] = fmt.Sprintf("Item %02d", i+1)
+	}
+	selected := 0
+	list := &selectionList{
+		Items:      &items,
+		Selected:   &selected,
+		Marker:     "> ",
+		MaxVisible: 0, // fill the clipped viewport, no fixed count
+		Render:     func(s *string) Component { return Text(s) },
+	}
+	view := VBox.Border(BorderSingle).Title("test")(
+		Text("header"),
+		HRule(),
+		VBox.Grow(1)(list),
+	)
+	screenH := int16(12)
+	tmpl := Build(view)
+	topRow := func() string {
+		buf := NewBuffer(40, int(screenH))
+		tmpl.Execute(buf, 40, screenH)
+		return buf.GetLine(3) // first row of the list area
+	}
+
+	topRow() // populate list.len before navigating
+	for i := 0; i < 24; i++ {
+		list.Down(nil)
+		topRow()
+	}
+	atBottom := topRow()
+	if !contains(atBottom, "Item 18") {
+		t.Fatalf("setup: expected window top 'Item 18' at bottom, got %q", atBottom)
+	}
+
+	// move up within the window: the top must not move
+	list.Up(nil)
+	if got := topRow(); !contains(got, "Item 18") {
+		t.Errorf("viewport scrolled on move up (within window): top now %q, want held at Item 18", got)
+	}
+	list.Up(nil)
+	if got := topRow(); !contains(got, "Item 18") {
+		t.Errorf("viewport scrolled on second move up: top now %q, want held at Item 18", got)
+	}
+
+	// cursor reaches the top edge (Item 18, index 17): still held
+	for selected > 17 {
+		list.Up(nil)
+	}
+	if got := topRow(); !contains(got, "Item 18") {
+		t.Errorf("viewport should hold while cursor sits at the top edge: top %q", got)
+	}
+	// push past the top: now it scrolls up
+	list.Up(nil)
+	if got := topRow(); contains(got, "Item 18") {
+		t.Errorf("viewport should scroll up when the cursor pushes past the top edge, but held at %q", got)
+	}
+
+	// return to the bottom: the same window must be restored (no drift)
+	for selected < 24 {
+		list.Down(nil)
+		topRow()
+	}
+	if got := topRow(); !contains(got, "Item 18") {
+		t.Errorf("returning to the bottom should restore the window top to Item 18, got %q", got)
+	}
+}

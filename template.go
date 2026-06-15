@@ -8635,10 +8635,16 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		}
 	}
 
-	// height-aware windowing: determine visible item range using per-item heights
+	// height-aware windowing: determine visible item range using per-item heights.
+	// startIdx always seeds from the persisted offset when there's a list pointer,
+	// even when MaxVisible==0 (the viewport is bounded by clipMaxY instead). Without
+	// this, an unbounded clipped list resets startIdx to 0 every frame, so the
+	// scroll-adjustment below recomputes the window from the selection alone and
+	// re-pins the selection to the bottom — making the viewport scroll on every
+	// move UP, not just when the cursor reaches the top edge.
 	startIdx := 0
 	endIdx := visibleLen
-	if ext.listPtr != nil && ext.listPtr.MaxVisible > 0 {
+	if ext.listPtr != nil {
 		startIdx = ext.listPtr.offset
 		if startIdx < 0 {
 			startIdx = 0
@@ -8646,9 +8652,11 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		if startIdx >= visibleLen {
 			startIdx = visibleLen - 1
 		}
-		endIdx = startIdx + ext.listPtr.MaxVisible
-		if endIdx > visibleLen {
-			endIdx = visibleLen
+		if ext.listPtr.MaxVisible > 0 {
+			endIdx = startIdx + ext.listPtr.MaxVisible
+			if endIdx > visibleLen {
+				endIdx = visibleLen
+			}
 		}
 	}
 
