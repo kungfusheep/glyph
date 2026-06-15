@@ -3,6 +3,7 @@ package glyph
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1427,18 +1428,36 @@ func (a *App) paintJumpLabels(buf *Buffer, height int) {
 	if a.jumpMode == nil {
 		return
 	}
+	// incremental feedback: the typed prefix recedes (matchedStyle) so the next
+	// key stands out, and labels whose prefix no longer matches the input dim
+	// whole (ADR 11). input is byte length — labels are ASCII home-row, so byte
+	// index == rune index here; slice on rune boundaries if labels ever leave
+	// ASCII.
+	input := a.jumpMode.Input
+	n := len(input)
 	for _, target := range a.jumpMode.Targets {
 		x, y := int(target.X), int(target.Y)
 		if y < 0 || y >= height || x >= buf.Width() {
 			continue
 		}
-		style := a.jumpStyle.LabelStyle
+		base := a.jumpStyle.LabelStyle
 		if !target.Style.Equal(Style{}) {
-			style = target.Style
+			base = target.Style
 		}
+		matched := a.jumpStyle.MatchedStyle
+		if matched.Equal(Style{}) {
+			matched = dimDerived(base) // default-on: derive a dim
+		}
+		// a label whose prefix diverged from the input is no longer a
+		// candidate — dim the whole thing so the live targets stand out
+		dead := n > 0 && !strings.HasPrefix(target.Label, input)
 		for i, r := range target.Label {
 			if x+i < 0 || x+i >= buf.Width() {
 				continue
+			}
+			style := base
+			if dead || i < n {
+				style = matched
 			}
 			buf.Set(x+i, y, Cell{Rune: r, Style: style})
 		}

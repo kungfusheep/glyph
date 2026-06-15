@@ -2,7 +2,22 @@ package glyph
 
 // JumpStyle configures the appearance of jump labels.
 type JumpStyle struct {
-	LabelStyle Style // Style for the label character(s)
+	LabelStyle Style // Style for the not-yet-typed remainder of a label
+
+	// MatchedStyle paints the already-typed prefix of a multi-char label
+	// (and, when a label no longer matches the typed input, the whole label),
+	// so progress is visible mid-sequence. A zero MatchedStyle derives a dim
+	// from LabelStyle — feedback is on by default (ADR 11). At rest (nothing
+	// typed) no prefix exists, so the render is identical to LabelStyle alone.
+	MatchedStyle Style
+}
+
+// dimDerived returns a dimmed variant of a style for the default-on matched
+// feedback: drop bold, add dim, so the typed prefix recedes and the next key
+// to press stays prominent.
+func dimDerived(s Style) Style {
+	s.Attr = (s.Attr &^ AttrBold) | AttrDim
+	return s
 }
 
 // DefaultJumpStyle is the default styling for jump labels.
