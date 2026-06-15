@@ -1403,6 +1403,27 @@ func (a *App) JumpKey(pattern string) *App {
 	return a
 }
 
+// EnterJumpScope activates jump mode restricted to one or more screen regions,
+// each given as a *NodeRef populated by a container's .NodeRef() each frame.
+// Only targets that render inside a region are labelled and selectable; the
+// whole-screen EnterJumpMode is the no-region case.
+func (a *App) EnterJumpScope(rects ...*NodeRef) {
+	if a.jumpMode == nil {
+		a.jumpMode = &JumpMode{}
+	}
+	a.jumpMode.ScopeRects = rects
+	a.EnterJumpMode()
+}
+
+// JumpScopeKey registers a key pattern that enters jump mode scoped to the given
+// regions. The scoped counterpart of JumpKey.
+func (a *App) JumpScopeKey(pattern string, rects ...*NodeRef) *App {
+	a.router.Handle(pattern, func(_ riffkey.Match) {
+		a.EnterJumpScope(rects...)
+	})
+	return a
+}
+
 // SetJumpStyle sets the global style for jump labels.
 func (a *App) SetJumpStyle(style JumpStyle) *App {
 	a.jumpStyle = style
@@ -1481,8 +1502,9 @@ func (a *App) EnterJumpMode() {
 	a.render()
 
 	if len(a.jumpMode.Targets) == 0 {
-		// No targets, exit immediately
+		// No targets (e.g. scoped to a region with none), exit immediately
 		a.jumpMode.Active = false
+		a.jumpMode.ScopeRects = nil
 		return
 	}
 
@@ -1530,6 +1552,7 @@ func (a *App) ExitJumpMode() {
 
 	a.jumpMode.Active = false
 	a.jumpMode.ClearJumpTargets()
+	a.jumpMode.ScopeRects = nil
 	a.input.Pop()
 	a.RequestRender()
 }
@@ -1538,6 +1561,9 @@ func (a *App) ExitJumpMode() {
 // Called by Jump components when jump mode is active.
 func (a *App) AddJumpTarget(x, y int16, onSelect func(), style Style) {
 	if a.jumpMode != nil && a.jumpMode.Active {
+		if !a.jumpMode.inScope(int(x), int(y)) {
+			return // outside the active jump scope
+		}
 		a.jumpMode.AddTarget(x, y, onSelect, style)
 	}
 }

@@ -41,6 +41,28 @@ type JumpMode struct {
 	Active  bool
 	Targets []JumpTarget
 	Input   string // Accumulated input for multi-char labels
+	// ScopeRects restricts collection to one or more screen regions (a pane's
+	// rendered NodeRef). Empty means the whole screen is in scope.
+	ScopeRects []*NodeRef
+}
+
+// inScope reports whether the screen position (x,y) is within the active jump
+// scope. With no scope rects the whole screen is in scope. Bounds are half-open;
+// an empty rect (W<=0 || H<=0, e.g. a pane not rendered this frame) matches
+// nothing, so scoping to an unrendered pane simply yields no targets.
+func (jm *JumpMode) inScope(x, y int) bool {
+	if len(jm.ScopeRects) == 0 {
+		return true
+	}
+	for _, r := range jm.ScopeRects {
+		if r == nil || r.W <= 0 || r.H <= 0 {
+			continue
+		}
+		if x >= r.X && x < r.X+r.W && y >= r.Y && y < r.Y+r.H {
+			return true
+		}
+	}
+	return false
 }
 
 // labelChars are the characters used for jump labels.
