@@ -81,3 +81,88 @@ func TestDimDerivedDropsBoldAddsDim(t *testing.T) {
 		t.Fatal("dimDerived did not add dim")
 	}
 }
+
+// TestJumpFeedbackEndToEndMultiChar drives the REAL path Pete exercises: many
+// targets (>27) so GenerateLabels produces TWO-char labels, collected through
+// Execute's AddJumpTarget and AssignLabels — then a partial first char typed.
+// The matching labels' typed prefix must dim and the remainder keep LabelStyle;
+// non-matching labels dim whole. Guards against the isolated-paint test passing
+// while the live collection/assignment path silently shows nothing.
+func TestJumpFeedbackEndToEndMultiChar(t *testing.T) {
+	items := make([]string, 30) // >27 forces two-char labels
+	for i := range items {
+		items[i] = "row"
+	}
+	app := NewApp()
+	tmpl := Build(VBox(ForEach(&items, func(s *string) Component {
+		return Jump(Text(s), func() {})
+	})))
+	tmpl.SetApp(app)
+	app.jumpMode.Active = true
+
+	buf := NewBuffer(40, 40)
+	app.jumpMode.ClearTargets()
+	tmpl.Execute(buf, 40, 40)
+	app.jumpMode.AssignLabels()
+
+	if n := len(app.jumpMode.Targets); n < 28 {
+		t.Fatalf("expected >27 collected targets for two-char labels, got %d", n)
+	}
+	// confirm we actually got multi-char labels (else there's no prefix to dim)
+	multi := false
+	for _, tg := range app.jumpMode.Targets {
+		if len(tg.Label) >= 2 {
+			multi = true
+			break
+		}
+	}
+	if !multi {
+		t.Fatalf("expected at least one two-char label among %d targets", len(app.jumpMode.Targets))
+	}
+
+	// type the first label's first char; it must be a live partial match
+	first := app.jumpMode.Targets[0].Label
+	prefix := first[:1]
+	if !app.jumpMode.HasPartialMatch(prefix) {
+		t.Fatalf("typing %q should be a partial match for %q", prefix, first)
+	}
+	app.jumpMode.Input = prefix
+
+	out := NewBuffer(40, 40)
+	app.paintJumpLabels(out, 40)
+
+	wantDim := dimDerived(DefaultJumpStyle.LabelStyle)
+	sawMatchingDim := false
+	sawNonMatchingDim := false
+	for _, tg := range app.jumpMode.Targets {
+		x, y := int(tg.X), int(tg.Y)
+		if x >= out.Width() || y >= out.Height() {
+			continue
+		}
+		head := out.Get(x, y).Style
+		if tg.Label[:1] == prefix {
+			// matching: first char dims, second char keeps LabelStyle
+			if head.Equal(wantDim) {
+				sawMatchingDim = true
+			}
+			if len(tg.Label) >= 2 {
+				if rem := out.Get(x+1, y).Style; !rem.Equal(DefaultJumpStyle.LabelStyle) {
+					t.Errorf("label %q remainder should keep LabelStyle, got %+v", tg.Label, rem)
+				}
+			}
+		} else {
+			// non-matching: whole label dims
+			if head.Equal(wantDim) {
+				sawNonMatchingDim = true
+			} else {
+				t.Errorf("non-matching label %q head should dim, got %+v", tg.Label, head)
+			}
+		}
+	}
+	if !sawMatchingDim {
+		t.Error("expected at least one matching label with a dimmed typed prefix")
+	}
+	if !sawNonMatchingDim {
+		t.Error("expected at least one non-matching label dimmed whole")
+	}
+}

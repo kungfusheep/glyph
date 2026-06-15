@@ -10,38 +10,54 @@ import (
 
 func main() {
 	selected := -1
-	items := []string{"Apple", "Banana", "Cherry", "Date", "Elderberry", "Fig", "Grape"}
-	status := "Press 'g' to enter jump mode, 'q' to quit"
+	// 32 targets (>27) so GenerateLabels assigns TWO-char labels — that's what
+	// makes the incremental feedback visible: type the first key and the matched
+	// prefix dims while every non-matching label greys out.
+	items := make([]string, 32)
+	for i := range items {
+		items[i] = fmt.Sprintf("item %02d", i+1)
+	}
+	status := "press 'g' to jump — then type the first key and watch the prefix dim"
 
 	app := NewApp()
 
-	// build UI with Jump-wrapped items
-	children := make([]Component, 0, len(items)+4)
-	children = append(children, Text("Jump Labels Demo").FG(Cyan).Bold())
-	children = append(children, SpaceH(1))
-
-	for i, item := range items {
-		idx := i
-		children = append(children, Jump(
-			Text(fmt.Sprintf("  %s", item)),
-			func() {
-				selected = idx
-				status = fmt.Sprintf("Selected: %s (index %d)", items[idx], idx)
-			},
-		))
+	// lay the targets out as a 4-column grid of Jump cells
+	const cols = 4
+	rows := (len(items) + cols - 1) / cols
+	columns := make([]Component, cols)
+	for c := 0; c < cols; c++ {
+		cells := make([]Component, 0, rows)
+		for r := 0; r < rows; r++ {
+			i := r*cols + c
+			if i >= len(items) {
+				break
+			}
+			idx := i
+			cells = append(cells, Jump(
+				Text(fmt.Sprintf("  %s", items[idx])).Width(12),
+				func() {
+					selected = idx
+					status = fmt.Sprintf("selected: %s (index %d)", items[idx], idx)
+				},
+			))
+		}
+		columns[c] = VBox(cells...)
 	}
 
-	children = append(children, SpaceH(1))
-	children = append(children, Text(&status).FG(Yellow))
-
-	app.SetView(VBox(children...)).
+	app.SetView(VBox(
+		Text("Jump Labels Demo — multi-char feedback").FG(Cyan).Bold(),
+		SpaceH(1),
+		HBox.Gap(2)(columns...),
+		SpaceH(1),
+		Text(&status).FG(Yellow),
+	)).
 		JumpKey("g").
 		Handle("q", func(_ riffkey.Match) {
 			app.Stop()
 		}).
 		Handle("r", func(_ riffkey.Match) {
 			selected = -1
-			status = "Press 'g' to enter jump mode, 'q' to quit"
+			status = "press 'g' to jump — then type the first key and watch the prefix dim"
 		})
 
 	if err := app.Run(); err != nil {
