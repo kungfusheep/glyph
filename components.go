@@ -251,14 +251,17 @@ func (f VBoxFn) BorderFG(c any) VBoxFn {
 		case Color:
 			v.borderFG = &val
 		case *Color:
-			v.borderFG = val
+			// route through the dyn path so a pointer into a ForEach element
+			// rebases per item (a raw pointer reads the compile-time placeholder,
+			// which resolves to ColorDefault and silently drops the border)
+			v.borderFGDyn = val
 		case conditionNode:
 			v.borderFGDyn = val
 		case valueBranchNode:
 			v.borderFGDyn = val
 		case tweenNode:
 			v.borderFGDyn = val
-	case OscC:
+		case OscC:
 			v.borderFGDyn = val
 		}
 		return v
@@ -626,14 +629,17 @@ func (f HBoxFn) BorderFG(c any) HBoxFn {
 		case Color:
 			h.borderFG = &val
 		case *Color:
-			h.borderFG = val
+			// route through the dyn path so a pointer into a ForEach element
+			// rebases per item (a raw pointer reads the compile-time placeholder,
+			// which resolves to ColorDefault and silently drops the border)
+			h.borderFGDyn = val
 		case conditionNode:
 			h.borderFGDyn = val
 		case valueBranchNode:
 			h.borderFGDyn = val
 		case tweenNode:
 			h.borderFGDyn = val
-	case OscC:
+		case OscC:
 			h.borderFGDyn = val
 		}
 		return h
