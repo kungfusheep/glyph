@@ -92,10 +92,17 @@ func TestDimDerivedDropsBoldAddsDim(t *testing.T) {
 // must produce a dim whose FG actually differs from the base, so the feedback
 // is perceptible — not a same-colour bold->faint flip.
 func TestDimDerivedVisibleOnStyledLabel(t *testing.T) {
-	base := Style{FG: White, BG: Blue, Attr: AttrBold}
+	// recap's diff labels: near-black FG on a muted-blue chip, bold.
+	base := Style{FG: Hex(0x1c1c1c), BG: Hex(0x6f8fa8), Attr: AttrBold}
 	got := dimDerived(base)
 	if got.FG == base.FG {
 		t.Fatal("dimDerived left FG unchanged on a styled label — feedback would be invisible")
+	}
+	// the categorical recede: the chip (BG band) is dropped, so a receded label
+	// is plain text, not a coloured chip — unmistakable on any theme. A bare FG
+	// nudge on the kept chip (near-black -> grey on the same blue) was too subtle.
+	if got.BG != (Color{}) {
+		t.Fatalf("dimDerived kept the BG chip (%+v) — recede too subtle on a styled label", got.BG)
 	}
 }
 

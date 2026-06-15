@@ -14,12 +14,16 @@ type JumpStyle struct {
 
 // dimDerived returns a dimmed variant of a style for the default-on matched
 // feedback: the typed prefix (and dead labels) recede so the next key to press
-// stays prominent. The recede is a real COLOUR change (FG to BrightBlack,
-// glyph's established Muted colour) and not merely the faint attribute — SGR 2
-// is weak and terminal-dependent, and on a label that already carries an
-// explicit FG/BG (the styled diff/calendar pick labels this feeds) a bold->faint
-// flip with unchanged colours is invisible. Greying the FG reads on any theme.
+// stays prominent. The recede is CATEGORICAL — it drops the background band
+// (the "chip"), greys the FG, and drops bold — not a mere attribute or FG nudge.
+// Two earlier tries failed on real consumers: a bold->faint flip is invisible
+// (SGR 2 is weak/terminal-dependent), and nudging only the FG is too subtle on a
+// label that keeps a coloured chip (recap's diff labels are near-black on a
+// muted-blue band, so FG near-black->grey on the SAME band barely reads).
+// Removing the band is unmistakable on any theme: an active label is a coloured
+// chip, a receded one is plain grey text.
 func dimDerived(s Style) Style {
+	s.BG = Color{} // drop the chip — the strongest theme-agnostic recede
 	s.FG = BrightBlack
 	s.Attr = (s.Attr &^ AttrBold) | AttrDim
 	return s
