@@ -1508,35 +1508,41 @@ func (a *App) EnterJumpMode() {
 		return
 	}
 
-	// Create temporary router for jump input
+	// Create temporary router for jump input. Labels are NOT registered as
+	// riffkey Handle sequences: a multi-char label ("as") would make riffkey
+	// buffer the first key as a pending sequence prefix, so HandleUnmatched
+	// (where the typed input is accumulated) would never fire mid-sequence and
+	// the incremental feedback could never engage. Instead every key flows
+	// through HandleUnmatched and we match against the labels ourselves, so
+	// jumpMode.Input is the single source of truth for both selection and the
+	// typed-prefix feedback.
 	jumpRouter := riffkey.NewRouter().NoCounts()
 
-	// Build label lookup
-	for _, target := range a.jumpMode.Targets {
-		jumpRouter.Handle(target.Label, func(_ riffkey.Match) {
-			a.ExitJumpMode()
-			if target.OnSelect != nil {
-				target.OnSelect()
-			}
-		})
-	}
-
-	// Escape cancels
 	jumpRouter.Handle("<Esc>", func(_ riffkey.Match) {
 		a.ExitJumpMode()
 	})
 
-	// Any unmatched key cancels (unless it's a partial match for multi-char labels)
 	jumpRouter.HandleUnmatched(func(k riffkey.Key) bool {
-		// For multi-char labels, accumulate input
-		if k.Rune != 0 && k.Mod == riffkey.ModNone {
-			a.jumpMode.Input += string(k.Rune)
-			// Check if any label starts with this prefix
-			if a.jumpMode.HasPartialMatch(a.jumpMode.Input) {
-				return true // Keep waiting for more input
-			}
+		if k.Rune == 0 || k.Mod != riffkey.ModNone {
+			a.ExitJumpMode()
+			return true
 		}
-		// No match, cancel
+		a.jumpMode.Input += string(k.Rune)
+		// exact label → select
+		if tgt := a.jumpMode.FindTarget(a.jumpMode.Input); tgt != nil {
+			onSelect := tgt.OnSelect
+			a.ExitJumpMode()
+			if onSelect != nil {
+				onSelect()
+			}
+			return true
+		}
+		// partial label → keep waiting; the typed prefix now recedes
+		if a.jumpMode.HasPartialMatch(a.jumpMode.Input) {
+			a.RequestRender()
+			return true
+		}
+		// no match → cancel
 		a.ExitJumpMode()
 		return true
 	})
