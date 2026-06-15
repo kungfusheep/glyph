@@ -80,6 +80,23 @@ func TestDimDerivedDropsBoldAddsDim(t *testing.T) {
 	if got.Attr&AttrDim == 0 {
 		t.Fatal("dimDerived did not add dim")
 	}
+	// the recede must be a real colour change, not attr-only — otherwise it is
+	// invisible on labels that carry an explicit FG (the diff/calendar case).
+	if got.FG != BrightBlack {
+		t.Fatalf("dimDerived FG = %+v, want BrightBlack (a visible recede, not faint-only)", got.FG)
+	}
+}
+
+// TestDimDerivedVisibleOnStyledLabel guards todo:65906d9f's sibling review
+// (c581): a styled pick label (FG/BG/bold, as recap's diff view registers)
+// must produce a dim whose FG actually differs from the base, so the feedback
+// is perceptible — not a same-colour bold->faint flip.
+func TestDimDerivedVisibleOnStyledLabel(t *testing.T) {
+	base := Style{FG: White, BG: Blue, Attr: AttrBold}
+	got := dimDerived(base)
+	if got.FG == base.FG {
+		t.Fatal("dimDerived left FG unchanged on a styled label — feedback would be invisible")
+	}
 }
 
 // TestJumpFeedbackEndToEndMultiChar drives the REAL path Pete exercises: many
