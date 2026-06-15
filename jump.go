@@ -4,26 +4,20 @@ package glyph
 type JumpStyle struct {
 	LabelStyle Style // Style for the not-yet-typed remainder of a label
 
-	// MatchedStyle paints the already-typed prefix of a multi-char label
-	// (and, when a label no longer matches the typed input, the whole label),
-	// so progress is visible mid-sequence. A zero MatchedStyle derives a dim
-	// from LabelStyle — feedback is on by default (ADR 11). At rest (nothing
-	// typed) no prefix exists, so the render is identical to LabelStyle alone.
+	// MatchedStyle paints the already-typed prefix of a multi-char label, and
+	// the whole label once it no longer matches the input, so progress is
+	// visible mid-sequence. A zero MatchedStyle derives one from LabelStyle. At
+	// rest the render is identical to LabelStyle alone.
 	MatchedStyle Style
 }
 
-// dimDerived returns a dimmed variant of a style for the default-on matched
-// feedback: the typed prefix (and dead labels) recede so the next key to press
-// stays prominent. The recede is CATEGORICAL — it drops the background band
-// (the "chip"), greys the FG, and drops bold — not a mere attribute or FG nudge.
-// Two earlier tries failed on real consumers: a bold->faint flip is invisible
-// (SGR 2 is weak/terminal-dependent), and nudging only the FG is too subtle on a
-// label that keeps a coloured chip (recap's diff labels are near-black on a
-// muted-blue band, so FG near-black->grey on the SAME band barely reads).
-// Removing the band is unmistakable on any theme: an active label is a coloured
-// chip, a receded one is plain grey text.
+// dimDerived returns a receded variant of a style for the matched/dead label
+// feedback. It drops the background band, greys the foreground and drops bold,
+// so a receded label is plain text rather than a coloured label — a categorical
+// change that reads on any theme, where a faint attribute or a foreground tweak
+// alone can be swamped by an explicit label colour.
 func dimDerived(s Style) Style {
-	s.BG = Color{} // drop the chip — the strongest theme-agnostic recede
+	s.BG = Color{}
 	s.FG = BrightBlack
 	s.Attr = (s.Attr &^ AttrBold) | AttrDim
 	return s

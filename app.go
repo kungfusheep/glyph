@@ -67,7 +67,7 @@ type App struct {
 	doneGen atomic.Uint64
 
 	// Apply queue: closures pushed by goroutines, drained at frame top under
-	// the render lock before any reads (ADR 2). Double-buffered for zero
+	// the render lock before any reads. Double-buffered for zero
 	// steady-state allocation.
 	applyMu      sync.Mutex
 	applied      []func()
@@ -850,7 +850,7 @@ func (a *App) Template() *Template {
 // Safe to call from any goroutine.
 // Apply enqueues fn to run on the render thread at the top of the next
 // frame, under the render lock, before any reads — the safe place to push a
-// goroutine's result into bound state (ADR 2):
+// goroutine's result into bound state:
 //
 //	go func() {
 //	    result := fetch()
@@ -940,7 +940,7 @@ func (a *App) render() {
 	defer a.doneGen.Store(coveredGen)
 
 	// apply queued state pushes first — frame top, under the lock, before
-	// any reads (ADR 2)
+	// any reads
 	a.drainApplies()
 
 	var t0, t1 time.Time
@@ -1429,10 +1429,9 @@ func (a *App) paintJumpLabels(buf *Buffer, height int) {
 		return
 	}
 	// incremental feedback: the typed prefix recedes (matchedStyle) so the next
-	// key stands out, and labels whose prefix no longer matches the input dim
-	// whole (ADR 11). input is byte length — labels are ASCII home-row, so byte
-	// index == rune index here; slice on rune boundaries if labels ever leave
-	// ASCII.
+	// key stands out, and labels whose prefix no longer matches the input recede
+	// whole. input is byte length — labels are ASCII home-row, so byte index ==
+	// rune index here; slice on rune boundaries if labels ever leave ASCII.
 	input := a.jumpMode.Input
 	n := len(input)
 	for _, target := range a.jumpMode.Targets {

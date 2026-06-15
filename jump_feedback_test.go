@@ -2,8 +2,8 @@ package glyph
 
 import "testing"
 
-// ADR 11: incremental multi-char jump-label feedback. Drive paintJumpLabels
-// directly with a constructed jump mode and inspect the painted cells.
+// incremental multi-char jump-label feedback: drive paintJumpLabels directly
+// with a constructed jump mode and inspect the painted cells.
 
 func paintJump(targets []JumpTarget, input string, style JumpStyle) *Buffer {
 	app := &App{jumpMode: &JumpMode{Active: true, Targets: targets, Input: input}, jumpStyle: style}
@@ -87,12 +87,11 @@ func TestDimDerivedDropsBoldAddsDim(t *testing.T) {
 	}
 }
 
-// TestDimDerivedVisibleOnStyledLabel guards todo:65906d9f's sibling review
-// (c581): a styled pick label (FG/BG/bold, as recap's diff view registers)
-// must produce a dim whose FG actually differs from the base, so the feedback
-// is perceptible — not a same-colour bold->faint flip.
+// TestDimDerivedVisibleOnStyledLabel: a styled label (coloured FG on a coloured
+// background band, bold) must produce a recede that is perceptible — not a
+// same-colour bold->faint flip nor a foreground nudge the band can swamp.
 func TestDimDerivedVisibleOnStyledLabel(t *testing.T) {
-	// recap's diff labels: near-black FG on a muted-blue chip, bold.
+	// near-black foreground on a muted-blue band, bold.
 	base := Style{FG: Hex(0x1c1c1c), BG: Hex(0x6f8fa8), Attr: AttrBold}
 	got := dimDerived(base)
 	if got.FG == base.FG {
@@ -106,12 +105,12 @@ func TestDimDerivedVisibleOnStyledLabel(t *testing.T) {
 	}
 }
 
-// TestJumpFeedbackEndToEndMultiChar drives the REAL path Pete exercises: many
-// targets (>27) so GenerateLabels produces TWO-char labels, collected through
-// Execute's AddJumpTarget and AssignLabels — then a partial first char typed.
-// The matching labels' typed prefix must dim and the remainder keep LabelStyle;
-// non-matching labels dim whole. Guards against the isolated-paint test passing
-// while the live collection/assignment path silently shows nothing.
+// TestJumpFeedbackEndToEndMultiChar drives the full path: many targets (>27) so
+// GenerateLabels produces two-char labels, collected through Execute's
+// AddJumpTarget and AssignLabels, then a partial first char typed. The matching
+// labels' typed prefix must recede and the remainder keep LabelStyle;
+// non-matching labels recede whole. Guards against the isolated-paint test
+// passing while the live collection/assignment path shows nothing.
 func TestJumpFeedbackEndToEndMultiChar(t *testing.T) {
 	items := make([]string, 30) // >27 forces two-char labels
 	for i := range items {

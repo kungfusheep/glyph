@@ -632,12 +632,11 @@ func TestSelectionListClampsSelectionAfterShrink(t *testing.T) {
 	}
 }
 
-// TestSelectionListUnboundedUpScrollHoldsViewport guards todo:65906d9f: an
-// unbounded List (MaxVisible==0) whose height is bounded by the clipped
-// viewport must hold the viewport while the cursor moves UP through the visible
-// window, scrolling only once the cursor pushes past the top edge — the same
-// sticky behaviour the bottom edge already had. The bug pinned the selection to
-// the bottom every frame, so moving up scrolled the viewport one row per move.
+// TestSelectionListUnboundedUpScrollHoldsViewport: an unbounded List
+// (MaxVisible==0) whose height is bounded by the clipped viewport must hold the
+// viewport while the cursor moves UP through the visible window, scrolling only
+// once the cursor pushes past the top edge — the same sticky behaviour the
+// bottom edge already has.
 func TestSelectionListUnboundedUpScrollHoldsViewport(t *testing.T) {
 	items := make([]string, 25)
 	for i := range items {

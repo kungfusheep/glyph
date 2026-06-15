@@ -1683,7 +1683,7 @@ func (t *Template) compileTweenFloat32(tw tweenNode, elemBase unsafe.Pointer, el
 
 // compileOscFloat64 registers a frame evaluator deriving the oscillator's
 // value from the shared frame clock. Resolving marks the template animating,
-// so the gated ticker runs exactly while an oscillator is reachable (ADR 1).
+// so the gated ticker runs exactly while an oscillator is reachable.
 func (t *Template) compileOscInt16(o OscC) *int16 {
 	root := t.evalRoot()
 	storage := new(int16)
@@ -3030,7 +3030,7 @@ type opCounter struct {
 type opSpinner struct {
 	framePtr sliceBinding // manual *int frame index, offset-resolved per element
 	frames   []string
-	selfFps  float64 // >0: self-animating from the frame clock (ADR 1)
+	selfFps  float64 // >0: self-animating from the frame clock
 	style    Style
 	stylePtr *Style
 }
@@ -7010,10 +7010,9 @@ func (t *Template) distributeFlexInCol(idx int16, op *Op, rootH int16) {
 		}
 
 		// Recalculate child positions with new heights. Must mirror layoutContainer's
-		// content offset exactly — margin + border + PADDING. Padding was missing here,
-		// so any column whose flex redistribution ran lost its top padding and children
-		// rode up over it (recap's "unfilled column's top padding collapses" workaround
-		// was this bug).
+		// content offset exactly — margin + border + PADDING. Without padding here,
+		// any column whose flex redistribution ran loses its top padding and children
+		// ride up over it.
 		contentOffY := int16(op.Margin[0]) + op.Border.PadTop() + int16(op.Padding[0])
 		cursor := int16(0)
 		firstChild := true

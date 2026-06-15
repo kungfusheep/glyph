@@ -91,7 +91,7 @@ func (b *Buffer) Set(x, y int, c Cell) {
 	existing := b.cells[idx]
 
 	// PreserveBG: keep the destination cell's background, then strip the
-	// write-mode bit so it never persists or emits (ADR 4)
+	// write-mode bit so it never persists or emits
 	if c.Style.Attr.Has(AttrPreserveBG) {
 		c.Style.BG = existing.Style.BG
 		c.Style.Attr = c.Style.Attr.Without(AttrPreserveBG)
@@ -159,7 +159,7 @@ type RowWriter struct {
 	cells      []Cell // slice into the row (len == buffer width)
 	width      int
 	style      Style // already merged with buffer's default style
-	preserveBG bool  // keep each destination cell's BG (ADR 4)
+	preserveBG bool  // keep each destination cell's BG
 }
 
 // Row returns a writer for row y with the style precomputed and the row marked dirty.

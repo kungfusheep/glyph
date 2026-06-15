@@ -1014,7 +1014,7 @@ func (t TextC) Strikethrough() TextC {
 // PreserveBG keeps the destination cell's background for this text's writes,
 // stamping only the rune and foreground over whatever sits beneath — a
 // decoration that carries no background of its own (underlines spanning
-// panes, badges over striped lists, glyphs over banners). ADR 4.
+// panes, badges over striped lists, glyphs over banners).
 func (t TextC) PreserveBG() TextC {
 	t.style.Attr |= AttrPreserveBG
 	return t
@@ -1553,7 +1553,7 @@ type SpinnerC struct {
 // Spinner renders an animated activity indicator. With no argument it
 // self-animates from the frame clock at ~12fps and marks the template
 // animating while rendered: an If-gated spinner runs exactly while visible,
-// with no app-side ticker or counter (ADR 1). Pass a *int to drive the
+// with no app-side ticker or counter. Pass a *int to drive the
 // frame index manually instead.
 func Spinner(frame ...*int) SpinnerC {
 	s := SpinnerC{frames: SpinnerBraille}
