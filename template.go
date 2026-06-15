@@ -8686,24 +8686,34 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		}
 	}
 
+	availableRows := 0 // viewport rows for the list; 0 means unclipped
 	if t.clipMaxY > 0 {
-		availableRows := int(t.clipMaxY - absY)
+		availableRows = int(t.clipMaxY - absY)
 		if availableRows <= 0 {
 			return
 		}
 
-		// trim endIdx so total height of visible items fits in available rows
+		// window the rows that FULLY fit, then include one extra partial row at
+		// the edge — clipped to the viewport bottom at draw time — so a row that
+		// only partly fits peeks in (the "more below" affordance) instead of
+		// vanishing. fullEnd is the fully-fitting boundary, used for the
+		// scroll-into-view decision so a SELECTED edge row still scrolls fully in.
 		rowsUsed := 0
-		trimEnd := endIdx
+		fullEnd := endIdx
+		partial := false
 		for ci := startIdx; ci < endIdx; ci++ {
 			ih := int(ext.geoms[ci].H)
 			if rowsUsed+ih > availableRows {
-				trimEnd = ci
+				fullEnd = ci
+				partial = true
 				break
 			}
 			rowsUsed += ih
 		}
-		endIdx = trimEnd
+		endIdx = fullEnd
+		if partial && fullEnd < visibleLen {
+			endIdx = fullEnd + 1 // render the edge row partially
+		}
 
 		// ensure selected item is visible (scroll adjustment)
 		if ext.listPtr != nil && selectedIdx >= 0 {
@@ -8721,7 +8731,7 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 					rowsUsed += ih
 				}
 				ext.listPtr.offset = startIdx
-			} else if selectedIdx >= endIdx {
+			} else if selectedIdx >= fullEnd {
 				// scroll down: place selected item at the bottom of the window
 				endIdx = selectedIdx + 1
 				rowsUsed = 0
@@ -8760,6 +8770,11 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		if ext.listPtr.scrollOffsetPtr != nil {
 			*ext.listPtr.scrollOffsetPtr = offRows
 		}
+		// the edge row is clipped to the viewport, so the visible rows never
+		// exceed the available height — clamp so a ScrollbarDyn reads right.
+		if availableRows > 0 && visRows > availableRows {
+			visRows = availableRows
+		}
 		if ext.listPtr.scrollVisiblePtr != nil {
 			*ext.listPtr.scrollVisiblePtr = visRows
 		}
@@ -8790,7 +8805,13 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		markerBaseStyle = ext.listPtr.MarkerStyle
 	}
 
-	// Render visible items using per-item heights from layout phase
+	// Render visible items using per-item heights from layout phase. Clip the
+	// draw to the viewport bottom so the edge row (which may overflow by design)
+	// is shown partially rather than overdrawing whatever sits below the list.
+	if t.clipMaxY > 0 {
+		buf.PushClip(0, int(absY), buf.Width(), int(t.clipMaxY))
+		defer buf.PopClip()
+	}
 	y := int(absY)
 	for i := startIdx; i < endIdx; i++ {
 		itemH := int(ext.geoms[i].H)

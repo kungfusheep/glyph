@@ -494,3 +494,44 @@ func BenchmarkWrapWriteChar(b *testing.B) {
 		}
 	}
 }
+
+// clip benchmarks: prove the clip check is free on the common (no-clip) path
+// and quantify the cost when a clip is active.
+
+func BenchmarkSetClipInactive(b *testing.B) {
+	buf := NewBuffer(benchLargeW, benchLargeH)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Set(i%benchLargeW, (i/benchLargeW)%benchLargeH, benchCell)
+	}
+}
+
+func BenchmarkSetClipActive(b *testing.B) {
+	buf := NewBuffer(benchLargeW, benchLargeH)
+	buf.PushClip(1, 1, benchLargeW-1, benchLargeH-1)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Set(i%benchLargeW, (i/benchLargeW)%benchLargeH, benchCell)
+	}
+}
+
+func BenchmarkWriteStringFastClipInactive(b *testing.B) {
+	buf := NewBuffer(benchLargeW, benchLargeH)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.WriteStringFast(0, i%benchLargeH, "the quick brown fox jumps", benchStyle, benchLargeW)
+	}
+}
+
+func BenchmarkWriteStringFastClipActive(b *testing.B) {
+	buf := NewBuffer(benchLargeW, benchLargeH)
+	buf.PushClip(2, 0, benchLargeW-2, benchLargeH)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.WriteStringFast(0, i%benchLargeH, "the quick brown fox jumps", benchStyle, benchLargeW)
+	}
+}

@@ -320,3 +320,48 @@ func BenchmarkBufferWriteString(b *testing.B) {
 		buf.WriteString(0, i%50, text, style)
 	}
 }
+
+// TestBufferClip: PushClip drops writes outside the rect, PopClip restores, and
+// nested clips compose by intersection.
+func TestBufferClip(t *testing.T) {
+	b := NewBuffer(10, 10)
+	cell := NewCell('X', DefaultStyle())
+
+	b.PushClip(2, 2, 8, 8) // half-open [2,8)x[2,8)
+	b.Set(0, 0, cell)      // outside — dropped
+	b.Set(2, 2, cell)      // inside — kept
+	b.Set(7, 7, cell)      // inside (last) — kept
+	b.Set(8, 8, cell)      // outside (half-open) — dropped
+	if b.Get(0, 0).Rune == 'X' {
+		t.Error("write outside clip was not dropped")
+	}
+	if b.Get(2, 2).Rune != 'X' || b.Get(7, 7).Rune != 'X' {
+		t.Error("write inside clip was dropped")
+	}
+	if b.Get(8, 8).Rune == 'X' {
+		t.Error("half-open upper bound not respected (8 should be excluded)")
+	}
+
+	// nested clip intersects: [2,8) ∩ [0,4) = [2,4)
+	b.PushClip(0, 0, 4, 4)
+	b.Set(3, 3, cell) // inside intersection
+	b.Set(5, 5, cell) // outside the narrower clip
+	if b.Get(3, 3).Rune != 'X' {
+		t.Error("write inside nested intersection was dropped")
+	}
+	if b.Get(5, 5).Rune == 'X' {
+		t.Error("nested clip did not intersect (5,5 should be excluded)")
+	}
+
+	b.PopClip() // back to [2,8)
+	b.Set(5, 5, cell)
+	if b.Get(5, 5).Rune != 'X' {
+		t.Error("PopClip did not restore the outer clip")
+	}
+
+	b.PopClip() // no clip
+	b.Set(0, 0, cell)
+	if b.Get(0, 0).Rune != 'X' {
+		t.Error("write after all clips popped was dropped")
+	}
+}

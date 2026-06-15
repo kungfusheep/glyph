@@ -19,6 +19,55 @@ type Buffer struct {
 
 	// Default style for cleared cells (set via SetDefaultStyle)
 	defaultStyle Style
+
+	// Clip rectangle: when hasClip is set, writes outside [clipMinX,clipMaxX) x
+	// [clipMinY,clipMaxY) are dropped. PushClip/PopClip nest by intersection.
+	// The hot write paths short-circuit on hasClip, so an unclipped buffer pays
+	// only a single bool test.
+	hasClip                              bool
+	clipMinX, clipMinY, clipMaxX, clipMaxY int
+	clipStack                            []clipRect
+}
+
+type clipRect struct {
+	has                    bool
+	minX, minY, maxX, maxY int
+}
+
+// PushClip restricts subsequent writes to the half-open rectangle
+// [x0,x1) x [y0,y1), intersected with any clip already in effect, until the
+// matching PopClip. Nesting composes by intersection.
+func (b *Buffer) PushClip(x0, y0, x1, y1 int) {
+	b.clipStack = append(b.clipStack, clipRect{b.hasClip, b.clipMinX, b.clipMinY, b.clipMaxX, b.clipMaxY})
+	if b.hasClip {
+		x0 = max(x0, b.clipMinX)
+		y0 = max(y0, b.clipMinY)
+		x1 = min(x1, b.clipMaxX)
+		y1 = min(y1, b.clipMaxY)
+	}
+	b.hasClip, b.clipMinX, b.clipMinY, b.clipMaxX, b.clipMaxY = true, x0, y0, x1, y1
+}
+
+// PopClip restores the clip in effect before the matching PushClip.
+func (b *Buffer) PopClip() {
+	if len(b.clipStack) == 0 {
+		b.hasClip = false
+		return
+	}
+	last := b.clipStack[len(b.clipStack)-1]
+	b.clipStack = b.clipStack[:len(b.clipStack)-1]
+	b.hasClip, b.clipMinX, b.clipMinY, b.clipMaxX, b.clipMaxY = last.has, last.minX, last.minY, last.maxX, last.maxY
+}
+
+// rowClipped reports whether row y is wholly outside the active clip (used by
+// the single-row write primitives to reject before touching the row).
+func (b *Buffer) rowClipped(y int) bool {
+	return b.hasClip && (y < b.clipMinY || y >= b.clipMaxY)
+}
+
+// cellClipped reports whether cell (x,y) is outside the active clip.
+func (b *Buffer) cellClipped(x, y int) bool {
+	return b.hasClip && (x < b.clipMinX || x >= b.clipMaxX || y < b.clipMinY || y >= b.clipMaxY)
 }
 
 // emptyBufferCache is a pre-filled buffer of empty cells for fast clearing via copy()
@@ -83,7 +132,7 @@ func (b *Buffer) Get(x, y int) Cell {
 // Does nothing if out of bounds.
 // When drawing border characters, automatically merges with existing borders.
 func (b *Buffer) Set(x, y int, c Cell) {
-	if !b.InBounds(x, y) {
+	if !b.InBounds(x, y) || b.cellClipped(x, y) {
 		return
 	}
 	c.Style = b.applyDefault(c.Style)
@@ -114,7 +163,7 @@ func (b *Buffer) Set(x, y int, c Cell) {
 // SetFast sets a cell without border merging. Use for text/progress where
 // you know the content isn't a border character.
 func (b *Buffer) SetFast(x, y int, c Cell) {
-	if y < 0 || y >= b.height || x < 0 || x >= b.width {
+	if y < 0 || y >= b.height || x < 0 || x >= b.width || b.cellClipped(x, y) {
 		return
 	}
 	c.Style = b.applyDefault(c.Style)
@@ -134,7 +183,7 @@ func (b *Buffer) SetFast(x, y int, c Cell) {
 // opacity rules. Default BG on c is treated as transparent and preserves the
 // existing cell BG; set an explicit BG when the source should fade a fill.
 func (b *Buffer) SetOpacity(x, y int, c Cell, opacity float64, mode OpacityMode) {
-	if y < 0 || y >= b.height || x < 0 || x >= b.width {
+	if y < 0 || y >= b.height || x < 0 || x >= b.width || b.cellClipped(x, y) {
 		return
 	}
 	idx := y*b.width + x
@@ -160,12 +209,13 @@ type RowWriter struct {
 	width      int
 	style      Style // already merged with buffer's default style
 	preserveBG bool  // keep each destination cell's BG
+	loX, hiX   int   // writable column range [loX,hiX) — the active clip, or [0,width)
 }
 
 // Row returns a writer for row y with the style precomputed and the row marked dirty.
 // If y is out of bounds, Put calls on the returned writer are no-ops.
 func (b *Buffer) Row(y int, style Style) RowWriter {
-	if y < 0 || y >= b.height {
+	if y < 0 || y >= b.height || b.rowClipped(y) {
 		return RowWriter{}
 	}
 	if y > b.dirtyMaxY {
@@ -178,17 +228,24 @@ func (b *Buffer) Row(y int, style Style) RowWriter {
 	if preserveBG {
 		merged.Attr = merged.Attr.Without(AttrPreserveBG)
 	}
+	loX, hiX := 0, b.width
+	if b.hasClip {
+		loX = max(loX, b.clipMinX)
+		hiX = min(hiX, b.clipMaxX)
+	}
 	return RowWriter{
 		cells:      b.cells[base : base+b.width],
 		width:      b.width,
 		style:      merged,
 		preserveBG: preserveBG,
+		loX:        loX,
+		hiX:        hiX,
 	}
 }
 
 // Put writes a rune at column x. Out-of-bounds columns are silently dropped.
 func (rw *RowWriter) Put(x int, r rune) {
-	if x < 0 || x >= rw.width {
+	if x < rw.loX || x >= rw.hiX {
 		return
 	}
 	cs := rw.style
@@ -275,7 +332,7 @@ func (b *Buffer) WriteProgressBar(x, y, width int, ratio float32, style Style) {
 // Handles double-width runes (emoji, CJK) by placing a Rune=0 placeholder
 // in the trailing cell so the screen layer skips it when diffing.
 func (b *Buffer) WriteStringFast(x, y int, s string, style Style, maxWidth int) {
-	if y < 0 || y >= b.height {
+	if y < 0 || y >= b.height || b.rowClipped(y) {
 		return
 	}
 	if y > b.dirtyMaxY {
@@ -296,7 +353,7 @@ func (b *Buffer) WriteStringFast(x, y int, s string, style Style, maxWidth int) 
 		if written+rw > maxWidth || x+rw > b.width {
 			break
 		}
-		if x >= 0 {
+		if x >= 0 && (!b.hasClip || (x >= b.clipMinX && x < b.clipMaxX)) {
 			cs := style
 			if preserveBG {
 				cs.BG = b.cells[base+x].Style.BG
@@ -329,7 +386,7 @@ func (b *Buffer) applyDefault(s Style) Style {
 // Each span has its own style. Spans are written left to right.
 // Handles double-width CJK characters correctly.
 func (b *Buffer) WriteSpans(x, y int, spans []Span, maxWidth int) {
-	if y < 0 || y >= b.height {
+	if y < 0 || y >= b.height || b.rowClipped(y) {
 		return
 	}
 	if y > b.dirtyMaxY {
@@ -350,7 +407,7 @@ func (b *Buffer) WriteSpans(x, y int, spans []Span, maxWidth int) {
 			if written+rw > maxWidth || x+rw > b.width {
 				return
 			}
-			if x >= 0 {
+			if x >= 0 && (!b.hasClip || (x >= b.clipMinX && x < b.clipMaxX)) {
 				cs := ss
 				if preserveBG {
 					cs.BG = b.cells[base+x].Style.BG
@@ -756,7 +813,7 @@ func (b *Buffer) FillRect(x, y, width, height int, c Cell) {
 	if c.Rune < boxDrawingMin || c.Rune > boxDrawingMax {
 		for dy := 0; dy < height; dy++ {
 			row := y + dy
-			if row < 0 || row >= b.height {
+			if row < 0 || row >= b.height || b.rowClipped(row) {
 				continue
 			}
 			if row > b.dirtyMaxY {
@@ -766,7 +823,7 @@ func (b *Buffer) FillRect(x, y, width, height int, c Cell) {
 			base := row * b.width
 			for dx := 0; dx < width; dx++ {
 				col := x + dx
-				if col >= 0 && col < b.width {
+				if col >= 0 && col < b.width && (!b.hasClip || (col >= b.clipMinX && col < b.clipMaxX)) {
 					b.cells[base+col] = c
 				}
 			}

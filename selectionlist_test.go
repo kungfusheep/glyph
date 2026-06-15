@@ -705,3 +705,74 @@ func TestSelectionListUnboundedUpScrollHoldsViewport(t *testing.T) {
 		t.Errorf("returning to the bottom should restore the window top to Item 18, got %q", got)
 	}
 }
+
+// TestSelectionListPartialEdgeRowShows: a variable-height row that only partly
+// fits the clipped viewport is rendered PARTIALLY (its top peeks in) rather than
+// dropped whole — the "more below" affordance.
+func TestSelectionListPartialEdgeRowShows(t *testing.T) {
+	type item struct{ Title, Desc string }
+	items := make([]item, 8)
+	for i := range items {
+		items[i] = item{fmt.Sprintf("Title %02d", i+1), fmt.Sprintf("desc %02d", i+1)}
+	}
+	selected := 0
+	list := &selectionList{
+		Items:    &items,
+		Selected: &selected,
+		Marker:   "> ",
+		Render:   func(it *item) Component { return VBox(Text(&it.Title), Text(&it.Desc)) },
+	}
+	// list area is an odd number of rows so the last item straddles the bottom.
+	view := VBox.Border(BorderSingle).Title("t")(
+		Text("header"), HRule(), VBox.Grow(1)(list), HRule(), Text("FOOTER"),
+	)
+	screenH := 11
+	buf := NewBuffer(40, screenH)
+	Build(view).Execute(buf, 40, int16(screenH))
+
+	// the straddling row's title must peek in (row 7), and the footer below the
+	// list must be intact (the overflow did not bleed past the clip).
+	if !contains(buf.GetLine(7), "Title 03") {
+		t.Errorf("partial edge row not shown: row 7 = %q", buf.GetLine(7))
+	}
+	footerOK := false
+	for y := 0; y < screenH; y++ {
+		if contains(buf.GetLine(y), "FOOTER") {
+			footerOK = true
+		}
+	}
+	if !footerOK {
+		t.Error("footer overdrawn by the partial row's overflow")
+	}
+}
+
+// TestSelectionListPartialEdgeNoBleed: with nothing rendered below the list, the
+// partial edge row's overflow must NOT write past the viewport bottom (the
+// decisive case — no sibling repaints the bled rows to mask it).
+func TestSelectionListPartialEdgeNoBleed(t *testing.T) {
+	type item struct{ Title, Desc string }
+	items := make([]item, 8)
+	for i := range items {
+		items[i] = item{fmt.Sprintf("Title %02d", i+1), fmt.Sprintf("desc %02d", i+1)}
+	}
+	selected := 0
+	list := &selectionList{
+		Items:    &items,
+		Selected: &selected,
+		Style:    Style{BG: Blue},
+		Render:   func(it *item) Component { return VBox(Text(&it.Title), Text(&it.Desc)) },
+	}
+	view := VBox(VBox.Height(3)(list)) // list bounded to 3 rows; rows 3+ are free
+	buf := NewBuffer(30, 10)
+	Build(view).Execute(buf, 30, 10)
+
+	for y := 3; y < 6; y++ {
+		for x := 0; x < 28; x++ {
+			c := buf.Get(x, y)
+			if c.Style.BG == Blue || c.Rune == 'd' { // 'd' from "desc NN" overflow
+				t.Errorf("partial row bled past clipMaxY=3 at (%d,%d): rune=%q bg=%v", x, y, c.Rune, c.Style.BG)
+				return
+			}
+		}
+	}
+}
