@@ -892,6 +892,52 @@ func TestBareForEachAsConditionBranch(t *testing.T) {
 	}
 }
 
+func TestForEachInIfInsideListRow(t *testing.T) {
+	// recap #370 exact shape: per-row fold inside a List, two sibling Ifs each
+	// wrapping a ForEach over a per-row sub-slice. List has its own iter path,
+	// so this guards that the root-level ForEach branch layout reaches it too.
+	type Row struct{ Spans []Span }
+	type RowVM struct {
+		Open        bool
+		Closed      bool
+		BodyRows    []Row
+		PreviewRows []Row
+	}
+	mk := func(s string) []Span { return []Span{{Text: s}} }
+	vms := []RowVM{
+		{Open: true, Closed: false,
+			BodyRows:    []Row{{mk("bodyA")}, {mk("bodyB")}},
+			PreviewRows: []Row{{mk("prevA")}}},
+		{Open: false, Closed: true,
+			BodyRows:    []Row{{mk("bodyX")}},
+			PreviewRows: []Row{{mk("prevX")}}},
+	}
+	view := VBox(
+		List(&vms).Render(func(c *RowVM) Component {
+			return VBox(
+				If(&c.Open).Then(ForEach(&c.BodyRows, func(r *Row) Component { return Rich(&r.Spans).CharWrap() })),
+				If(&c.Closed).Then(ForEach(&c.PreviewRows, func(r *Row) Component { return Rich(&r.Spans).CharWrap() })),
+			)
+		}),
+	)
+	tmpl := Build(view)
+	buf := NewBuffer(20, 10)
+	tmpl.Execute(buf, 20, 10)
+
+	// open row -> its BodyRows; closed row -> its PreviewRows. each rebases.
+	// row 0 carries the List selection marker "> ".
+	checks := []struct {
+		row  int
+		want string
+	}{{0, "bodyA"}, {1, "bodyB"}, {2, "prevX"}}
+	for _, c := range checks {
+		got := strings.TrimRight(extractLine(buf, c.row, 12), " \x00")
+		if !strings.Contains(got, c.want) {
+			t.Errorf("row %d: expected to contain %q, got %q", c.row, c.want, got)
+		}
+	}
+}
+
 func TestHBoxLayout(t *testing.T) {
 	t.Run("HBox places children horizontally", func(t *testing.T) {
 		view := HBox(
