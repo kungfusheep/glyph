@@ -115,6 +115,16 @@ func (s *Screen) Buffer() *Buffer {
 	return s.back
 }
 
+// FrontBuffer returns the front buffer — the model of what is currently on the
+// terminal (only the cells Flush has actually emitted). Exposed for tests and
+// diagnostics: after a Flush, comparing it against Buffer() (the back buffer)
+// reveals any STRANDED change — a cell whose content changed but whose row was
+// not marked dirty, so Flush's fast path skipped it and the terminal kept stale
+// content. Read-only; do not mutate.
+func (s *Screen) FrontBuffer() *Buffer {
+	return s.front
+}
+
 // ResizeChan returns a channel that receives size updates on terminal resize.
 func (s *Screen) ResizeChan() <-chan Size {
 	return s.resizeChan
