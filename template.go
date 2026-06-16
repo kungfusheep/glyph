@@ -725,6 +725,8 @@ type Op struct {
 	Gap          int8    // gap between children
 	ContentSized bool    // has fixed-width children (don't implicit flex)
 	FitContent   bool    // size to content instead of filling available space
+	MaxWidth     int16   // >0: size to content but never exceed this (wrapping content wraps at it)
+	MaxWidthPct  float32 // >0: like MaxWidth but as a fraction of available width
 
 	// Container
 	IsRow        bool        // true=HBox, false=VBox
@@ -4250,6 +4252,8 @@ func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsaf
 		elemBase,
 		elemSize,
 	)
+	t.ops[idx].MaxWidth = v.maxWidth
+	t.ops[idx].MaxWidthPct = v.maxWidthPct
 	t.applyContainerDynamics(idx, v.nodeRef, v.opacityMode, v.gapPtr, v.gapCond, v.fillPtr, v.fillCond, v.localStyle, v.localStylePtr, v.localStyleCond, v.opacity, elemBase, elemSize)
 	return idx
 }
@@ -4278,6 +4282,8 @@ func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsaf
 		elemBase,
 		elemSize,
 	)
+	t.ops[idx].MaxWidth = v.maxWidth
+	t.ops[idx].MaxWidthPct = v.maxWidthPct
 	t.applyContainerDynamics(idx, v.nodeRef, v.opacityMode, v.gapPtr, v.gapCond, v.fillPtr, v.fillCond, v.localStyle, v.localStylePtr, v.localStyleCond, v.opacity, elemBase, elemSize)
 	return idx
 }
@@ -5528,6 +5534,66 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 	return op.marginH()
 }
 
+// measureMaxWidthContent computes a max-width container's natural content width.
+// Unlike computeIntrinsicWidth, wrappable children (TextBlock) wrap at the bound
+// and report their longest produced line, so the container hugs that line rather
+// than the full unwrapped text. bound is the container's outer ceiling; the
+// returned width includes this container's own chrome and is never forced past
+// bound here (the caller clamps the final result).
+func (t *Template) measureMaxWidthContent(idx, bound int16, elemBase unsafe.Pointer) int16 {
+	op := &t.ops[idx]
+
+	chrome := op.marginH() + op.paddingH()
+	if op.Border.HasBorder() {
+		chrome += op.Border.PadH()
+	}
+	inner := bound - chrome
+	if inner < 0 {
+		inner = 0
+	}
+
+	var contentW int16
+	childCount := int16(0)
+	for i := op.ChildStart; i < op.ChildEnd; i++ {
+		childOp := &t.ops[i]
+		if childOp.Parent != idx {
+			continue
+		}
+		childCount++
+
+		var cw int16
+		switch childOp.Kind {
+		case OpTextBlock:
+			ext := childOp.Ext.(*opText)
+			for _, ln := range wrapText(ext.resolve(elemBase), int(inner), ext.charWrap) {
+				if w := int16(StringWidth(ln)); w > cw {
+					cw = w
+				}
+			}
+			cw += childOp.marginH()
+		case OpContainer:
+			cw = t.measureMaxWidthContent(i, inner, elemBase)
+		default:
+			cw = t.computeIntrinsicWidthWithBase(i, elemBase)
+		}
+		if cw > inner {
+			cw = inner
+		}
+
+		if op.IsRow {
+			contentW += cw
+		} else if cw > contentW {
+			contentW = cw
+		}
+	}
+
+	if g := op.gap(); op.IsRow && childCount > 1 && g > 0 {
+		contentW += int16(g) * (childCount - 1)
+	}
+
+	return contentW + chrome
+}
+
 func templateIntrinsicWidth(tmpl *Template) int16 {
 	if tmpl == nil || len(tmpl.ops) == 0 {
 		return 0
@@ -5796,6 +5862,20 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 			geom.W = 0
 		} else if pw := op.percentWidth(); pw > 0 {
 			geom.W = int16(float32(availW) * pw)
+		} else if op.MaxWidth > 0 || op.MaxWidthPct > 0 {
+			// size to content but clamp at the bound; wrappable children wrap at
+			// the bound and the container hugs the longest produced line.
+			bound := op.MaxWidth
+			if op.MaxWidthPct > 0 {
+				bound = int16(float32(availW) * op.MaxWidthPct)
+			}
+			if availW > 0 && bound > availW {
+				bound = availW
+			}
+			geom.W = t.measureMaxWidthContent(idx, bound, elemBase)
+			if geom.W > bound {
+				geom.W = bound
+			}
 		} else if op.FitContent || (op.Parent >= 0 && op.ContentSized && t.ops[op.Parent].Kind == OpContainer && t.ops[op.Parent].IsRow) {
 			geom.W = t.computeIntrinsicWidth(idx)
 			if availW > 0 && geom.W > availW {

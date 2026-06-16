@@ -1094,3 +1094,74 @@ func TestForEachPerItemFlexPointersRebind(t *testing.T) {
 		t.Errorf("per-item spacer Width frozen: both rows place text at col %d", a)
 	}
 }
+
+func TestMaxWidthHugsShortContent(t *testing.T) {
+	// a pill with a short label sizes to the label, not the bound
+	tmpl := Build(VBox.MaxWidth(20)(Text("hi")))
+	buf := NewBuffer(40, 3)
+	tmpl.Execute(buf, 40, 3)
+	if got := tmpl.geom[0].W; got != 2 {
+		t.Errorf("short content should hug to 2, got W=%d", got)
+	}
+}
+
+func TestMaxWidthClampsLongSingleLine(t *testing.T) {
+	// a long non-wrapping line clamps at the bound
+	tmpl := Build(VBox.MaxWidth(20)(Text("this is a very long line exceeding twenty")))
+	buf := NewBuffer(60, 3)
+	tmpl.Execute(buf, 60, 3)
+	if got := tmpl.geom[0].W; got != 20 {
+		t.Errorf("long single line should clamp to 20, got W=%d", got)
+	}
+}
+
+func TestMaxWidthHugsLongestWrappedLine(t *testing.T) {
+	// a TextBlock wraps at the bound and the container hugs the longest line
+	// "the quick brown fox jumps over" word-wrapped at 20:
+	//   "the quick brown fox" (19)  /  "jumps over" (10)  -> longest 19
+	tmpl := Build(VBox.MaxWidth(20)(TextBlock("the quick brown fox jumps over")))
+	buf := NewBuffer(60, 5)
+	tmpl.Execute(buf, 60, 5)
+	if got := tmpl.geom[0].W; got != 19 {
+		t.Errorf("wrapping content should hug longest wrapped line 19, got W=%d", got)
+	}
+}
+
+func TestMaxWidthPctClampsToFraction(t *testing.T) {
+	// MaxWidthPct caps at a fraction of available width; long content clamps there
+	tmpl := Build(VBox.MaxWidthPct(0.25)(Text("this is a very long line exceeding the quarter budget")))
+	buf := NewBuffer(40, 3)
+	tmpl.Execute(buf, 40, 3)
+	if got := tmpl.geom[0].W; got != 10 {
+		t.Errorf("0.25 of 40 should clamp to 10, got W=%d", got)
+	}
+}
+
+func TestMaxWidthWithBorderHugsContent(t *testing.T) {
+	// border chrome is added on top of the hugged content width
+	tmpl := Build(VBox.MaxWidth(20).Border(BorderSingle)(Text("hey")))
+	buf := NewBuffer(40, 5)
+	tmpl.Execute(buf, 40, 5)
+	// content 3 + border 2 = 5, under the bound so no clamp
+	if got := tmpl.geom[0].W; got != 5 {
+		t.Errorf("content+border should hug to 5, got W=%d", got)
+	}
+}
+
+func BenchmarkMaxWidthNonWrapping(b *testing.B) {
+	tmpl := Build(VBox.MaxWidth(20)(Text("short")))
+	buf := NewBuffer(40, 3)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tmpl.Execute(buf, 40, 3)
+	}
+}
+
+func BenchmarkMaxWidthWrapMeasure(b *testing.B) {
+	tmpl := Build(VBox.MaxWidth(20)(TextBlock("the quick brown fox jumps over the lazy dog again")))
+	buf := NewBuffer(40, 8)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tmpl.Execute(buf, 40, 8)
+	}
+}

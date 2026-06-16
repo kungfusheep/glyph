@@ -114,6 +114,8 @@ type VBoxC struct {
 	percentWidth     float32
 	flexGrow         float32
 	fitContent       bool
+	maxWidth         int16
+	maxWidthPct      float32
 	margin           [4]int16 // top, right, bottom, left
 	padding          [4]int16 // top, right, bottom, left
 	nodeRef          *NodeRef
@@ -401,6 +403,26 @@ func (f VBoxFn) FitContent() VBoxFn {
 	}
 }
 
+// MaxWidth caps the container at n columns: it sizes to its content (wrapping
+// wrappable children at the cap) but never exceeds n and never pads to it.
+func (f VBoxFn) MaxWidth(n int) VBoxFn {
+	return func(children ...Component) VBoxC {
+		v := f(children...)
+		v.maxWidth = int16(n)
+		return v
+	}
+}
+
+// MaxWidthPct caps the container at a fraction (0..1) of the parent's width;
+// otherwise like MaxWidth.
+func (f VBoxFn) MaxWidthPct(p float32) VBoxFn {
+	return func(children ...Component) VBoxC {
+		v := f(children...)
+		v.maxWidthPct = p
+		return v
+	}
+}
+
 // Margin sets uniform margin on all sides.
 func (f VBoxFn) Margin(all int16) VBoxFn {
 	return func(children ...Component) VBoxC {
@@ -492,6 +514,8 @@ type HBoxC struct {
 	percentWidth     float32
 	flexGrow         float32
 	fitContent       bool
+	maxWidth         int16
+	maxWidthPct      float32
 	margin           [4]int16 // top, right, bottom, left
 	padding          [4]int16 // top, right, bottom, left
 	nodeRef          *NodeRef
@@ -775,6 +799,26 @@ func (f HBoxFn) FitContent() HBoxFn {
 	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.fitContent = true
+		return h
+	}
+}
+
+// MaxWidth caps the container at n columns: it sizes to its content (wrapping
+// wrappable children at the cap) but never exceeds n and never pads to it.
+func (f HBoxFn) MaxWidth(n int) HBoxFn {
+	return func(children ...Component) HBoxC {
+		h := f(children...)
+		h.maxWidth = int16(n)
+		return h
+	}
+}
+
+// MaxWidthPct caps the container at a fraction (0..1) of the parent's width;
+// otherwise like MaxWidth.
+func (f HBoxFn) MaxWidthPct(p float32) HBoxFn {
+	return func(children ...Component) HBoxC {
+		h := f(children...)
+		h.maxWidthPct = p
 		return h
 	}
 }
