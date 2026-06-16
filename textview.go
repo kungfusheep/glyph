@@ -127,7 +127,7 @@ func (tv *TextViewC) sync() {
 	tv.layer.SetBuffer(buf)
 }
 
-func (t *Template) compileTextViewC(v *TextViewC, parent int16, depth int) int16 {
+func (t *Template) compileTextViewC(v *TextViewC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	var layerView LayerViewC
 	if v.flexGrowCond != nil {
 		layerView = LayerView(v.layer).Grow(v.flexGrowCond)
@@ -139,7 +139,7 @@ func (t *Template) compileTextViewC(v *TextViewC, parent int16, depth int) int16
 	if v.margin != [4]int16{} {
 		layerView = layerView.MarginTRBL(v.margin[0], v.margin[1], v.margin[2], v.margin[3])
 	}
-	return t.compileLayerViewC(layerView, parent, depth)
+	return t.compileLayerViewC(layerView, parent, depth, elemBase, elemSize)
 }
 
 // wrapTextDraw wraps s to width and writes runes directly to buf at (x, y).

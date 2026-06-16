@@ -3474,7 +3474,7 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	case JumpC:
 		return t.compileJumpC(v, parent, depth, elemBase, elemSize)
 	case LayerViewC:
-		return t.compileLayerViewC(v, parent, depth)
+		return t.compileLayerViewC(v, parent, depth, elemBase, elemSize)
 	case OverlayC:
 		return t.compileOverlayC(v, parent, depth)
 	case TabsC:
@@ -3493,13 +3493,13 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	case *InputC:
 		t.collectTextInputBinding(v)
 		t.collectFocusManager(v)
-		return t.compileInputC(v, parent, depth)
+		return t.compileInputC(v, parent, depth, elemBase, elemSize)
 	case *LogC:
 		t.collectBindings(v)
-		return t.compileLogC(v, parent, depth)
+		return t.compileLogC(v, parent, depth, elemBase, elemSize)
 	case *TextViewC:
 		t.collectBindings(v)
-		return t.compileTextViewC(v, parent, depth)
+		return t.compileTextViewC(v, parent, depth, elemBase, elemSize)
 	case *ScrollViewC:
 		return t.compileScrollViewC(v, parent, depth)
 	case *FilterLogC:
@@ -4349,7 +4349,7 @@ func (t *Template) compileTextC(v TextC, parent int16, depth int, elemBase unsaf
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Width = v.widthPtr
+		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthPtr, elemBase, elemSize)
 	}
 	if v.opacity.dyn != nil {
 		if t.ops[idx].Dyn == nil {
@@ -4479,7 +4479,7 @@ func (t *Template) compileVRuleC(v VRuleC, parent int16, depth int, elemBase uns
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Height = v.heightPtr
+		t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightPtr, elemBase, elemSize)
 	}
 	return idx
 }
@@ -4526,7 +4526,7 @@ func (t *Template) compileProgressC(v ProgressC, parent int16, depth int, elemBa
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Width = v.widthPtr
+		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthPtr, elemBase, elemSize)
 	}
 	return idx
 }
@@ -4609,7 +4609,7 @@ func (t *Template) compileLeaderC(v LeaderC, parent int16, depth int, elemBase u
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Width = v.widthPtr
+		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthPtr, elemBase, elemSize)
 	}
 	return idx
 }
@@ -4658,12 +4658,12 @@ func (t *Template) compileSparklineC(v SparklineC, parent int16, depth int, elem
 		if v.widthCond != nil {
 			t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthCond, nil, 0)
 		} else if v.widthPtr != nil {
-			t.ops[idx].Dyn.Width = v.widthPtr
+			t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthPtr, elemBase, elemSize)
 		}
 		if v.heightCond != nil {
 			t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightCond, nil, 0)
 		} else if v.heightPtr != nil {
-			t.ops[idx].Dyn.Height = v.heightPtr
+			t.ops[idx].Dyn.Height = t.compileDynInt16(v.heightPtr, elemBase, elemSize)
 		}
 	}
 	return idx
@@ -4688,7 +4688,7 @@ func (t *Template) compileJumpC(v JumpC, parent int16, depth int, elemBase unsaf
 	return idx
 }
 
-func (t *Template) compileLayerViewC(v LayerViewC, parent int16, depth int) int16 {
+func (t *Template) compileLayerViewC(v LayerViewC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	ext := &opLayer{ptr: v.layer, width: v.viewWidth, height: v.viewHeight}
 	idx := t.addOp(Op{
 		Kind:     OpLayer,
@@ -4710,7 +4710,7 @@ func (t *Template) compileLayerViewC(v LayerViewC, parent int16, depth int) int1
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.FlexGrow = v.flexGrowPtr
+		t.ops[idx].Dyn.FlexGrow = t.compileDynFloat32(v.flexGrowPtr, elemBase, elemSize)
 	}
 	return idx
 }
@@ -5235,7 +5235,7 @@ func (t *Template) compileRadioC(v *RadioC, parent int16, depth int) int16 {
 	return t.compileVBoxC(vbox, parent, depth, nil, 0)
 }
 
-func (t *Template) compileInputC(v *InputC, parent int16, depth int) int16 {
+func (t *Template) compileInputC(v *InputC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	// Convert to TextInput and compile
 	ti := v.toTextInput()
 	idx := t.compile(ti, parent, depth, nil, 0)
@@ -5248,7 +5248,7 @@ func (t *Template) compileInputC(v *InputC, parent int16, depth int) int16 {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
 		}
-		t.ops[idx].Dyn.Width = v.widthPtr
+		t.ops[idx].Dyn.Width = t.compileDynInt16(v.widthPtr, elemBase, elemSize)
 	}
 	return idx
 }

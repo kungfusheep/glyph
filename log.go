@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"io"
 	"sync"
+	"unsafe"
 )
 
 type LogC struct {
@@ -290,7 +291,7 @@ func (lv *LogC) syncToLayer() {
 
 // compileLogC compiles the Log component into the template.
 // Starts the reader goroutine on first compile and returns a LayerView.
-func (t *Template) compileLogC(lv *LogC, parent int16, depth int) int16 {
+func (t *Template) compileLogC(lv *LogC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	// collect for later wiring (app not available yet during compile)
 	if lv.onUpdate == nil {
 		t.pendingLogs = append(t.pendingLogs, lv)
@@ -312,5 +313,5 @@ func (t *Template) compileLogC(lv *LogC, parent int16, depth int) int16 {
 		layerView = layerView.MarginTRBL(lv.margin[0], lv.margin[1], lv.margin[2], lv.margin[3])
 	}
 
-	return t.compileLayerViewC(layerView, parent, depth)
+	return t.compileLayerViewC(layerView, parent, depth, elemBase, elemSize)
 }
