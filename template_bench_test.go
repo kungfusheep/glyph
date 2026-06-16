@@ -302,3 +302,33 @@ func BenchmarkV2Render(b *testing.B) {
 		tmpl.render(buf, 0, 0, 80)
 	}
 }
+
+// BenchmarkV2ExecuteForEachPerItemFlex measures the per-item flex-pointer
+// rebind path (Space().Grow + Text().Width reading element fields): the rebind
+// runs an itemEval per item per frame. Proves the cost is bounded and the
+// steady-state render stays allocation-free (storage + closures are built once
+// at compile, not per Execute).
+func BenchmarkV2ExecuteForEachPerItemFlex(b *testing.B) {
+	type Row struct {
+		lg    float32
+		w     int16
+		label string
+	}
+	n := 100
+	rows := make([]Row, n)
+	for i := range rows {
+		rows[i] = Row{lg: float32(i % 2), w: int16(4 + i%8), label: "x"}
+	}
+	tmpl := Build(VBox(
+		ForEach(&rows, func(r *Row) Component {
+			return HBox.Width(40)(Space().Grow(&r.lg), Text(&r.label).Width(&r.w))
+		}),
+	))
+	buf := NewBuffer(40, n+10)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf.Clear()
+		tmpl.Execute(buf, 40, int16(n)+10)
+	}
+}
