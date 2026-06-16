@@ -105,7 +105,7 @@ func (l *Layer) NeedsRender() bool {
 	if l.Render == nil {
 		return false
 	}
-	return l.AlwaysRender || l.renderDirty.Load() || l.lastRenderWidth == 0 || l.lastRenderWidth != l.viewWidth
+	return l.AlwaysRender || l.renderDirty.Load() || l.lastRenderWidth == 0 || l.lastRenderWidth != l.viewWidth || l.lastRenderHeight != l.viewHeight
 }
 
 // Invalidate marks the layer content dirty so Render runs on the next display

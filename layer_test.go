@@ -384,3 +384,41 @@ func BenchmarkLayerCursorScreenTranslation(b *testing.B) {
 		_, _, _ = layer.ScreenCursor()
 	}
 }
+
+// TestLayerReRendersOnHeightChange guards the Layer strand (#341): NeedsRender
+// must re-render when the viewport HEIGHT changes (a pane regrows / relayouts),
+// not only on width. Without it, a stale l.buffer blits consistently (front==back,
+// so the screen diff is blind to it) and the lower rows persist stale until the
+// next Invalidate. lastRenderHeight was tracked in prepare() but never compared.
+func TestLayerReRendersOnHeightChange(t *testing.T) {
+	l := NewLayer()
+	renders := 0
+	l.Render = func() { renders++ }
+
+	l.SetViewport(20, 5)
+	l.prepare()
+	if renders != 1 {
+		t.Fatalf("first prepare should render once, got %d", renders)
+	}
+
+	// height grows (relayout) — must trigger a re-render
+	l.SetViewport(20, 9)
+	if !l.NeedsRender() {
+		t.Fatal("NeedsRender false after a height change — stale buffer would blit (the strand)")
+	}
+	l.prepare()
+	if renders != 2 {
+		t.Fatalf("prepare should re-render after a height change, renders=%d", renders)
+	}
+
+	// no change → no re-render (don't over-render)
+	if l.NeedsRender() {
+		t.Fatal("NeedsRender true with no dimension change — would over-render every frame")
+	}
+
+	// width change still re-renders (control)
+	l.SetViewport(30, 9)
+	if !l.NeedsRender() {
+		t.Fatal("width change should still re-render")
+	}
+}
