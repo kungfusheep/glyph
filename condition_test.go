@@ -741,7 +741,6 @@ func TestSelectionList(t *testing.T) {
 }
 
 func TestConditionInsideForEach(t *testing.T) {
-	t.Skip("TODO: If inside ForEach not fully implemented in new Template")
 	t.Run("If evaluates per element in ForEach", func(t *testing.T) {
 		type Item struct {
 			Name     string
@@ -846,6 +845,51 @@ func TestConditionInsideForEach(t *testing.T) {
 			t.Errorf("after flip: row 1 expected 'Active    ', got %q", line1)
 		}
 	})
+}
+
+func TestBareForEachAsConditionBranch(t *testing.T) {
+	// a bare ForEach used directly as an If branch (no wrapping container) must
+	// lay out and render per outer element. the inner slice is a field offset on
+	// a value-slice element, so it rebases per row. recap #370 fold shape.
+	type Comment struct {
+		Open    bool
+		Body    []string
+		Preview []string
+	}
+	cs := []Comment{
+		{Open: true, Body: []string{"b1", "b2"}, Preview: []string{"p1"}},
+		{Open: false, Body: []string{"x1", "x2"}, Preview: []string{"prev2"}},
+	}
+	view := VBox(ForEach(&cs, func(c *Comment) Component {
+		return If(&c.Open).Eq(true).
+			Then(ForEach(&c.Body, func(s *string) Component { return Text(s) })).
+			Else(ForEach(&c.Preview, func(s *string) Component { return Text(s) }))
+	}))
+	tmpl := Build(view)
+	buf := NewBuffer(20, 10)
+	tmpl.Execute(buf, 20, 10)
+
+	// row 0 is open -> its Body (b1,b2); the closed row shows its Preview (prev2)
+	want := []string{"b1", "b2", "prev2"}
+	for i, w := range want {
+		got := strings.TrimRight(extractLine(buf, i, 8), " \x00")
+		if got != w {
+			t.Errorf("row %d: expected %q, got %q", i, w, got)
+		}
+	}
+
+	// flip fold state and re-render: each row's own sub-slice follows
+	cs[0].Open = false
+	cs[1].Open = true
+	buf.Clear()
+	tmpl.Execute(buf, 20, 10)
+	want = []string{"p1", "x1", "x2"}
+	for i, w := range want {
+		got := strings.TrimRight(extractLine(buf, i, 8), " \x00")
+		if got != w {
+			t.Errorf("after flip row %d: expected %q, got %q", i, w, got)
+		}
+	}
 }
 
 func TestHBoxLayout(t *testing.T) {

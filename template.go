@@ -6632,6 +6632,16 @@ func (t *Template) layout(_ int16) {
 					geom.H = 0
 				}
 
+			case OpForEach:
+				// root-level OpForEach (e.g. a bare ForEach used directly as an
+				// If/Switch/Match branch); container children are laid out inline
+				// by layoutContainer and skipped here.
+				if op.Parent != -1 {
+					break
+				}
+				h, _ := t.layoutForEach(idx, op, geom.W)
+				geom.H = h
+
 			case OpLayout:
 				t.layoutCustom(idx, op, geom)
 

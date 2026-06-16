@@ -131,8 +131,10 @@ func TestRenderPathAB_AutoTableInSubTemplate(t *testing.T) {
 	if !strings.Contains(direct, "Ada") {
 		t.Fatalf("direct AutoTable did not render row: %q", direct)
 	}
-	if strings.Contains(foreach, "Ada") {
-		t.Fatalf("current sub-template AutoTable unexpectedly rendered row: %q", foreach)
+	// a bare ForEach used as the root view now lays out and renders, so the
+	// sub-template path matches the direct path (root-level OpForEach layout).
+	if !strings.Contains(foreach, "Ada") {
+		t.Fatalf("sub-template AutoTable should render row in parity with direct: %q", foreach)
 	}
 	t.Logf("direct AutoTable output=%q, foreach AutoTable output=%q", direct, foreach)
 }
