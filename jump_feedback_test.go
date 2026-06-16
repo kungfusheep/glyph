@@ -318,3 +318,51 @@ func TestJumpScopeFiltersTargets(t *testing.T) {
 		t.Fatalf("wrong target kept: %+v", tg)
 	}
 }
+
+// TestClearJumpTargetsPreservesScope locks the invariant scoped jump relies on:
+// ClearJumpTargets (run every collecting render) clears Targets+Input but must
+// NOT wipe ScopeRects, or a later "tidy-up" silently kills scoped jump.
+func TestClearJumpTargetsPreservesScope(t *testing.T) {
+	jm := &JumpMode{
+		ScopeRects: []*NodeRef{{X: 1, Y: 1, W: 4, H: 3}},
+		Targets:    []JumpTarget{{Label: "a"}},
+		Input:      "a",
+	}
+	jm.ClearJumpTargets()
+	if len(jm.ScopeRects) != 1 {
+		t.Fatal("ClearJumpTargets wiped ScopeRects — scoped jump invariant broken")
+	}
+	if len(jm.Targets) != 0 || jm.Input != "" {
+		t.Fatalf("ClearJumpTargets should clear Targets+Input: targets=%d input=%q", len(jm.Targets), jm.Input)
+	}
+}
+
+// TestEnterJumpScopeLabelsOnlyInRegion drives the real consumer path: a column
+// of jump targets, EnterJumpScope restricted to the top region, must collect
+// only the targets that render inside that region.
+func TestEnterJumpScopeLabelsOnlyInRegion(t *testing.T) {
+	app := NewApp()
+	labels := make([]string, 6)
+	for i := range labels {
+		labels[i] = "row"
+	}
+	app.SetView(VBox(ForEach(&labels, func(s *string) Component {
+		return Jump(Text(s), func() {})
+	})))
+	app.RenderNow()
+
+	// region covers only the first 3 rows (y 0..2)
+	region := &NodeRef{X: 0, Y: 0, W: 10, H: 3}
+	app.EnterJumpScope(region)
+	if !app.JumpModeActive() {
+		t.Fatal("EnterJumpScope did not enter jump mode")
+	}
+	for _, tg := range app.JumpMode().Targets {
+		if int(tg.Y) < 0 || int(tg.Y) >= 3 {
+			t.Fatalf("target at y=%d is outside the scope region [0,3) — scope filter not applied via EnterJumpScope", tg.Y)
+		}
+	}
+	if n := len(app.JumpMode().Targets); n != 3 {
+		t.Fatalf("expected 3 in-region targets, got %d", n)
+	}
+}
