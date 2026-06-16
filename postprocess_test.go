@@ -1294,3 +1294,35 @@ func TestSESpinGlowPhaseUsesFrameDelta(t *testing.T) {
 		t.Fatalf("phase after speed change = %v, want %v", got, want)
 	}
 }
+
+// TestEffectAppliedDuringRender pins that a screen effect is applied within the
+// render pipeline (not just in isolation via Apply): after a render, the screen
+// buffer reflects the effect. This is the parity guard for the planned
+// effect-only-frame optimization (caching the clean render, running effects on
+// the screen back buffer) — the rendered output must stay identical whatever
+// path produced it.
+func TestEffectAppliedDuringRender(t *testing.T) {
+	app := NewApp()
+	label := "hi"
+	app.SetView(VBox(Text(&label).FG(RGB(255, 255, 255))))
+	app.AddEffect(SEDim())
+	app.RenderNow()
+
+	back := app.screen.Buffer()
+	// find the 'h' cell and confirm the effect (AttrDim) landed via the render path
+	found := false
+	for y := 0; y < back.Height() && !found; y++ {
+		for x := 0; x < back.Width(); x++ {
+			if back.Get(x, y).Rune == 'h' {
+				if !back.Get(x, y).Style.Attr.Has(AttrDim) {
+					t.Fatalf("effect not applied during render: 'h' cell has no AttrDim (style=%+v)", back.Get(x, y).Style)
+				}
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Fatal("rendered 'h' cell not found")
+	}
+}
