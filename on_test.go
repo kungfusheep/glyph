@@ -1,6 +1,7 @@
 package glyph
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/kungfusheep/riffkey"
@@ -555,5 +556,34 @@ func TestOnModalFormEscapeDismissesOverlay(t *testing.T) {
 	app.render()
 	if !dispatchRune(app, 'x') {
 		t.Fatal("reopened form input not focused; show-edge latch failed to reset")
+	}
+}
+
+// TestModalRouterUpBeforeNextKeyInRealLoop drives keys through riffkey's REAL
+// loop (ReadKey -> Dispatch -> afterDispatch render), not a bare Dispatch. A key
+// opens an overlay modal via a state flip + async RequestRender (no synchronous
+// RenderNow), then the next key must reach the modal's On.Modal handler — proving
+// the opening key's render pushes the modal router before the next key is read,
+// so there is no dropped-first-key race in the real input loop (the race only
+// appears when keys are dispatched with no render between them).
+func TestModalRouterUpBeforeNextKeyInRealLoop(t *testing.T) {
+	app := NewApp()
+	modalOpen := false
+	rootHits, modalHits := 0, 0
+	app.SetView(VBox(
+		On(Key("x", func() { modalOpen = true; app.RequestRender() })),
+		On(Key("y", func() { rootHits++ })),
+		If(&modalOpen).Then(Overlay.Centered()(VBox(
+			Text("modal"),
+			On.Modal(Key("y", func() { modalHits++ })),
+		))),
+	))
+	app.RenderNow()
+
+	reader := riffkey.NewReader(strings.NewReader("xy"))
+	_ = app.Input().Run(reader, func(handled bool) { app.RenderNow() })
+
+	if modalHits != 1 || rootHits != 0 {
+		t.Fatalf("real loop: the modal should catch the y after x opened it (no RenderNow needed): root=%d modal=%d", rootHits, modalHits)
 	}
 }
