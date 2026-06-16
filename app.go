@@ -1523,6 +1523,17 @@ func (a *App) EnterJumpMode() {
 	})
 
 	jumpRouter.HandleUnmatched(func(k riffkey.Key) bool {
+		// backspace undoes the last typed key, restoring the previous label set;
+		// on empty input it cancels jump mode.
+		if k.Special == riffkey.SpecialBackspace {
+			if n := len(a.jumpMode.Input); n > 0 {
+				a.jumpMode.Input = a.jumpMode.Input[:n-1] // ASCII labels: byte == rune
+				a.RequestRender()
+				return true
+			}
+			a.ExitJumpMode()
+			return true
+		}
 		if k.Rune == 0 || k.Mod != riffkey.ModNone {
 			a.ExitJumpMode()
 			return true

@@ -54,7 +54,17 @@ func TestJumpFeedbackLiveMultiCharInput(t *testing.T) {
 		t.Fatal("exited jump mode on a partial match")
 	}
 
-	// type the second char: completes the label, selects, exits
+	// backspace undoes the typed char and stays in jump mode (restores labels)
+	app.Input().Dispatch(riffkey.Key{Special: riffkey.SpecialBackspace})
+	if got := app.JumpMode().Input; got != "" {
+		t.Fatalf("after backspace, Input = %q, want empty", got)
+	}
+	if !app.JumpModeActive() {
+		t.Fatal("backspace on a partial prefix should not exit jump mode")
+	}
+
+	// retype both chars: completes the label, selects, exits
+	app.Input().Dispatch(riffkey.Key{Rune: rune(first[0])})
 	app.Input().Dispatch(riffkey.Key{Rune: rune(first[1])})
 	if app.JumpModeActive() {
 		t.Fatal("still in jump mode after a full label")
