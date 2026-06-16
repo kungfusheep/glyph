@@ -221,3 +221,95 @@ func TestListCDelete(t *testing.T) {
 		t.Errorf("After deleting last item, selection should be 0, got %d", list.Index())
 	}
 }
+
+// TestListScrollConvergesInOneFrame guards against the one-frame-stale
+// blank-bottom: a height-windowed variable-height List must produce its final
+// window in a SINGLE render pass after a scroll changes the offset. Previously
+// the render-phase scroll-down adjustment set endIdx=selected+1 and left the
+// viewport's bottom rows unfilled until the next frame re-rendered from the
+// persisted offset (a visible blank flash on every j past the bottom edge).
+func TestListScrollConvergesInOneFrame(t *testing.T) {
+	const W, H = 24, 14
+	type Item struct{ Lines []string }
+	items := make([]Item, 18)
+	for i := range items {
+		n := (i % 4) + 1 // variable heights 1..4 so the window has a partial edge
+		ls := make([]string, n)
+		for j := range ls {
+			ls[j] = strings.Repeat(string(rune('A'+i%26)), 4)
+		}
+		items[i] = Item{Lines: ls}
+	}
+	sel := 0
+	list := List(&items).MaxVisible(8).Selection(&sel).Render(func(it *Item) Component {
+		return VBox(ForEach(&it.Lines, func(s *string) Component { return Text(s) }))
+	})
+	tmpl := Build(VBox.Height(H)(list.Build()))
+
+	nonblank := func(b *Buffer) int {
+		c := 0
+		for y := 0; y < H; y++ {
+			if strings.TrimRight(extractLine(b, y, W), " \x00") != "" {
+				c++
+			}
+		}
+		return c
+	}
+
+	// at every step a SINGLE render must already equal a second render of the
+	// same state (converged) — in both scroll directions.
+	assertConverged := func(label string, s int) {
+		first := NewBuffer(W, H)
+		tmpl.Execute(first, W, H)
+		second := NewBuffer(W, H)
+		tmpl.Execute(second, W, H)
+		for y := 0; y < H; y++ {
+			a := strings.TrimRight(extractLine(first, y, W), " \x00")
+			b := strings.TrimRight(extractLine(second, y, W), " \x00")
+			if a != b {
+				t.Errorf("%s step %d row %d: first render %q != converged render %q (one-frame-stale)", label, s, y, a, b)
+			}
+		}
+		if nb1, nb2 := nonblank(first), nonblank(second); nb1 != nb2 {
+			t.Errorf("%s step %d: first render filled %d rows, converged fills %d", label, s, nb1, nb2)
+		}
+	}
+
+	for s := 0; s < 16; s++ {
+		list.cached.Down(nil)
+		assertConverged("down", s)
+	}
+	for s := 0; s < 16; s++ {
+		list.cached.Up(nil)
+		assertConverged("up", s)
+	}
+}
+
+func BenchmarkSelectionListScrollRender(b *testing.B) {
+	const W, H = 24, 14
+	type Item struct{ Lines []string }
+	items := make([]Item, 60)
+	for i := range items {
+		n := (i % 4) + 1
+		ls := make([]string, n)
+		for j := range ls {
+			ls[j] = strings.Repeat(string(rune('A'+i%26)), 4)
+		}
+		items[i] = Item{Lines: ls}
+	}
+	sel := 0
+	list := List(&items).MaxVisible(8).Selection(&sel).Render(func(it *Item) Component {
+		return VBox(ForEach(&it.Lines, func(s *string) Component { return Text(s) }))
+	})
+	tmpl := Build(VBox.Height(H)(list.Build()))
+	buf := NewBuffer(W, H)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tmpl.Execute(buf, W, H)
+		list.cached.Down(nil)
+		if sel >= len(items)-1 {
+			sel = 0
+			list.cached.offset = 0
+		}
+	}
+}

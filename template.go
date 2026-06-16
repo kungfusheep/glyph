@@ -8824,6 +8824,39 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		// only partly fits peeks in (the "more below" affordance) instead of
 		// vanishing. fullEnd is the fully-fitting boundary, used for the
 		// scroll-into-view decision so a SELECTED edge row still scrolls fully in.
+		//
+		// computeEnd returns the window end for a given start using that same
+		// fully-fit + one-partial-edge rule, bounded by MaxVisible. It is reused
+		// after a scroll adjustment so the viewport is filled from the FINAL
+		// offset within this single pass — without it, the scroll-down branch
+		// stopped at the selected row and left the bottom rows blank until the
+		// next frame re-rendered from the persisted offset (one-frame-stale).
+		computeEnd := func(start int) int {
+			upper := visibleLen
+			if ext.listPtr != nil && ext.listPtr.MaxVisible > 0 {
+				if u := start + ext.listPtr.MaxVisible; u < upper {
+					upper = u
+				}
+			}
+			used := 0
+			full := upper
+			part := false
+			for ci := start; ci < upper; ci++ {
+				ih := int(ext.geoms[ci].H)
+				if used+ih > availableRows {
+					full = ci
+					part = true
+					break
+				}
+				used += ih
+			}
+			end := full
+			if part && full < visibleLen {
+				end = full + 1 // render the edge row partially
+			}
+			return end
+		}
+
 		rowsUsed := 0
 		fullEnd := endIdx
 		partial := false
@@ -8841,28 +8874,18 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 			endIdx = fullEnd + 1 // render the edge row partially
 		}
 
-		// ensure selected item is visible (scroll adjustment)
+		// ensure selected item is visible (scroll adjustment). Each branch only
+		// finalizes startIdx/offset; endIdx is then recomputed forward from the
+		// final start so the window fills the viewport in this same pass.
 		if ext.listPtr != nil && selectedIdx >= 0 {
 			if selectedIdx < startIdx {
 				startIdx = selectedIdx
-				// recalculate endIdx forward from new startIdx
-				rowsUsed = 0
-				endIdx = visibleLen
-				for ci := startIdx; ci < visibleLen; ci++ {
-					ih := int(ext.geoms[ci].H)
-					if rowsUsed+ih > availableRows {
-						endIdx = ci
-						break
-					}
-					rowsUsed += ih
-				}
-				ext.listPtr.offset = startIdx
 			} else if selectedIdx >= fullEnd {
-				// scroll down: place selected item at the bottom of the window
-				endIdx = selectedIdx + 1
+				// scroll down: pull the window up until the selected item is the
+				// last fully-fitting row, then fill forward from there.
+				startIdx = selectedIdx + 1
 				rowsUsed = 0
-				startIdx = endIdx
-				for ci := endIdx - 1; ci >= 0; ci-- {
+				for ci := selectedIdx; ci >= 0; ci-- {
 					ih := int(ext.geoms[ci].H)
 					if rowsUsed+ih > availableRows {
 						break
@@ -8870,8 +8893,9 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 					rowsUsed += ih
 					startIdx = ci
 				}
-				ext.listPtr.offset = startIdx
 			}
+			endIdx = computeEnd(startIdx)
+			ext.listPtr.offset = startIdx
 		}
 	}
 
