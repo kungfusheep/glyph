@@ -5332,7 +5332,7 @@ func (t *Template) distributeWidths(screenW int16, elemBase unsafe.Pointer) {
 		geom := &t.geom[idx]
 		if op.FitContent {
 			// Compute intrinsic width from children
-			intrinsicW := t.computeIntrinsicWidth(idx)
+			intrinsicW := t.computeIntrinsicWidth(idx, screenW)
 			geom.W = intrinsicW
 		} else {
 			t.setOpWidth(idx, op, geom, screenW, elemBase)
@@ -5359,11 +5359,14 @@ func (t *Template) distributeWidths(screenW int16, elemBase unsafe.Pointer) {
 // computeIntrinsicWidth computes the minimum width needed for a ContentSized container.
 // For VBox: maximum width of children (all children stack vertically, need same width)
 // For HBox: sum of children widths + gaps
-func (t *Template) computeIntrinsicWidth(idx int16) int16 {
-	return t.computeIntrinsicWidthWithBase(idx, nil)
+func (t *Template) computeIntrinsicWidth(idx, availW int16) int16 {
+	return t.computeIntrinsicWidthWithBase(idx, nil, availW)
 }
 
-func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Pointer) int16 {
+// availW is the space this op could occupy; only the MaxWidth branch consults it
+// (to resolve a percentage bound). 0 means "unknown" — a pct bound then falls
+// through to plain content measurement, matching how WidthPct behaves here.
+func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Pointer, availW int16) int16 {
 	op := &t.ops[idx]
 
 	// If this op has an explicit width, use it
@@ -5371,9 +5374,42 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 		return w
 	}
 
+	// A MaxWidth container measures the same way it sizes (setOpWidth): wrap at
+	// the bound and hug the longest line, so both paths agree and the clamp
+	// constrains content-sizing parents too.
+	if op.Kind == OpContainer && (op.MaxWidth > 0 || op.MaxWidthPct > 0) {
+		bound := op.MaxWidth
+		if op.MaxWidthPct > 0 && availW > 0 {
+			bound = int16(float32(availW) * op.MaxWidthPct)
+			if bound > availW {
+				bound = availW
+			}
+		}
+		if bound > 0 {
+			w := t.measureMaxWidthContent(idx, bound, elemBase)
+			if w > bound {
+				w = bound
+			}
+			return w
+		}
+	}
+
 	// For containers, compute from children
 	if op.Kind == OpContainer {
 		var intrinsicW int16
+
+		// budget passed down for a child's pct resolution, shrunk by this
+		// container's own chrome (0 stays 0 = unknown)
+		childAvail := availW
+		if childAvail > 0 {
+			childAvail -= op.marginH() + op.paddingH()
+			if op.Border.HasBorder() {
+				childAvail -= op.Border.PadH()
+			}
+			if childAvail < 0 {
+				childAvail = 0
+			}
+		}
 
 		// Count children and find max/sum
 		childCount := int16(0)
@@ -5382,7 +5418,7 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 			if childOp.Parent != idx {
 				continue
 			}
-			childW := t.computeIntrinsicWidthWithBase(i, elemBase)
+			childW := t.computeIntrinsicWidthWithBase(i, elemBase, childAvail)
 			childCount++
 
 			if op.IsRow {
@@ -5419,7 +5455,7 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 			if t.ops[i].Parent != idx {
 				continue
 			}
-			w += t.computeIntrinsicWidthWithBase(i, elemBase)
+			w += t.computeIntrinsicWidthWithBase(i, elemBase, availW)
 		}
 		return w + op.marginH()
 	}
@@ -5449,7 +5485,7 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 				if tmpl == nil || len(tmpl.ops) == 0 {
 					continue
 				}
-				if w := tmpl.computeIntrinsicWidthWithBase(0, nil); w > maxW {
+				if w := tmpl.computeIntrinsicWidthWithBase(0, nil, availW); w > maxW {
 					maxW = w
 				}
 			}
@@ -5459,7 +5495,7 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 		selected, _ := ifExt.selector(elemBase).selectBranch(requested, branches)
 		if tmpl := branchAt(branches, selected); tmpl != nil && len(tmpl.ops) > 0 {
 			tmpl.runItemEvalsFrom(t, elemBase)
-			return tmpl.computeIntrinsicWidthWithBase(0, elemBase)
+			return tmpl.computeIntrinsicWidthWithBase(0, elemBase, availW)
 		}
 		return op.marginH()
 	case OpSwitch:
@@ -5470,7 +5506,7 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 				continue
 			}
 			ct.runItemEvalsFrom(t, elemBase)
-			if w := ct.computeIntrinsicWidthWithBase(0, elemBase); w > maxW {
+			if w := ct.computeIntrinsicWidthWithBase(0, elemBase, availW); w > maxW {
 				maxW = w
 			}
 		}
@@ -5483,7 +5519,7 @@ func (t *Template) computeIntrinsicWidthWithBase(idx int16, elemBase unsafe.Poin
 				continue
 			}
 			ct.runItemEvalsFrom(t, elemBase)
-			if w := ct.computeIntrinsicWidthWithBase(0, elemBase); w > maxW {
+			if w := ct.computeIntrinsicWidthWithBase(0, elemBase, availW); w > maxW {
 				maxW = w
 			}
 		}
@@ -5574,7 +5610,7 @@ func (t *Template) measureMaxWidthContent(idx, bound int16, elemBase unsafe.Poin
 		case OpContainer:
 			cw = t.measureMaxWidthContent(i, inner, elemBase)
 		default:
-			cw = t.computeIntrinsicWidthWithBase(i, elemBase)
+			cw = t.computeIntrinsicWidthWithBase(i, elemBase, inner)
 		}
 		if cw > inner {
 			cw = inner
@@ -5598,14 +5634,14 @@ func templateIntrinsicWidth(tmpl *Template) int16 {
 	if tmpl == nil || len(tmpl.ops) == 0 {
 		return 0
 	}
-	return tmpl.computeIntrinsicWidth(0)
+	return tmpl.computeIntrinsicWidth(0, 0)
 }
 
 func templateIntrinsicWidthWithBase(tmpl *Template, elemBase unsafe.Pointer) int16 {
 	if tmpl == nil || len(tmpl.ops) == 0 {
 		return 0
 	}
-	return tmpl.computeIntrinsicWidthWithBase(0, elemBase)
+	return tmpl.computeIntrinsicWidthWithBase(0, elemBase, 0)
 }
 
 func (t *Template) clampRootWidth(maxW int16) {
@@ -5877,7 +5913,7 @@ func (t *Template) setOpWidth(idx int16, op *Op, geom *Geom, availW int16, elemB
 				geom.W = bound
 			}
 		} else if op.FitContent || (op.Parent >= 0 && op.ContentSized && t.ops[op.Parent].Kind == OpContainer && t.ops[op.Parent].IsRow) {
-			geom.W = t.computeIntrinsicWidth(idx)
+			geom.W = t.computeIntrinsicWidth(idx, availW)
 			if availW > 0 && geom.W > availW {
 				geom.W = availW
 			}
@@ -5976,7 +6012,7 @@ func (t *Template) distributeHBoxChildWidths(idx int16, op *Op, availW int16, el
 		} else if effectiveOp.Kind == OpJump && effectiveOp.width() == 0 {
 			// Jump is a transparent wrapper: when its content measures, size
 			// to it so flex siblings don't starve it to zero width.
-			if w := t.computeIntrinsicWidthWithBase(i, elemBase); w > 0 {
+			if w := t.computeIntrinsicWidthWithBase(i, elemBase, availW); w > 0 {
 				if w > availW {
 					w = availW
 				}

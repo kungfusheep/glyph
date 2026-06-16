@@ -1165,3 +1165,34 @@ func BenchmarkMaxWidthWrapMeasure(b *testing.B) {
 		tmpl.Execute(buf, 40, 8)
 	}
 }
+
+func TestMaxWidthClampsInContentSizingParent(t *testing.T) {
+	// a MaxWidth child measured by a content-sizing parent must report its
+	// CLAMPED width so both measurement paths agree (intrinsic + setOpWidth).
+	tmpl := Build(HBox.FitContent()(
+		VBox.MaxWidth(20)(Text("this label is forty characters long ok!!")),
+		Text("x"),
+	))
+	buf := NewBuffer(80, 3)
+	tmpl.Execute(buf, 80, 3)
+	// clamped child 20 + sibling 1 = 21, not the unwrapped ~41
+	if got := tmpl.geom[0].W; got != 21 {
+		t.Errorf("content-sizing parent should size to clamped child (21), got W=%d", got)
+	}
+}
+
+func TestMaxWidthPctClampsInContentSizingParent(t *testing.T) {
+	// pct bound resolves against the avail threaded into the intrinsic pass
+	tmpl := Build(VBox.Width(40)(
+		HBox.FitContent()(
+			VBox.MaxWidthPct(0.5)(Text("this label is forty characters long ok!!")),
+			Text("x"),
+		),
+	))
+	buf := NewBuffer(60, 3)
+	tmpl.Execute(buf, 60, 3)
+	// inner HBox gets 40; 0.5*40 = 20 clamp + sibling 1 = 21
+	if got := tmpl.geom[1].W; got != 21 {
+		t.Errorf("pct bound in content-sizing parent should clamp to 21, got W=%d", got)
+	}
+}
