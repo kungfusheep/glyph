@@ -1127,16 +1127,6 @@ func TestMaxWidthHugsLongestWrappedLine(t *testing.T) {
 	}
 }
 
-func TestMaxWidthPctClampsToFraction(t *testing.T) {
-	// MaxWidthPct caps at a fraction of available width; long content clamps there
-	tmpl := Build(VBox.MaxWidthPct(0.25)(Text("this is a very long line exceeding the quarter budget")))
-	buf := NewBuffer(40, 3)
-	tmpl.Execute(buf, 40, 3)
-	if got := tmpl.geom[0].W; got != 10 {
-		t.Errorf("0.25 of 40 should clamp to 10, got W=%d", got)
-	}
-}
-
 func TestMaxWidthWithBorderHugsContent(t *testing.T) {
 	// border chrome is added on top of the hugged content width
 	tmpl := Build(VBox.MaxWidth(20).Border(BorderSingle)(Text("hey")))
@@ -1178,22 +1168,6 @@ func TestMaxWidthClampsInContentSizingParent(t *testing.T) {
 	// clamped child 20 + sibling 1 = 21, not the unwrapped ~41
 	if got := tmpl.geom[0].W; got != 21 {
 		t.Errorf("content-sizing parent should size to clamped child (21), got W=%d", got)
-	}
-}
-
-func TestMaxWidthPctClampsInContentSizingParent(t *testing.T) {
-	// pct bound resolves against the avail threaded into the intrinsic pass
-	tmpl := Build(VBox.Width(40)(
-		HBox.FitContent()(
-			VBox.MaxWidthPct(0.5)(Text("this label is forty characters long ok!!")),
-			Text("x"),
-		),
-	))
-	buf := NewBuffer(60, 3)
-	tmpl.Execute(buf, 60, 3)
-	// inner HBox gets 40; 0.5*40 = 20 clamp + sibling 1 = 21
-	if got := tmpl.geom[1].W; got != 21 {
-		t.Errorf("pct bound in content-sizing parent should clamp to 21, got W=%d", got)
 	}
 }
 

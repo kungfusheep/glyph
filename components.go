@@ -115,7 +115,6 @@ type VBoxC struct {
 	flexGrow         float32
 	fitContent       bool
 	maxWidth         int16
-	maxWidthPct      float32
 	overflow         OverflowMode
 	margin           [4]int16 // top, right, bottom, left
 	padding          [4]int16 // top, right, bottom, left
@@ -414,16 +413,6 @@ func (f VBoxFn) MaxWidth(n int) VBoxFn {
 	}
 }
 
-// MaxWidthPct caps the container at a fraction (0..1) of the parent's width;
-// otherwise like MaxWidth.
-func (f VBoxFn) MaxWidthPct(p float32) VBoxFn {
-	return func(children ...Component) VBoxC {
-		v := f(children...)
-		v.maxWidthPct = p
-		return v
-	}
-}
-
 // Overflow controls whether content exceeding an explicit Height is clipped to
 // the box (the default) or allowed to render past it (OverflowVisible).
 func (f VBoxFn) Overflow(m OverflowMode) VBoxFn {
@@ -526,7 +515,6 @@ type HBoxC struct {
 	flexGrow         float32
 	fitContent       bool
 	maxWidth         int16
-	maxWidthPct      float32
 	overflow         OverflowMode
 	margin           [4]int16 // top, right, bottom, left
 	padding          [4]int16 // top, right, bottom, left
@@ -821,16 +809,6 @@ func (f HBoxFn) MaxWidth(n int) HBoxFn {
 	return func(children ...Component) HBoxC {
 		h := f(children...)
 		h.maxWidth = int16(n)
-		return h
-	}
-}
-
-// MaxWidthPct caps the container at a fraction (0..1) of the parent's width;
-// otherwise like MaxWidth.
-func (f HBoxFn) MaxWidthPct(p float32) HBoxFn {
-	return func(children ...Component) HBoxC {
-		h := f(children...)
-		h.maxWidthPct = p
 		return h
 	}
 }
