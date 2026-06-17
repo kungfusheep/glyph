@@ -1544,6 +1544,29 @@ func (b *Buffer) Blit(src *Buffer, srcX, srcY, dstX, dstY, width, height int) {
 		height = b.height - dstY
 	}
 
+	// Honour the active clip rect so a blitted source (e.g. a LayerView) is
+	// contained by a fixed-height/clipped box instead of bleeding past it.
+	if b.hasClip {
+		if dstX < b.clipMinX {
+			d := b.clipMinX - dstX
+			width -= d
+			srcX += d
+			dstX = b.clipMinX
+		}
+		if dstY < b.clipMinY {
+			d := b.clipMinY - dstY
+			height -= d
+			srcY += d
+			dstY = b.clipMinY
+		}
+		if dstX+width > b.clipMaxX {
+			width = b.clipMaxX - dstX
+		}
+		if dstY+height > b.clipMaxY {
+			height = b.clipMaxY - dstY
+		}
+	}
+
 	// Nothing to copy
 	if width <= 0 || height <= 0 {
 		return

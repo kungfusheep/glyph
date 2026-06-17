@@ -1196,3 +1196,180 @@ func TestMaxWidthPctClampsInContentSizingParent(t *testing.T) {
 		t.Errorf("pct bound in content-sizing parent should clamp to 21, got W=%d", got)
 	}
 }
+
+func TestFixedHeightClipsContent(t *testing.T) {
+	// a VBox with explicit Height(2) holding 5 lines must show only the first 2
+	// and NOT let the rest escape onto the sibling below.
+	tmpl := Build(VBox(
+		VBox.Height(2)(
+			Text("L1"), Text("L2"), Text("L3"), Text("L4"), Text("L5"),
+		),
+		Text("AFTER"),
+	))
+	buf := NewBuffer(20, 12)
+	tmpl.Execute(buf, 20, 12)
+
+	get := func(y int) string { return strings.TrimRight(extractLine(buf, y, 8), " \x00") }
+	if get(0) != "L1" {
+		t.Errorf("row 0: want L1, got %q", get(0))
+	}
+	if get(1) != "L2" {
+		t.Errorf("row 1: want L2, got %q", get(1))
+	}
+	// row 2 is the sibling — the box owns exactly 2 rows
+	if get(2) != "AFTER" {
+		t.Errorf("row 2: want AFTER (sibling at declared height), got %q", get(2))
+	}
+	// L3/L4/L5 must NOT have escaped the box onto rows 3+
+	for y := 3; y < 8; y++ {
+		if g := get(y); g != "" {
+			t.Errorf("row %d: content escaped fixed-height box: %q", y, g)
+		}
+	}
+}
+
+func TestFixedHeightBorderedClipsBetweenBorders(t *testing.T) {
+	// bordered fixed-height box reserves both border rows and clips content between
+	tmpl := Build(VBox(
+		VBox.Height(3).Border(BorderSingle)(
+			Text("A"), Text("B"), Text("C"), Text("D"),
+		),
+		Text("AFTER"),
+	))
+	buf := NewBuffer(20, 12)
+	tmpl.Execute(buf, 20, 12)
+	get := func(y int) string { return strings.TrimRight(extractLine(buf, y, 8), " \x00") }
+	// rows: 0 top border, 1 content (A), 2 bottom border, 3 sibling
+	if buf.Get(0, 0).Rune != '┌' {
+		t.Errorf("row 0 should be top border, got %q", buf.Get(0, 0).Rune)
+	}
+	if !strings.Contains(get(1), "A") {
+		t.Errorf("row 1 should show A, got %q", get(1))
+	}
+	if get(3) != "AFTER" {
+		t.Errorf("row 3 should be the sibling, got %q", get(3))
+	}
+	// B/C/D must not escape below the box
+	for y := 4; y < 8; y++ {
+		if g := get(y); g != "" {
+			t.Errorf("row %d: content escaped bordered fixed-height box: %q", y, g)
+		}
+	}
+}
+
+func TestFixedHeightOverflowVisibleOptOut(t *testing.T) {
+	// .Overflow(OverflowVisible) restores the old escape-the-box behaviour:
+	// with 5 children in a Height(2) box, L4/L5 spill past the sibling row.
+	tmpl := Build(VBox(
+		VBox.Height(2).Overflow(OverflowVisible)(
+			Text("L1"), Text("L2"), Text("L3"), Text("L4"), Text("L5"),
+		),
+		Text("AFTER"),
+	))
+	buf := NewBuffer(20, 12)
+	tmpl.Execute(buf, 20, 12)
+	get := func(y int) string { return strings.TrimRight(extractLine(buf, y, 8), " \x00") }
+	// with overflow visible, the overflow lines escape below the sibling
+	found := false
+	for y := 3; y < 8; y++ {
+		if strings.Contains(get(y), "L4") || strings.Contains(get(y), "L5") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Overflow(OverflowVisible) should let content escape the box")
+	}
+}
+
+func TestFixedHeightClipsLayerView(t *testing.T) {
+	// a LayerView taller than its fixed-height box must clip at the box edge,
+	// not bleed past it — guards that Blit honours the active clip rect.
+	layer := NewLayer()
+	layer.EnsureSize(12, 6)
+	for i := 0; i < 6; i++ {
+		layer.SetLineString(i, "LAYERROW"+string(rune('0'+i)), DefaultStyle())
+	}
+	tmpl := Build(VBox(
+		VBox.Height(2)(LayerView(layer).ViewHeight(6)),
+		Text("AFTER"),
+	))
+	buf := NewBuffer(20, 12)
+	tmpl.Execute(buf, 20, 12)
+	get := func(y int) string { return strings.TrimRight(extractLine(buf, y, 12), " \x00") }
+	// only the first 2 layer rows fit; row 2 is the sibling
+	if !strings.Contains(get(0), "LAYERROW0") {
+		t.Errorf("row 0 should show first layer row, got %q", get(0))
+	}
+	if get(2) != "AFTER" {
+		t.Errorf("row 2 should be the sibling, got %q", get(2))
+	}
+	// layer rows 2..5 must NOT bleed below the box
+	for y := 3; y < 9; y++ {
+		if strings.Contains(get(y), "LAYERROW") {
+			t.Errorf("row %d: layer content escaped the fixed-height box: %q", y, get(y))
+		}
+	}
+}
+
+func TestFixedHeightClipsPerForEachItem(t *testing.T) {
+	// per-item fixed-height boxes in a ForEach each clip their own content
+	// (exercises the renderSubOp clip path, not just top-level renderOp).
+	type row struct{ lines []string }
+	rows := []row{
+		{lines: []string{"a1", "a2", "a3", "a4"}},
+		{lines: []string{"b1", "b2", "b3", "b4"}},
+	}
+	tmpl := Build(VBox(
+		ForEach(&rows, func(r *row) Component {
+			return VBox.Height(1)(
+				ForEach(&r.lines, func(s *string) Component { return Text(s) }),
+			)
+		}),
+	))
+	buf := NewBuffer(20, 12)
+	tmpl.Execute(buf, 20, 12)
+	get := func(y int) string { return strings.TrimRight(extractLine(buf, y, 8), " \x00") }
+	// each Height(1) box shows only its first line; rows stack 1-high
+	if get(0) != "a1" {
+		t.Errorf("row 0: want a1, got %q", get(0))
+	}
+	if get(1) != "b1" {
+		t.Errorf("row 1: want b1 (second item, clipped to 1 high), got %q", get(1))
+	}
+	// no a2/a3/a4 or b2.. escaping
+	for y := 2; y < 8; y++ {
+		if g := get(y); g != "" {
+			t.Errorf("row %d: per-item content escaped Height(1) box: %q", y, g)
+		}
+	}
+}
+
+func BenchmarkFixedHeightClipRender(b *testing.B) {
+	// fixed-height container with overflowing content (clip path active)
+	tmpl := Build(VBox.Height(10)(
+		ForEach(&[]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, func(i *int) Component {
+			return Text("row of dashboard content here")
+		}),
+	))
+	buf := NewBuffer(60, 30)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for n := 0; n < b.N; n++ {
+		tmpl.Execute(buf, 60, 30)
+	}
+}
+
+func BenchmarkNoClipRender(b *testing.B) {
+	// same content, no fixed height (no clip — the common path, must be unchanged)
+	tmpl := Build(VBox(
+		ForEach(&[]int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}, func(i *int) Component {
+			return Text("row of dashboard content here")
+		}),
+	))
+	buf := NewBuffer(60, 30)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for n := 0; n < b.N; n++ {
+		tmpl.Execute(buf, 60, 30)
+	}
+}

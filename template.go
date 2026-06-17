@@ -727,6 +727,7 @@ type Op struct {
 	FitContent   bool    // size to content instead of filling available space
 	MaxWidth     int16   // >0: size to content but never exceed this (wrapping content wraps at it)
 	MaxWidthPct  float32 // >0: like MaxWidth but as a fraction of available width
+	Overflow     OverflowMode // clip children to an explicit-Height box (default) or let them overflow
 
 	// Container
 	IsRow        bool        // true=HBox, false=VBox
@@ -4254,6 +4255,7 @@ func (t *Template) compileVBoxC(v VBoxC, parent int16, depth int, elemBase unsaf
 	)
 	t.ops[idx].MaxWidth = v.maxWidth
 	t.ops[idx].MaxWidthPct = v.maxWidthPct
+	t.ops[idx].Overflow = v.overflow
 	t.applyContainerDynamics(idx, v.nodeRef, v.opacityMode, v.gapPtr, v.gapCond, v.fillPtr, v.fillCond, v.localStyle, v.localStylePtr, v.localStyleCond, v.opacity, elemBase, elemSize)
 	return idx
 }
@@ -4284,6 +4286,7 @@ func (t *Template) compileHBoxC(v HBoxC, parent int16, depth int, elemBase unsaf
 	)
 	t.ops[idx].MaxWidth = v.maxWidth
 	t.ops[idx].MaxWidthPct = v.maxWidthPct
+	t.ops[idx].Overflow = v.overflow
 	t.applyContainerDynamics(idx, v.nodeRef, v.opacityMode, v.gapPtr, v.gapCond, v.fillPtr, v.fillCond, v.localStyle, v.localStylePtr, v.localStyleCond, v.opacity, elemBase, elemSize)
 	return idx
 }
@@ -8114,6 +8117,14 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 		t.refOpacity = effectiveRefOpacity
 		t.refOpacitySet = true
 
+		// clip children to the box when it has an explicit Height (content could
+		// exceed it) unless overflow is explicitly visible — a fixed-height box
+		// owns exactly its declared rows instead of letting content escape.
+		clipFixedHeight := op.height() > 0 && op.Overflow != OverflowVisible
+		if clipFixedHeight {
+			buf.PushClip(0, int(boxY+op.Border.PadTop()), buf.Width(), int(contentBottom))
+		}
+
 		// Render children with this container's position as their origin
 		// children's LocalX/Y already include margin+border offsets from layoutContainer
 		for i := op.ChildStart; i < op.ChildEnd; i++ {
@@ -8122,6 +8133,10 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 				continue
 			}
 			t.renderOp(buf, i, absX, absY, contentW)
+		}
+
+		if clipFixedHeight {
+			buf.PopClip()
 		}
 
 		if hasOpacity && opacity < 1 {
@@ -8694,6 +8709,13 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 		t.refOpacity = effectiveRefOpacity
 		t.refOpacitySet = true
 
+		// clip children to an explicit-Height box (see renderOp) unless overflow
+		// is visible — keeps per-item fixed-height boxes from bleeding too.
+		clipFixedHeight := op.height() > 0 && op.Overflow != OverflowVisible
+		if clipFixedHeight {
+			buf.PushClip(0, int(boxY+op.Border.PadTop()), buf.Width(), int(contentBottom))
+		}
+
 		// Recurse into children with this container's position as their origin
 		// children's LocalX/Y already include margin+border offsets
 		for i := op.ChildStart; i < op.ChildEnd; i++ {
@@ -8702,6 +8724,10 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 				continue
 			}
 			t.renderSubOp(buf, i, absX, absY, contentW, elemBase)
+		}
+
+		if clipFixedHeight {
+			buf.PopClip()
 		}
 
 		// Restore inherited style, fill, and clip

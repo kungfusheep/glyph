@@ -319,6 +319,21 @@ const (
 	OpacityPaint
 )
 
+// OverflowMode controls whether a container with an explicit Height clips
+// content that exceeds the box. The zero value clips (the safe default — an
+// explicit height should bound its content); OverflowVisible opts out and lets
+// content render past the box, the pre-clip behaviour.
+type OverflowMode uint8
+
+const (
+	// OverflowHidden clips children to the container's box when it has an
+	// explicit Height. This is the default for fixed-height containers.
+	OverflowHidden OverflowMode = iota
+	// OverflowVisible lets content render beyond a fixed-height box (escape
+	// hatch for the rare case that deliberately overflows).
+	OverflowVisible
+)
+
 // DefaultStyle returns a style with default colours and no attributes.
 func DefaultStyle() Style {
 	return Style{
