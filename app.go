@@ -76,6 +76,14 @@ type App struct {
 	suspended      atomic.Bool // when set, render() is a no-op (terminal handed to an external program, e.g. $EDITOR)
 	effectsActive  bool        // previous frame used post-processing; clear pooled buffers fully
 
+	// cache-effects skip gate (ADR 19): on a frame whose only trigger is an
+	// effect's animation, skip Execute and re-run effects over the cached render.
+	appDirty          bool    // a RequestRender happened since the last full render — forces a full Execute
+	effectFramePending bool   // this frame was requested by an effect's animation (the only case we skip Execute)
+	cleanValid        bool    // cleanBuf holds a valid pristine (pre-effects) render
+	cleanBuf          *Buffer // persistent snapshot of the last full render, before effects
+	lastAnimating     bool    // last Execute reported a template animation — don't skip while animating
+
 	// Cursor state
 	cursorX, cursorY int
 	cursorVisible    bool
@@ -888,11 +896,27 @@ func (a *App) drainApplies() {
 }
 
 func (a *App) RequestRender() {
+	// any caller of RequestRender (input, Apply, resize, view change, and
+	// template animations via t.requestRender) is a real state change — mark the
+	// app dirty so the next frame does a full Execute, not an effect-only skip.
+	a.appDirty = true
 	a.reqGen.Add(1)
 	select {
 	case a.renderChan <- struct{}{}:
 	default:
 		// Already a render pending
+	}
+}
+
+// requestEffectFrame schedules another frame WITHOUT marking the app dirty — used
+// by an animating screen effect that wants to advance over unchanged app output.
+// The next frame can then skip Execute and re-run effects over the cached render.
+func (a *App) requestEffectFrame() {
+	a.effectFramePending = true
+	a.reqGen.Add(1)
+	select {
+	case a.renderChan <- struct{}{}:
+	default:
 	}
 }
 
@@ -942,6 +966,12 @@ func (a *App) render() {
 	// apply queued state pushes first — frame top, under the lock, before
 	// any reads
 	a.drainApplies()
+
+	// consume the effect-frame request: only a frame an effect explicitly asked
+	// for (via requestEffectFrame) is eligible to skip Execute. A direct render()
+	// or a RequestRender-driven frame always does a full Execute.
+	effectFrame := a.effectFramePending
+	a.effectFramePending = false
 
 	var t0, t1 time.Time
 	if DebugTiming {
@@ -998,6 +1028,26 @@ func (a *App) render() {
 			return // No view set
 		}
 	}
+	// effect-only skip (ADR 19): when nothing in the app changed since the last
+	// full render and that frame ran effects, reuse the cached pristine render and
+	// re-run the effect pipeline over it instead of re-Executing the whole
+	// template. Conservative — fullscreen only, never while animating a template,
+	// in jump mode, or when a full flush is forced.
+	if effectFrame && !a.appDirty && a.cleanValid && a.effectsActive && !a.lastAnimating &&
+		!a.inline && !a.forceFullFlush && !DebugFullRedraw && !a.JumpModeActive() &&
+		a.cleanBuf != nil && a.cleanBuf.Width() == size.Width &&
+		a.cleanBuf.Height() == size.Height {
+		a.copyToScreen(a.cleanBuf) // back = pristine cached render
+		a.screen.forceRGB = true
+		a.applyEffects(a.screen.Buffer(), activeTmpl.ScreenEffects(), size.Width, int(renderHeight))
+		a.screen.Flush()
+		if a.cursorColorSet {
+			a.screen.BufferCursorColor(a.cursorColor)
+		}
+		a.screen.BufferCursor(a.cursorX, a.cursorY, a.cursorVisible, a.cursorShape)
+		a.screen.FlushBuffer()
+		return
+	}
 	if a.JumpModeActive() {
 		a.jumpMode.ClearTargets()
 	}
@@ -1035,6 +1085,16 @@ func (a *App) render() {
 		lastRenderTime = t1.Sub(t0)
 	}
 
+	// snapshot the pristine (pre-effects) render so an effect-only frame can
+	// reuse it and skip Execute. cleanBuf is sized to the screen and reused.
+	if a.cleanBuf == nil || a.cleanBuf.Width() != buf.Width() || a.cleanBuf.Height() != buf.Height() {
+		a.cleanBuf = NewBuffer(buf.Width(), buf.Height())
+	}
+	a.cleanBuf.CopyFrom(buf)
+	a.cleanValid = true
+	a.appDirty = false
+	a.lastAnimating = activeTmpl.Animating()
+
 	// post-processing pipeline: tree-declared ScreenEffects first, then imperative
 	treeEffects := activeTmpl.ScreenEffects()
 	effectsActive := len(treeEffects) > 0 || len(a.postProcess) > 0
@@ -1046,54 +1106,7 @@ func (a *App) render() {
 			tEffect = time.Now()
 		}
 
-		// resolve Color16 cells to detected palette RGB before effects run
-		resolveColor16(buf, size.Width, int(renderHeight))
-
-		now := time.Now()
-		if a.startTime.IsZero() {
-			a.startTime = now
-		}
-		var delta time.Duration
-		if !a.lastFrameTime.IsZero() {
-			delta = now.Sub(a.lastFrameTime)
-		}
-		a.lastFrameTime = now
-
-		// OSC 10/11 query populates a.defaultFG/BG but only if the
-		// terminal supports it. When it doesn't, effects that key off
-		// ctx.DefaultFG (anything going through lerpIfRGB) silently skip
-		// painting unstyled cells. Falling back to the explicit
-		// SetDefaultStyle values means effects work even without OSC.
-		ppFG := a.defaultFG
-		if ppFG.Mode == ColorDefault {
-			ppFG = a.defaultStyle.FG
-		}
-		ppBG := a.defaultBG
-		if ppBG.Mode == ColorDefault {
-			ppBG = a.defaultStyle.BG
-		}
-		var animReq bool
-		ppCtx := PostContext{
-			Width:     size.Width,
-			Height:    int(renderHeight),
-			Frame:     a.frameCount,
-			Delta:     delta,
-			Time:      now.Sub(a.startTime),
-			DefaultFG: ppFG,
-			DefaultBG: ppBG,
-			animReq:   &animReq,
-		}
-		for _, pp := range treeEffects {
-			pp.Apply(buf, ppCtx)
-		}
-		for _, pp := range a.postProcess {
-			pp.Apply(buf, ppCtx)
-		}
-		if animReq {
-			a.RequestRender()
-		}
-		buf.MarkAllDirty()
-		a.frameCount++
+		a.applyEffects(buf, treeEffects, size.Width, int(renderHeight))
 
 		if DebugTiming {
 			lastEffectTime = time.Since(tEffect)
@@ -1152,6 +1165,60 @@ func (a *App) render() {
 func (a *App) copyToScreen(src *Buffer) {
 	dst := a.screen.Buffer()
 	dst.CopyFrom(src) // Fast bulk copy
+}
+
+// applyEffects runs the post-processing pipeline over buf: resolve Color16,
+// build the frame PostContext, apply tree + imperative effects, and request
+// another frame if any effect is mid-animation. Shared by the full-render path
+// and the effect-only skip path (ADR 19).
+func (a *App) applyEffects(buf *Buffer, treeEffects []Effect, width, height int) {
+	// resolve Color16 cells to detected palette RGB before effects run
+	resolveColor16(buf, width, height)
+
+	now := time.Now()
+	if a.startTime.IsZero() {
+		a.startTime = now
+	}
+	var delta time.Duration
+	if !a.lastFrameTime.IsZero() {
+		delta = now.Sub(a.lastFrameTime)
+	}
+	a.lastFrameTime = now
+
+	// OSC 10/11 populates defaultFG/BG only if the terminal supports it; fall
+	// back to the explicit SetDefaultStyle values so effects work either way.
+	ppFG := a.defaultFG
+	if ppFG.Mode == ColorDefault {
+		ppFG = a.defaultStyle.FG
+	}
+	ppBG := a.defaultBG
+	if ppBG.Mode == ColorDefault {
+		ppBG = a.defaultStyle.BG
+	}
+	var animReq bool
+	ppCtx := PostContext{
+		Width:     width,
+		Height:    height,
+		Frame:     a.frameCount,
+		Delta:     delta,
+		Time:      now.Sub(a.startTime),
+		DefaultFG: ppFG,
+		DefaultBG: ppBG,
+		animReq:   &animReq,
+	}
+	for _, pp := range treeEffects {
+		pp.Apply(buf, ppCtx)
+	}
+	for _, pp := range a.postProcess {
+		pp.Apply(buf, ppCtx)
+	}
+	if animReq {
+		// effect wants another frame but app state is unchanged — schedule a
+		// frame without dirtying the app so the next one can skip Execute.
+		a.requestEffectFrame()
+	}
+	buf.MarkAllDirty()
+	a.frameCount++
 }
 
 // TimingString returns a formatted timing string.
