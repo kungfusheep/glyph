@@ -92,3 +92,24 @@ Raised per ADR 10's escape hatch. Confirmed by the owner (Glyph Smith, m426/m438
 that no such primitive exists, the shape + value are endorsed, and this is the
 proposal route; he will review/own it. No implementation written ahead of a
 verdict. chat ships budget-width bubbles for v1 and adopts MaxWidth when it lands.
+
+## Amendment (2026-06-17): MaxWidth is a pure cap; MaxWidthPct dropped
+
+After review (recap #367), the semantics were simplified on the owner's call:
+
+- **MaxWidth is a pure upper bound**, not a content-sizing mode. The component
+  sizes by its normal rule (default fill, FitContent, Grow, WidthPct) and
+  MaxWidth only clamps the result: `width = min(computed, MaxWidth)`. It implies
+  no sizing of its own — the original "hug the longest wrapped line" behaviour is
+  gone, because it baked a scaling rule into what should be just a constraint.
+- The content-hug-to-a-budget use case (chat bubbles) is now a **composition**:
+  `FitContent().MaxWidth(n)` — FitContent hugs, MaxWidth caps. Wrappable content
+  wraps to the (narrower) capped width naturally, as a consequence of the
+  container being narrower, not a special pass. `measureMaxWidthContent` (the
+  wrap-then-measure helper) was removed.
+- **MaxWidthPct dropped** — it overlapped with Grow + MaxWidth and had no
+  consumer; revisit only if a concrete need appears.
+
+This makes MaxWidth orthogonal and composable, at the cost of the
+hug-to-longest-wrapped-line nicety (a budget-width box no longer shrinks to its
+longest produced line; it stays the cap width). Accepted as the better trade.

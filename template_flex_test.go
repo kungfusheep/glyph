@@ -1095,13 +1095,24 @@ func TestForEachPerItemFlexPointersRebind(t *testing.T) {
 	}
 }
 
-func TestMaxWidthHugsShortContent(t *testing.T) {
-	// a pill with a short label sizes to the label, not the bound
+func TestMaxWidthCapsFill(t *testing.T) {
+	// MaxWidth is a pure cap: with the default fill sizing, a short label still
+	// fills up to the bound (no implicit hug) — hugging is FitContent's job.
 	tmpl := Build(VBox.MaxWidth(20)(Text("hi")))
 	buf := NewBuffer(40, 3)
 	tmpl.Execute(buf, 40, 3)
+	if got := tmpl.geom[0].W; got != 20 {
+		t.Errorf("MaxWidth alone caps the fill at 20, got W=%d", got)
+	}
+}
+
+func TestMaxWidthFitContentHugsUnderCap(t *testing.T) {
+	// FitContent + MaxWidth: hug the content, capped at the bound.
+	tmpl := Build(VBox.FitContent().MaxWidth(20)(Text("hi")))
+	buf := NewBuffer(40, 3)
+	tmpl.Execute(buf, 40, 3)
 	if got := tmpl.geom[0].W; got != 2 {
-		t.Errorf("short content should hug to 2, got W=%d", got)
+		t.Errorf("FitContent under the cap should hug to 2, got W=%d", got)
 	}
 }
 
@@ -1115,21 +1126,24 @@ func TestMaxWidthClampsLongSingleLine(t *testing.T) {
 	}
 }
 
-func TestMaxWidthHugsLongestWrappedLine(t *testing.T) {
-	// a TextBlock wraps at the bound and the container hugs the longest line
-	// "the quick brown fox jumps over" word-wrapped at 20:
-	//   "the quick brown fox" (19)  /  "jumps over" (10)  -> longest 19
+func TestMaxWidthWrapsToCappedWidth(t *testing.T) {
+	// MaxWidth narrows the container, so wrappable content wraps to the cap —
+	// the container is the cap width (20), not the longest wrapped line.
 	tmpl := Build(VBox.MaxWidth(20)(TextBlock("the quick brown fox jumps over")))
 	buf := NewBuffer(60, 5)
 	tmpl.Execute(buf, 60, 5)
-	if got := tmpl.geom[0].W; got != 19 {
-		t.Errorf("wrapping content should hug longest wrapped line 19, got W=%d", got)
+	if got := tmpl.geom[0].W; got != 20 {
+		t.Errorf("MaxWidth caps the container to 20 (text wraps to it), got W=%d", got)
+	}
+	// and the text actually wrapped (more than one row used)
+	if buf.GetLine(1) == "" {
+		t.Error("text should wrap to a second line at the capped width")
 	}
 }
 
-func TestMaxWidthWithBorderHugsContent(t *testing.T) {
-	// border chrome is added on top of the hugged content width
-	tmpl := Build(VBox.MaxWidth(20).Border(BorderSingle)(Text("hey")))
+func TestMaxWidthFitContentBorderHugsUnderCap(t *testing.T) {
+	// FitContent + MaxWidth + border: hug content + border chrome, under the cap.
+	tmpl := Build(VBox.FitContent().MaxWidth(20).Border(BorderSingle)(Text("hey")))
 	buf := NewBuffer(40, 5)
 	tmpl.Execute(buf, 40, 5)
 	// content 3 + border 2 = 5, under the bound so no clamp
