@@ -164,3 +164,38 @@ func BenchmarkRenderEffectOnlyFrame(b *testing.B) {
 		a.render()
 	}
 }
+
+// TestExecuteNotCalledOnSkip directly asserts Execute does NOT run on an
+// effect-only frame: a Text bound to a counter-incrementing func only ticks when
+// the template is Executed, so the count stays flat across effect frames.
+func TestExecuteNotCalledOnSkip(t *testing.T) {
+	executes := 0
+	tmpl := Build(VBox(
+		Text(func() string { executes++; return "x" }),
+		ScreenEffect(SETint(RGB(200, 100, 50)).Strength(0.5)),
+	))
+	a := newEffectTestApp(tmpl, 20, 4)
+
+	a.appDirty = true
+	a.render() // full
+	base := executes
+	if base == 0 {
+		t.Fatal("expected at least one Execute on the first frame")
+	}
+
+	// 5 effect-only frames must NOT increment the Execute counter
+	for i := 0; i < 5; i++ {
+		a.requestEffectFrame()
+		a.render()
+	}
+	if executes != base {
+		t.Fatalf("Execute ran on effect-only frames: count %d -> %d (expected flat)", base, executes)
+	}
+
+	// a real RequestRender must Execute again
+	a.RequestRender()
+	a.render()
+	if executes <= base {
+		t.Fatalf("RequestRender should Execute: count stayed %d", executes)
+	}
+}
