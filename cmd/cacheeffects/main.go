@@ -68,7 +68,7 @@ func main() {
 		// self-animates), and the built-in SEVignette breathes the edges dark via
 		// an Osc on its Strength — the oscillator drives EFFECT frames (ADR 19 v2),
 		// so the built-in effect oscillates over the cached render without Execute.
-		ScreenEffect(pulse{}, SEVignette().Smooth().Strength(Osc(0.5).Range(0.15, 0.85))),
+		ScreenEffect(pulse{}, SEVignette().Smooth().Strength(Osc(0.5).Ease(EaseInOutBack).Range(0.15, 0.85))),
 	}
 
 	app.SetView(VBox.Grow(1).Fill(RGB(12, 14, 20))(children...)).

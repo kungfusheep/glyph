@@ -84,6 +84,14 @@ type App struct {
 	cleanBuf          *Buffer // persistent snapshot of the last full render, before effects
 	lastAnimating     bool    // last Execute reported a template animation — don't skip while animating
 
+	// render pacing (m793): how long the last terminal write (FlushBuffer) took.
+	// when the terminal can't drain as fast as we render, writes back up and a
+	// frame can take seconds to reach the screen (tearing). we use this to back
+	// off — coalesce per-key input renders and widen the debounce — so we never
+	// queue more frames than the terminal can absorb. lock-free: written after a
+	// flush (render goroutine), read by the input goroutine.
+	lastWriteNs atomic.Int64
+
 	// Cursor state
 	cursorX, cursorY int
 	cursorVisible    bool
@@ -1153,13 +1161,14 @@ func (a *App) render() {
 		}
 		a.screen.BufferCursor(a.cursorX, a.cursorY, a.cursorVisible, a.cursorShape)
 
-		var tWrite time.Time
-		if DebugTiming {
-			tWrite = time.Now()
-		}
+		// always time the write: it's the terminal-drain signal the input
+		// goroutine reads to decide whether to coalesce renders (m793).
+		tWrite := time.Now()
 		a.screen.FlushBuffer() // single Write() syscall to terminal
+		writeDur := time.Since(tWrite)
+		a.lastWriteNs.Store(int64(writeDur))
 		if DebugTiming {
-			lastWriteTime = time.Since(tWrite)
+			lastWriteTime = writeDur
 		}
 	}
 
@@ -1364,14 +1373,25 @@ func (a *App) run(startView string) error {
 	// render immediately on input for zero-latency response;
 	// signal debounce timer to skip its next frame since we just rendered
 	err := a.input.Run(a.reader, func(handled bool) {
-		if a.running {
-			// drain any pending render request so the debounce timer won't double-render
-			select {
-			case <-a.renderChan:
-			default:
-			}
-			a.render()
+		if !a.running {
+			return
 		}
+		// render immediately for zero-latency response — UNLESS the terminal is
+		// behind. when the last write took longer than a frame budget, the PTY is
+		// backed up; another synchronous blocking write here would queue behind it
+		// and a held key (e.g. ?) would stack seconds of frames, tearing the
+		// screen (m793). in that case coalesce: hand off to the debounced render
+		// goroutine, which drops to the latest state at the terminal's drain rate.
+		if time.Duration(a.lastWriteNs.Load()) > behindThreshold {
+			a.RequestRender()
+			return
+		}
+		// drain any pending render request so the debounce timer won't double-render
+		select {
+		case <-a.renderChan:
+		default:
+		}
+		a.render()
 	})
 
 	// Normal termination via Stop() causes reader to return error
@@ -1383,6 +1403,34 @@ func (a *App) run(startView string) error {
 		return nil
 	}
 	return err
+}
+
+const (
+	// baseDebounce is the resting coalescing window (~120fps ceiling); it keeps
+	// latency low when the terminal can keep up.
+	baseDebounce = 8 * time.Millisecond
+	// maxDebounce caps the adaptive backoff so a momentarily slow terminal can't
+	// stall rendering indefinitely.
+	maxDebounce = 100 * time.Millisecond
+	// behindThreshold: a write slower than this means the terminal can't sustain
+	// 60fps; past it we stop forcing synchronous per-key renders and let the
+	// debounced goroutine drop to the latest state.
+	behindThreshold = 16 * time.Millisecond
+)
+
+// pacingInterval returns the debounce window for the next coalesced frame. When
+// the last terminal write was slow, it widens toward the actual drain rate so we
+// don't enqueue frames the terminal can't absorb (m793). Clamped to
+// [baseDebounce, maxDebounce].
+func (a *App) pacingInterval() time.Duration {
+	last := time.Duration(a.lastWriteNs.Load())
+	if last <= baseDebounce {
+		return baseDebounce
+	}
+	if last > maxDebounce {
+		return maxDebounce
+	}
+	return last
 }
 
 // handleRenderRequests processes async render requests with frame debouncing.
@@ -1402,7 +1450,10 @@ func (a *App) handleRenderRequests() {
 			}
 			if !framePending {
 				framePending = true
-				frameTimer.Reset(8 * time.Millisecond)
+				// adaptive debounce: when the terminal is draining slowly, widen
+				// the coalescing window to match its drain rate so we never queue
+				// frames faster than they can reach the screen (m793).
+				frameTimer.Reset(a.pacingInterval())
 			}
 		case <-frameTimer.C:
 			framePending = false
