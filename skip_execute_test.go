@@ -253,13 +253,13 @@ func TestEffectOscOscillatesWhileSkippingExecute(t *testing.T) {
 	tmpl.nowFn = func() time.Time { return time.Unix(0, 0).Add(clk) }
 	a := newEffectTestApp(tmpl, 20, 8)
 
-	a.appDirty = true
+	a.appDirty.Store(true)
 	a.render() // first full frame
 	base := executes
 	if base == 0 {
 		t.Fatal("expected an Execute on the first frame")
 	}
-	if !a.effectFramePending {
+	if !a.effectFramePending.Load() {
 		t.Fatal("the effect osc should have requested the next effect frame")
 	}
 
@@ -270,7 +270,7 @@ func TestEffectOscOscillatesWhileSkippingExecute(t *testing.T) {
 	if executes != base {
 		t.Fatalf("Execute ran on osc-driven effect frames: %d -> %d (the effect osc forced Execute — v2 broken)", base, executes)
 	}
-	if !a.effectFramePending {
+	if !a.effectFramePending.Load() {
 		t.Fatal("the effect osc stopped sustaining effect frames")
 	}
 }
