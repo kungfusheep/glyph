@@ -39,43 +39,6 @@ func (pulse) Apply(buf *Buffer, ctx PostContext) {
 	ctx.RequestAnimation()
 }
 
-// oscVignette breathes a vignette in and out forever. The strength is computed
-// from ctx.Time INSIDE the effect (not bound into the template), so the
-// oscillation lives entirely on the effect-frame path and every breath skips
-// Execute. Drive the same oscillation with a template-level Osc instead and the
-// template reads as Animating(), which forces a full Execute every frame — the
-// exact thing the cache path avoids. So a built-in SEVignette().Strength(Osc(…))
-// would animate, but NOT skip; this is how you oscillate one over the cache.
-type oscVignette struct{}
-
-func (oscVignette) Apply(buf *Buffer, ctx PostContext) {
-	effectFrames++
-	// strength breathes between 0.15 (barely there) and 0.85 (heavy edges).
-	strength := 0.5 + 0.35*math.Sin(ctx.Time.Seconds()*1.5)
-	w, h := ctx.Width, ctx.Height
-	cx, cy := float64(w)/2, float64(h)/2
-	maxX := math.Max(cx, float64(w)-cx)
-	maxY := math.Max(cy, float64(h)-cy) * 2
-	maxDist := math.Sqrt(maxX*maxX + maxY*maxY)
-	black := RGB(0, 0, 0)
-	for y := 0; y < h; y++ {
-		dy := (float64(y) - cy) * 2
-		for x := 0; x < w; x++ {
-			dx := float64(x) - cx
-			dist := math.Sqrt(dx*dx+dy*dy) / maxDist
-			dim := dist * dist * strength // quadratic falloff, same shape as SEVignette
-			if dim > 1 {
-				dim = 1
-			}
-			c := buf.Get(x, y)
-			c.Style.FG = Lerp(c.Style.FG, black, dim)
-			c.Style.BG = Lerp(c.Style.BG, black, dim)
-			buf.Set(x, y, c)
-		}
-	}
-	ctx.RequestAnimation()
-}
-
 func main() {
 	app := NewApp()
 	app.SetDefaultStyle(Style{FG: RGB(200, 210, 220), BG: RGB(12, 14, 20)})
@@ -101,9 +64,11 @@ func main() {
 		Space(),
 		Text(footer).FG(RGB(120, 200, 255)),
 		// both effects animate over the SAME static dashboard, every frame
-		// skipping Execute: pulse breathes the text warm, oscVignette breathes
-		// the edges dark.
-		ScreenEffect(pulse{}, oscVignette{}),
+		// skipping Execute: pulse breathes the text warm (a custom effect that
+		// self-animates), and the built-in SEVignette breathes the edges dark via
+		// an Osc on its Strength — the oscillator drives EFFECT frames (ADR 19 v2),
+		// so the built-in effect oscillates over the cached render without Execute.
+		ScreenEffect(pulse{}, SEVignette().Smooth().Strength(Osc(0.5).Range(0.15, 0.85))),
 	}
 
 	app.SetView(VBox.Grow(1).Fill(RGB(12, 14, 20))(children...)).

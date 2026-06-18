@@ -1038,7 +1038,7 @@ func (a *App) render() {
 		a.cleanBuf.Height() == size.Height {
 		a.copyToScreen(a.cleanBuf) // back = pristine cached render
 		a.screen.forceRGB = true
-		a.applyEffects(a.screen.Buffer(), activeTmpl.ScreenEffects(), size.Width, int(renderHeight))
+		a.applyEffects(a.screen.Buffer(), activeTmpl, activeTmpl.ScreenEffects(), size.Width, int(renderHeight))
 		a.screen.Flush()
 		if a.cursorColorSet {
 			a.screen.BufferCursorColor(a.cursorColor)
@@ -1113,7 +1113,7 @@ func (a *App) render() {
 			tEffect = time.Now()
 		}
 
-		a.applyEffects(buf, treeEffects, size.Width, int(renderHeight))
+		a.applyEffects(buf, activeTmpl, treeEffects, size.Width, int(renderHeight))
 
 		if DebugTiming {
 			lastEffectTime = time.Since(tEffect)
@@ -1178,9 +1178,15 @@ func (a *App) copyToScreen(src *Buffer) {
 // build the frame PostContext, apply tree + imperative effects, and request
 // another frame if any effect is mid-animation. Shared by the full-render path
 // and the effect-only skip path (ADR 19).
-func (a *App) applyEffects(buf *Buffer, treeEffects []Effect, width, height int) {
+func (a *App) applyEffects(buf *Buffer, tmpl *Template, treeEffects []Effect, width, height int) {
 	// resolve Color16 cells to detected palette RGB before effects run
 	resolveColor16(buf, width, height)
+
+	// ADR 19 v2: resolve oscillators that feed ONLY a screen-effect parameter,
+	// here in the effect pass, so they advance over the cached render on
+	// effect-only (Execute-skipped) frames. They mark effectAnimating, not the
+	// template animating, so they drive effect frames rather than forcing Execute.
+	effectAnim := tmpl != nil && tmpl.RunEffectEvals()
 
 	now := time.Now()
 	if a.startTime.IsZero() {
@@ -1219,9 +1225,11 @@ func (a *App) applyEffects(buf *Buffer, treeEffects []Effect, width, height int)
 	for _, pp := range a.postProcess {
 		pp.Apply(buf, ppCtx)
 	}
-	if animReq {
+	if animReq || effectAnim {
 		// effect wants another frame but app state is unchanged — schedule a
 		// frame without dirtying the app so the next one can skip Execute.
+		// effectAnim: an oscillating effect parameter (ADR 19 v2) keeps the
+		// effect-frame loop alive over the cached render.
 		a.requestEffectFrame()
 	}
 	buf.MarkAllDirty()

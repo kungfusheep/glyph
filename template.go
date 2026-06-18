@@ -187,6 +187,16 @@ type Template struct {
 	// per-frame evaluators — conditions, animations, etc. run at start of Execute
 	evals []func()
 
+	// effect-param evaluators — oscillators that feed ONLY a screen-effect
+	// parameter (a post-pass). They are NOT run in Execute and do NOT mark the
+	// template animating; instead they run in the effect pass (App.applyEffects)
+	// and mark effectAnimating, so an oscillating effect drives EFFECT frames (which
+	// skip Execute over the cached render) rather than forcing a full Execute every
+	// frame. ADR 19 v2. compilingEffect routes osc compilation here.
+	effectEvals     []func()
+	effectAnimating bool
+	compilingEffect bool
+
 	// exit evaluators — non-item Animate.Out evaluators owned by this template.
 	// These can be primed when a retained branch first renders as exiting, so
 	// NodeRefs see the correct opacity before effects sample them.
@@ -1491,6 +1501,32 @@ func anyToStyle(v any) Style {
 // check this after Execute to determine if another frame is needed.
 func (t *Template) Animating() bool { return t.animating }
 
+// RunEffectEvals resolves effect-parameter oscillators against a fresh frame
+// clock and reports whether any are animating. The effect pass (App.applyEffects)
+// calls it each frame — including effect-only frames that skip Execute — so an
+// oscillating screen-effect parameter advances over the cached render without
+// forcing a full Execute. ADR 19 v2. Returns false (no work) when no effect-param
+// oscillators were compiled.
+func (t *Template) RunEffectEvals() bool {
+	root := t.evalRoot()
+	if len(root.effectEvals) == 0 {
+		return false
+	}
+	if root.nowFn != nil {
+		root.frameTime = root.nowFn()
+	} else {
+		root.frameTime = time.Now()
+	}
+	if root.oscEpoch.IsZero() {
+		root.oscEpoch = root.frameTime
+	}
+	root.effectAnimating = false
+	for _, eval := range root.effectEvals {
+		eval()
+	}
+	return root.effectAnimating
+}
+
 // compileTween resolves a tweenNode's target to a typed pointer, allocates
 // interpolation storage, and registers a per-frame evaluator that watches the
 // target and lerps toward it. all tweens in a frame share t.frameTime.
@@ -1712,16 +1748,34 @@ func (t *Template) compileTweenFloat32(tw tweenNode, elemBase unsafe.Pointer, el
 // compileOscFloat64 registers a frame evaluator deriving the oscillator's
 // value from the shared frame clock. Resolving marks the template animating,
 // so the gated ticker runs exactly while an oscillator is reachable.
+// addOscEval registers an oscillator evaluator, routing it to the effect-eval
+// list when the osc is being compiled as a screen-effect parameter (so it drives
+// effect frames, not Execute). markRoot marks animating/effectAnimating accordingly.
+func (t *Template) addOscEval(root *Template, body func()) {
+	effect := root.compilingEffect
+	eval := func() {
+		if effect {
+			root.effectAnimating = true
+		} else {
+			root.animating = true
+		}
+		body()
+	}
+	if effect {
+		root.effectEvals = append(root.effectEvals, eval)
+	} else {
+		root.evals = append(root.evals, eval)
+	}
+}
+
 func (t *Template) compileOscInt16(o OscC) *int16 {
 	root := t.evalRoot()
 	storage := new(int16)
 	var acc oscAccum
 	osc := o
-	eval := func() {
-		root.animating = true
+	t.addOscEval(root, func() {
 		*storage = int16(osc.resolve(root.frameTime.Sub(root.oscEpoch), &acc) + 0.5)
-	}
-	root.evals = append(root.evals, eval)
+	})
 	return storage
 }
 
@@ -1730,11 +1784,9 @@ func (t *Template) compileOscFloat64(o OscC) *float64 {
 	storage := new(float64)
 	var acc oscAccum
 	osc := o
-	eval := func() {
-		root.animating = true
+	t.addOscEval(root, func() {
 		*storage = osc.resolve(root.frameTime.Sub(root.oscEpoch), &acc)
-	}
-	root.evals = append(root.evals, eval)
+	})
 	return storage
 }
 
@@ -1743,11 +1795,9 @@ func (t *Template) compileOscFloat32(o OscC) *float32 {
 	storage := new(float32)
 	var acc oscAccum
 	osc := o
-	eval := func() {
-		root.animating = true
+	t.addOscEval(root, func() {
 		*storage = float32(osc.resolve(root.frameTime.Sub(root.oscEpoch), &acc))
-	}
-	root.evals = append(root.evals, eval)
+	})
 	return storage
 }
 
@@ -1756,12 +1806,10 @@ func (t *Template) compileOscColor(o OscC) *Color {
 	storage := new(Color)
 	var acc oscAccum
 	osc := o
-	eval := func() {
-		root.animating = true
+	t.addOscEval(root, func() {
 		v := osc.resolve(root.frameTime.Sub(root.oscEpoch), &acc)
 		*storage = Lerp(osc.colA, osc.colB, v)
-	}
-	root.evals = append(root.evals, eval)
+	})
 	return storage
 }
 
@@ -3436,6 +3484,12 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 	case textInput:
 		return t.compileTextInput(v, parent, depth)
 	case screenEffectNode:
+		// Mark the eval-root so oscillators compiled for these effect parameters
+		// register as effect-evals (drive effect frames) instead of template-evals
+		// (force Execute). ADR 19 v2.
+		root := t.evalRoot()
+		prevCE := root.compilingEffect
+		root.compilingEffect = true
 		for i, eff := range v.Effects {
 			if ec, ok := eff.(EffectCompilable); ok {
 				v.Effects[i] = ec.CompileEffect(effectCompiler{t: t})
@@ -3443,6 +3497,7 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 				v.Effects[i] = ec.compileEffect(t)
 			}
 		}
+		root.compilingEffect = prevCE
 		ext := &opScreenEffect{fns: v.Effects}
 		return t.addOp(Op{Kind: OpScreenEffect, Parent: parent, Ext: ext}, depth)
 	case OnC:
