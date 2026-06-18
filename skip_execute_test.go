@@ -44,7 +44,7 @@ func TestSkipExecuteOnEffectFrame(t *testing.T) {
 	app := newEffectTestApp(tmpl, 20, 4)
 
 	a := app
-	a.appDirty = true // first frame is a full render
+	a.appDirty.Store(true) // first frame is a full render
 	a.render()
 	if got := frontLine(a, 0, 20); !strings.Contains(got, "AAA") {
 		t.Fatalf("first render should show AAA, got %q", got)
@@ -80,7 +80,7 @@ func TestAnimatingTemplateNotSkipped(t *testing.T) {
 	tmpl.nowFn = func() time.Time { return clock }
 	app := newEffectTestApp(tmpl, 20, 4)
 
-	app.appDirty = true
+	app.appDirty.Store(true)
 	app.render()
 	first := frontLine(app, 0, 20)
 
@@ -107,7 +107,7 @@ func TestSkipMatchesFullRender(t *testing.T) {
 		))
 	}
 	a := newEffectTestApp(mk(), 20, 4)
-	a.appDirty = true
+	a.appDirty.Store(true)
 	a.render() // establish clean
 	a.requestEffectFrame()
 	a.render() // skip frame
@@ -156,7 +156,7 @@ func BenchmarkRenderFullFrame(b *testing.B) {
 
 func BenchmarkRenderEffectOnlyFrame(b *testing.B) {
 	a := benchRenderScene()
-	a.appDirty = true
+	a.appDirty.Store(true)
 	a.render() // establish clean
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -176,7 +176,7 @@ func TestExecuteNotCalledOnSkip(t *testing.T) {
 	))
 	a := newEffectTestApp(tmpl, 20, 4)
 
-	a.appDirty = true
+	a.appDirty.Store(true)
 	a.render() // full
 	base := executes
 	if base == 0 {

@@ -8270,7 +8270,9 @@ func (t *Template) renderLayer(buf *Buffer, op *Op, absX, absY, contentW, conten
 	if t.app != nil {
 		ext.ptr.app = t.app
 		ext.ptr.defaultStyle = t.app.defaultStyle
-		if t.app.JumpModeActive() {
+		// direct read, not JumpModeActive(): we're inside Execute, where render
+		// holds a.jumpMode.mu — a locking accessor would self-deadlock.
+		if t.app.jumpMode != nil && t.app.jumpMode.isActive() {
 			ext.ptr.Invalidate()
 		}
 	}
@@ -9155,7 +9157,7 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 	// anything visible (the span jump path filters the same way), so they
 	// must not register either. Layer offsets translate buffer-local
 	// positions to screen positions.
-	if t.app != nil && t.app.JumpModeActive() {
+	if t.app != nil && t.app.jumpMode != nil && t.app.jumpMode.isActive() {
 		if absY < 0 || int(absY) >= buf.Height() || absX < 0 || int(absX) >= buf.Width() {
 			return
 		}
@@ -9188,7 +9190,7 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 }
 
 func (t *Template) richSpanJumpFunc(buf *Buffer) spanJumpFunc {
-	if t.app == nil || !t.app.JumpModeActive() {
+	if t.app == nil || t.app.jumpMode == nil || !t.app.jumpMode.isActive() {
 		return nil
 	}
 	return func(x, y int, span Span) {
@@ -9830,7 +9832,7 @@ func (t *Template) renderAutoTable(buf *Buffer, op *Op, absX, absY, maxW int16) 
 
 	// header row
 	x := int(absX)
-	jumpActive := ext.sort != nil && t.app != nil && t.app.JumpModeActive()
+	jumpActive := ext.sort != nil && t.app != nil && t.app.jumpMode != nil && t.app.jumpMode.isActive()
 
 	for i, h := range ext.headers {
 		text := applyTransform(h, hdrStyle.Transform)
@@ -9863,10 +9865,13 @@ func (t *Template) renderAutoTable(buf *Buffer, op *Op, absX, absY, maxW int16) 
 				autoTableSort(slicePtr, fieldIdx, ss.asc)
 			}, Style{})
 
-			// draw jump label if assigned (second render pass)
+			// draw jump label if assigned (second render pass). Read the in-progress
+			// build scratch: during Execute the frame's targets live in building with
+			// no labels yet (labels are assigned at AssignLabels after Execute), so
+			// nothing draws here — paintJumpLabels paints the labelled set post-Execute.
 			jm := t.app.JumpMode()
-			for j := len(jm.Targets) - 1; j >= 0; j-- {
-				target := &jm.Targets[j]
+			for j := len(jm.building) - 1; j >= 0; j-- {
+				target := &jm.building[j]
 				if target.X == int16(x) && target.Y == int16(y) && target.Label != "" {
 					style := t.app.JumpStyle().LabelStyle
 					for k, r := range target.Label {

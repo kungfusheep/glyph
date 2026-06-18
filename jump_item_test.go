@@ -12,7 +12,7 @@ func TestJumpItemResolvesPerForEachItem(t *testing.T) {
 
 	var picked []string
 	app := NewApp()
-	app.JumpMode().Active = true
+	app.JumpMode().setActive(true)
 	tmpl := Build(VBox(
 		ForEach(&rows, func(r *row) Component {
 			return JumpItem(Text(&r.Name), func(r *row) {
@@ -23,6 +23,7 @@ func TestJumpItemResolvesPerForEachItem(t *testing.T) {
 	tmpl.SetApp(app)
 	buf := NewBuffer(20, 5)
 	tmpl.Execute(buf, 20, 5)
+	app.JumpMode().AssignLabels() // publish the frame's built targets (as render does)
 
 	targets := app.JumpMode().Targets
 	if len(targets) != 3 {
@@ -47,7 +48,7 @@ func TestJumpItemRefPassesGeometry(t *testing.T) {
 	var gotName string
 	var gotRef NodeRef
 	app := NewApp()
-	app.JumpMode().Active = true
+	app.JumpMode().setActive(true)
 	tmpl := Build(VBox(
 		ForEach(&rows, func(r *row) Component {
 			return HBox.Height(1)(
@@ -61,6 +62,7 @@ func TestJumpItemRefPassesGeometry(t *testing.T) {
 	tmpl.SetApp(app)
 	buf := NewBuffer(20, 5)
 	tmpl.Execute(buf, 20, 5)
+	app.JumpMode().AssignLabels() // publish the frame's built targets (as render does)
 
 	targets := app.JumpMode().Targets
 	if len(targets) != 2 {

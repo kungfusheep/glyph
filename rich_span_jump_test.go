@@ -84,7 +84,7 @@ func TestRichSpanRegistersNativeJumpTarget(t *testing.T) {
 	tmpl := Build(tree)
 	tmpl.SetApp(app)
 
-	app.jumpMode.Active = true
+	app.jumpMode.setActive(true)
 	buf := NewBuffer(20, 2)
 	tmpl.Execute(buf, 20, 2)
 	app.jumpMode.AssignLabels()
@@ -112,7 +112,7 @@ func TestRichSpanSelectRefReceivesRenderedBounds(t *testing.T) {
 	tmpl := Build(tree)
 	tmpl.SetApp(app)
 
-	app.jumpMode.Active = true
+	app.jumpMode.setActive(true)
 	buf := NewBuffer(20, 2)
 	tmpl.Execute(buf, 20, 2)
 	app.jumpMode.AssignLabels()
@@ -144,7 +144,7 @@ func TestScrollViewRichSpanRegistersVisibleJumpTarget(t *testing.T) {
 	tmpl := Build(tree)
 	tmpl.SetApp(app)
 
-	app.jumpMode.Active = true
+	app.jumpMode.setActive(true)
 	buf := NewBuffer(20, 4)
 	tmpl.Execute(buf, 20, 4)
 	app.jumpMode.AssignLabels()
@@ -187,7 +187,7 @@ func TestScrollViewRichSpanJumpTargetsAreVisibleOnlyAndOrderedByScreenPosition(t
 	tmpl.Execute(buf, 20, 4)
 	sv.Layer().ScrollTo(5)
 
-	app.jumpMode.Active = true
+	app.jumpMode.setActive(true)
 	buf.Clear()
 	tmpl.Execute(buf, 20, 4)
 	app.jumpMode.AssignLabels()
@@ -226,7 +226,7 @@ func TestScrollViewForEachRichSpanInheritsJumpViewport(t *testing.T) {
 	tmpl := Build(tree)
 	tmpl.SetApp(app)
 
-	app.jumpMode.Active = true
+	app.jumpMode.setActive(true)
 	buf := NewBuffer(24, 3)
 	tmpl.Execute(buf, 24, 3)
 	app.jumpMode.AssignLabels()

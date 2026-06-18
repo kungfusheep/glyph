@@ -78,8 +78,8 @@ type App struct {
 
 	// cache-effects skip gate (ADR 19): on a frame whose only trigger is an
 	// effect's animation, skip Execute and re-run effects over the cached render.
-	appDirty          bool    // a RequestRender happened since the last full render — forces a full Execute
-	effectFramePending bool   // this frame was requested by an effect's animation (the only case we skip Execute)
+	appDirty          atomic.Bool // a RequestRender happened since the last full render — forces a full Execute. Set outside renderMu (any goroutine), cleared in render(); atomic to order those.
+	effectFramePending atomic.Bool // this frame was requested by an effect's animation (the only case we skip Execute). Set outside renderMu; atomic.
 	cleanValid        bool    // cleanBuf holds a valid pristine (pre-effects) render
 	cleanBuf          *Buffer // persistent snapshot of the last full render, before effects
 	lastAnimating     bool    // last Execute reported a template animation — don't skip while animating
@@ -899,7 +899,7 @@ func (a *App) RequestRender() {
 	// any caller of RequestRender (input, Apply, resize, view change, and
 	// template animations via t.requestRender) is a real state change — mark the
 	// app dirty so the next frame does a full Execute, not an effect-only skip.
-	a.appDirty = true
+	a.appDirty.Store(true)
 	a.reqGen.Add(1)
 	select {
 	case a.renderChan <- struct{}{}:
@@ -912,7 +912,7 @@ func (a *App) RequestRender() {
 // by an animating screen effect that wants to advance over unchanged app output.
 // The next frame can then skip Execute and re-run effects over the cached render.
 func (a *App) requestEffectFrame() {
-	a.effectFramePending = true
+	a.effectFramePending.Store(true)
 	a.reqGen.Add(1)
 	select {
 	case a.renderChan <- struct{}{}:
@@ -970,8 +970,7 @@ func (a *App) render() {
 	// consume the effect-frame request: only a frame an effect explicitly asked
 	// for (via requestEffectFrame) is eligible to skip Execute. A direct render()
 	// or a RequestRender-driven frame always does a full Execute.
-	effectFrame := a.effectFramePending
-	a.effectFramePending = false
+	effectFrame := a.effectFramePending.Swap(false)
 
 	var t0, t1 time.Time
 	if DebugTiming {
@@ -1033,7 +1032,7 @@ func (a *App) render() {
 	// re-run the effect pipeline over it instead of re-Executing the whole
 	// template. Conservative — fullscreen only, never while animating a template,
 	// in jump mode, or when a full flush is forced.
-	if effectFrame && !a.appDirty && a.cleanValid && a.effectsActive && !a.lastAnimating &&
+	if effectFrame && !a.appDirty.Load() && a.cleanValid && a.effectsActive && !a.lastAnimating &&
 		!a.inline && !a.forceFullFlush && !DebugFullRedraw && !a.JumpModeActive() &&
 		a.cleanBuf != nil && a.cleanBuf.Width() == size.Width &&
 		a.cleanBuf.Height() == size.Height {
@@ -1048,12 +1047,20 @@ func (a *App) render() {
 		a.screen.FlushBuffer()
 		return
 	}
-	if a.JumpModeActive() {
-		a.jumpMode.ClearTargets()
+	// Jump-target rebuild WITHOUT holding a lock across Execute. active is atomic
+	// so the gate is lock-free; targets accumulate into the build scratch during
+	// Execute (render-goroutine-only) and AssignLabels swaps them into Targets in
+	// one locked step. The swap is atomic to the input goroutine's reads, so its
+	// len-check never sees Targets transiently empty (#400 no-op); and because no
+	// jump lock is held across Execute, a consumer's layer Render calling
+	// JumpModeActive() mid-Execute can't re-enter and deadlock.
+	jumpActive := a.jumpMode != nil && a.jumpMode.isActive()
+	if jumpActive {
+		a.jumpMode.ClearTargets() // reset the build scratch for a fresh frame
 	}
 	activeTmpl.Execute(buf, int16(size.Width), renderHeight)
-	if a.JumpModeActive() {
-		a.jumpMode.AssignLabels()
+	if jumpActive {
+		a.jumpMode.AssignLabels() // swap built→Targets + label, atomically
 	}
 
 	// for inline auto-size, use content height instead of full terminal height
@@ -1092,7 +1099,7 @@ func (a *App) render() {
 	}
 	a.cleanBuf.CopyFrom(buf)
 	a.cleanValid = true
-	a.appDirty = false
+	a.appDirty.Store(false)
 	a.lastAnimating = activeTmpl.Animating()
 
 	// post-processing pipeline: tree-declared ScreenEffects first, then imperative
@@ -1478,7 +1485,7 @@ func (a *App) EnterJumpScope(rects ...*NodeRef) {
 	if a.jumpMode == nil {
 		a.jumpMode = &JumpMode{}
 	}
-	a.jumpMode.ScopeRects = rects
+	a.jumpMode.setScope(rects)
 	a.EnterJumpMode()
 }
 
@@ -1502,9 +1509,14 @@ func (a *App) JumpStyle() JumpStyle {
 	return a.jumpStyle
 }
 
-// JumpModeActive returns true if jump mode is currently active.
+// JumpModeActive returns true if jump mode is currently active. Safe to call
+// from any goroutine; reads the active flag under the jump lock.
+//
+// Do NOT call this from inside Execute (the render path) — use the per-frame
+// a.frameJumpActive flag captured at render start instead, so a render that is
+// mid-build doesn't re-lock and so the active state is consistent for the frame.
 func (a *App) JumpModeActive() bool {
-	return a.jumpMode != nil && a.jumpMode.Active
+	return a.jumpMode != nil && a.jumpMode.isActive()
 }
 
 // JumpMode returns the jump mode state for use during rendering.
@@ -1520,9 +1532,9 @@ func (a *App) paintJumpLabels(buf *Buffer, height int) {
 	// key stands out, and labels whose prefix no longer matches the input recede
 	// whole. input is byte length — labels are ASCII home-row, so byte index ==
 	// rune index here; slice on rune boundaries if labels ever leave ASCII.
-	input := a.jumpMode.Input
+	targets, input := a.jumpMode.snapshot()
 	n := len(input)
-	for _, target := range a.jumpMode.Targets {
+	for _, target := range targets {
 		x, y := int(target.X), int(target.Y)
 		if y < 0 || y >= height || x >= buf.Width() {
 			continue
@@ -1558,20 +1570,20 @@ func (a *App) EnterJumpMode() {
 	if a.jumpMode == nil {
 		a.jumpMode = &JumpMode{}
 	}
-	if a.jumpMode.Active {
+	if a.jumpMode.isActive() {
 		return // Already in jump mode
 	}
 
-	a.jumpMode.Active = true
+	a.jumpMode.setActive(true)
 	a.jumpMode.ClearJumpTargets()
 
 	// Render collects visible targets, assigns labels, and paints them.
 	a.render()
 
-	if len(a.jumpMode.Targets) == 0 {
+	if a.jumpMode.targetCount() == 0 {
 		// No targets (e.g. scoped to a region with none), exit immediately
-		a.jumpMode.Active = false
-		a.jumpMode.ScopeRects = nil
+		a.jumpMode.setActive(false)
+		a.jumpMode.setScope(nil)
 		return
 	}
 
@@ -1593,8 +1605,7 @@ func (a *App) EnterJumpMode() {
 		// backspace undoes the last typed key, restoring the previous label set;
 		// on empty input it cancels jump mode.
 		if k.Special == riffkey.SpecialBackspace {
-			if n := len(a.jumpMode.Input); n > 0 {
-				a.jumpMode.Input = a.jumpMode.Input[:n-1] // ASCII labels: byte == rune
+			if _, ok := a.jumpMode.backspaceInput(); ok {
 				a.RequestRender()
 				return true
 			}
@@ -1605,10 +1616,9 @@ func (a *App) EnterJumpMode() {
 			a.ExitJumpMode()
 			return true
 		}
-		a.jumpMode.Input += string(k.Rune)
+		input := a.jumpMode.appendInput(string(k.Rune))
 		// exact label → select
-		if tgt := a.jumpMode.FindTarget(a.jumpMode.Input); tgt != nil {
-			onSelect := tgt.OnSelect
+		if onSelect, ok := a.jumpMode.selectTarget(input); ok {
 			a.ExitJumpMode()
 			if onSelect != nil {
 				onSelect()
@@ -1616,7 +1626,7 @@ func (a *App) EnterJumpMode() {
 			return true
 		}
 		// partial label → keep waiting; the typed prefix now recedes
-		if a.jumpMode.HasPartialMatch(a.jumpMode.Input) {
+		if a.jumpMode.partialMatch(input) {
 			a.RequestRender()
 			return true
 		}
@@ -1634,20 +1644,24 @@ func (a *App) ExitJumpMode() {
 		return
 	}
 
-	a.jumpMode.Active = false
+	a.jumpMode.setActive(false)
 	a.jumpMode.ClearJumpTargets()
-	a.jumpMode.ScopeRects = nil
+	a.jumpMode.setScope(nil)
 	a.input.Pop()
 	a.RequestRender()
 }
 
-// AddJumpTarget registers a jump target during rendering.
-// Called by Jump components when jump mode is active.
+// AddJumpTarget registers a jump target during rendering, called by Jump
+// components during Execute. The active gate is a lock-free atomic read;
+// buildTarget appends to the render-goroutine-only scratch (published into
+// Targets by AssignLabels at end of render). No jump lock is taken here, so it's
+// safe to call from a consumer's layer Render mid-Execute.
 func (a *App) AddJumpTarget(x, y int16, onSelect func(), style Style) {
-	if a.jumpMode != nil && a.jumpMode.Active {
-		if !a.jumpMode.inScope(int(x), int(y)) {
-			return // outside the active jump scope
-		}
-		a.jumpMode.AddTarget(x, y, onSelect, style)
+	if a.jumpMode == nil || !a.jumpMode.isActive() {
+		return
 	}
+	if !a.jumpMode.inScope(int(x), int(y)) {
+		return // outside the active jump scope
+	}
+	a.jumpMode.buildTarget(x, y, onSelect, style)
 }

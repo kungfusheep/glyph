@@ -2,6 +2,7 @@ package glyph
 
 import (
 	"testing"
+	"time"
 
 	"github.com/kungfusheep/riffkey"
 )
@@ -10,7 +11,9 @@ import (
 // with a constructed jump mode and inspect the painted cells.
 
 func paintJump(targets []JumpTarget, input string, style JumpStyle) *Buffer {
-	app := &App{jumpMode: &JumpMode{Active: true, Targets: targets, Input: input}, jumpStyle: style}
+	jm := &JumpMode{Targets: targets, Input: input}
+	jm.setActive(true)
+	app := &App{jumpMode: jm, jumpStyle: style}
 	buf := NewBuffer(20, 4)
 	app.paintJumpLabels(buf, 4)
 	return buf
@@ -125,7 +128,7 @@ func TestJumpFeedbackEndToEndMultiChar(t *testing.T) {
 		return Jump(Text(s), func() {})
 	})))
 	tmpl.SetApp(app)
-	app.jumpMode.Active = true
+	app.jumpMode.setActive(true)
 
 	buf := NewBuffer(40, 40)
 	app.jumpMode.ClearTargets()
@@ -307,10 +310,13 @@ func TestJumpScopeInScope(t *testing.T) {
 // TestJumpScopeFiltersTargets: with a scope rect active, AddJumpTarget collects
 // only targets that render inside the region.
 func TestJumpScopeFiltersTargets(t *testing.T) {
-	a := &App{jumpMode: &JumpMode{Active: true, ScopeRects: []*NodeRef{{X: 0, Y: 0, W: 10, H: 5}}}}
+	jm := &JumpMode{ScopeRects: []*NodeRef{{X: 0, Y: 0, W: 10, H: 5}}}
+	jm.setActive(true)
+	a := &App{jumpMode: jm}
 	a.AddJumpTarget(3, 2, func() {}, Style{})  // inside
 	a.AddJumpTarget(20, 2, func() {}, Style{}) // right of region
 	a.AddJumpTarget(3, 9, func() {}, Style{})  // below region
+	a.jumpMode.AssignLabels()                  // publish built→Targets
 	if n := len(a.jumpMode.Targets); n != 1 {
 		t.Fatalf("expected 1 in-scope target, got %d", n)
 	}
@@ -364,5 +370,60 @@ func TestEnterJumpScopeLabelsOnlyInRegion(t *testing.T) {
 	}
 	if n := len(app.JumpMode().Targets); n != 3 {
 		t.Fatalf("expected 3 in-region targets, got %d", n)
+	}
+}
+
+// TestJumpModeConcurrentRenderNoRace reproduces the jump-mode data race behind
+// #400 (diff jump-pick silently no-ops "a few times then works"). The frame-timer
+// goroutine runs render() — ClearTargets then Execute re-adds — while the input
+// goroutine runs EnterJumpMode, whose len(Targets)==0 check lands outside renderMu.
+// JumpMode.{Active,Targets,Input} are shared with no lock. Run under -race.
+func TestJumpModeConcurrentRenderNoRace(t *testing.T) {
+	tmpl := Build(VBox(Rich([]Span{{Text: "x", OnSelect: func() {}}})))
+	app := newEffectTestApp(tmpl, 20, 4)
+	app.input = riffkey.NewInput(riffkey.NewRouter())
+	app.jumpMode = &JumpMode{} // exists once jump mode has been used; avoid a separate pointer-init race
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 3000; i++ {
+			app.render() // frame-timer goroutine: ClearTargets + Execute(AddTarget)
+		}
+		close(done)
+	}()
+	for i := 0; i < 3000; i++ {
+		app.EnterJumpMode() // input goroutine: render() then len(Targets) check, no lock
+		app.ExitJumpMode()
+	}
+	<-done
+}
+
+// TestJumpModeLayerRenderNoDeadlock guards the re-entrancy that 0cdb24c hit: a
+// consumer's layer Render callback (recap's renderDiffLayer) calls JumpModeActive()
+// DURING the main render's Execute. If render holds the jump lock across Execute and
+// JumpModeActive() also locks it, that's a same-goroutine re-lock → deadlock. This
+// drives exactly that shape with a timeout guard.
+func TestJumpModeLayerRenderNoDeadlock(t *testing.T) {
+	layer := NewLayer()
+	var app *App
+	layer.Render = func() {
+		_ = app.JumpModeActive() // consumer reads jump state while rendering its layer
+		layer.SetBuffer(NewBuffer(layer.ViewportWidth(), 2))
+	}
+	tmpl := Build(VBox(LayerView(layer).Grow(1)))
+	app = newEffectTestApp(tmpl, 20, 4)
+	app.input = riffkey.NewInput(riffkey.NewRouter())
+	app.jumpMode = &JumpMode{}
+	app.jumpMode.setActive(true)
+
+	done := make(chan struct{})
+	go func() {
+		app.render() // renderLayer invalidates the layer under jump mode → Render runs → JumpModeActive()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("deadlock: render() re-entered the jump lock via a layer Render calling JumpModeActive()")
 	}
 }
