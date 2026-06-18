@@ -9919,22 +9919,8 @@ func (t *Template) renderAutoTable(buf *Buffer, op *Op, absX, absY, maxW int16) 
 				}
 				autoTableSort(slicePtr, fieldIdx, ss.asc)
 			}, Style{})
-
-			// draw jump label if assigned (second render pass). Read the in-progress
-			// build scratch: during Execute the frame's targets live in building with
-			// no labels yet (labels are assigned at AssignLabels after Execute), so
-			// nothing draws here — paintJumpLabels paints the labelled set post-Execute.
-			jm := t.app.JumpMode()
-			for j := len(jm.building) - 1; j >= 0; j-- {
-				target := &jm.building[j]
-				if target.X == int16(x) && target.Y == int16(y) && target.Label != "" {
-					style := t.app.JumpStyle().LabelStyle
-					for k, r := range target.Label {
-						buf.Set(x+k, y, Cell{Rune: r, Style: style})
-					}
-					break
-				}
-			}
+			// the labelled targets are painted by paintJumpLabels after Execute
+			// (labels are assigned post-Execute); no per-cell draw needed here.
 		}
 
 		x += widths[i] + gap
