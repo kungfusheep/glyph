@@ -1,6 +1,9 @@
 package glyph
 
-import "sync/atomic"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // Layer is a pre-rendered buffer with scroll management.
 // Content is rendered once (expensive), then blitted to screen each frame (cheap).
@@ -9,6 +12,14 @@ import "sync/atomic"
 // the viewport dimensions change. This ensures content is always rendered at
 // the correct size without manual timing coordination.
 type Layer struct {
+	// scrollMu guards the scroll/viewport state below — scrollY, maxScroll,
+	// viewWidth, viewHeight. render() writes them (SetViewport→updateMaxScroll,
+	// blit reads scrollY) on the frame goroutine while input handlers scroll
+	// (ScrollTo/ScrollDown/PageDown/…) and read ViewportHeight/ScrollY on another.
+	// NEVER hold scrollMu across the Render callback: consumer Render code calls
+	// back into ScrollY()/ScrollTo()/ViewportWidth() (recap's renderDiffLayer), so
+	// holding it there would re-enter and deadlock (the jump-fix lesson).
+	scrollMu  sync.Mutex
 	buffer    *Buffer
 	scrollY   int
 	maxScroll int
@@ -56,8 +67,10 @@ func (l *Layer) SetContent(tmpl *Template, width, height int) {
 	l.buffer = NewBuffer(width, height)
 	tmpl.Execute(l.buffer, int16(width), int16(height))
 	l.renderDirty.Store(false)
+	l.scrollMu.Lock()
 	l.scrollY = 0
 	l.updateMaxScroll()
+	l.scrollMu.Unlock()
 }
 
 // SetBuffer directly sets the layer's buffer.
@@ -65,8 +78,10 @@ func (l *Layer) SetContent(tmpl *Template, width, height int) {
 func (l *Layer) SetBuffer(buf *Buffer) {
 	l.buffer = buf
 	l.renderDirty.Store(false)
+	l.scrollMu.Lock()
 	l.scrollY = 0
 	l.updateMaxScroll()
+	l.scrollMu.Unlock()
 }
 
 // Buffer returns the underlying buffer (for direct manipulation if needed).
@@ -93,9 +108,11 @@ func (l *Layer) updateMaxScroll() {
 // SetViewport sets the viewport dimensions for the layer.
 // Called internally by the framework during layout.
 func (l *Layer) SetViewport(width, height int) {
+	l.scrollMu.Lock()
 	l.viewWidth = width
 	l.viewHeight = height
-	l.updateMaxScroll()
+	l.updateMaxScroll() // unlocked inner; we hold scrollMu
+	l.scrollMu.Unlock()
 }
 
 // NeedsRender returns true if the layer needs to re-render before blitting.
@@ -105,7 +122,10 @@ func (l *Layer) NeedsRender() bool {
 	if l.Render == nil {
 		return false
 	}
-	return l.AlwaysRender || l.renderDirty.Load() || l.lastRenderWidth == 0 || l.lastRenderWidth != l.viewWidth || l.lastRenderHeight != l.viewHeight
+	l.scrollMu.Lock()
+	vw, vh, lrw, lrh := l.viewWidth, l.viewHeight, l.lastRenderWidth, l.lastRenderHeight
+	l.scrollMu.Unlock()
+	return l.AlwaysRender || l.renderDirty.Load() || lrw == 0 || lrw != vw || lrh != vh
 }
 
 // Invalidate marks the layer content dirty so Render runs on the next display
@@ -121,19 +141,27 @@ func (l *Layer) prepare() {
 	if !l.NeedsRender() {
 		return
 	}
+	l.scrollMu.Lock()
 	l.lastRenderWidth = l.viewWidth
 	l.lastRenderHeight = l.viewHeight
+	l.scrollMu.Unlock()
 	l.renderDirty.Store(false)
+	// Render is consumer code that calls back into ScrollY()/ScrollTo()/
+	// ViewportWidth() — must run with NO scroll lock held, or it re-enters.
 	l.Render()
 }
 
 // ScrollY returns the current scroll position.
 func (l *Layer) ScrollY() int {
+	l.scrollMu.Lock()
+	defer l.scrollMu.Unlock()
 	return l.scrollY
 }
 
 // MaxScroll returns the maximum scroll position.
 func (l *Layer) MaxScroll() int {
+	l.scrollMu.Lock()
+	defer l.scrollMu.Unlock()
 	return l.maxScroll
 }
 
@@ -147,16 +175,20 @@ func (l *Layer) ContentHeight() int {
 
 // ViewportHeight returns the visible viewport height.
 func (l *Layer) ViewportHeight() int {
+	l.scrollMu.Lock()
+	defer l.scrollMu.Unlock()
 	return l.viewHeight
 }
 
 // ViewportWidth returns the visible viewport width.
 func (l *Layer) ViewportWidth() int {
+	l.scrollMu.Lock()
+	defer l.scrollMu.Unlock()
 	return l.viewWidth
 }
 
-// ScrollTo sets the scroll position, clamping to valid range.
-func (l *Layer) ScrollTo(y int) {
+// scrollToLocked clamps and sets scrollY; caller holds scrollMu.
+func (l *Layer) scrollToLocked(y int) {
 	if y < 0 {
 		y = 0
 	}
@@ -166,44 +198,67 @@ func (l *Layer) ScrollTo(y int) {
 	l.scrollY = y
 }
 
+// ScrollTo sets the scroll position, clamping to valid range.
+func (l *Layer) ScrollTo(y int) {
+	l.scrollMu.Lock()
+	l.scrollToLocked(y)
+	l.scrollMu.Unlock()
+}
+
 // ScrollDown scrolls down by n lines.
 func (l *Layer) ScrollDown(n int) {
-	l.ScrollTo(l.scrollY + n)
+	l.scrollMu.Lock()
+	l.scrollToLocked(l.scrollY + n)
+	l.scrollMu.Unlock()
 }
 
 // ScrollUp scrolls up by n lines.
 func (l *Layer) ScrollUp(n int) {
-	l.ScrollTo(l.scrollY - n)
+	l.scrollMu.Lock()
+	l.scrollToLocked(l.scrollY - n)
+	l.scrollMu.Unlock()
 }
 
 // ScrollToTop scrolls to the top.
 func (l *Layer) ScrollToTop() {
+	l.scrollMu.Lock()
 	l.scrollY = 0
+	l.scrollMu.Unlock()
 }
 
 // ScrollToEnd scrolls to the bottom.
 func (l *Layer) ScrollToEnd() {
+	l.scrollMu.Lock()
 	l.scrollY = l.maxScroll
+	l.scrollMu.Unlock()
 }
 
 // PageDown scrolls down by one viewport height.
 func (l *Layer) PageDown() {
-	l.ScrollDown(l.viewHeight)
+	l.scrollMu.Lock()
+	l.scrollToLocked(l.scrollY + l.viewHeight)
+	l.scrollMu.Unlock()
 }
 
 // PageUp scrolls up by one viewport height.
 func (l *Layer) PageUp() {
-	l.ScrollUp(l.viewHeight)
+	l.scrollMu.Lock()
+	l.scrollToLocked(l.scrollY - l.viewHeight)
+	l.scrollMu.Unlock()
 }
 
 // HalfPageDown scrolls down by half a viewport.
 func (l *Layer) HalfPageDown() {
-	l.ScrollDown(l.viewHeight / 2)
+	l.scrollMu.Lock()
+	l.scrollToLocked(l.scrollY + l.viewHeight/2)
+	l.scrollMu.Unlock()
 }
 
 // HalfPageUp scrolls up by half a viewport.
 func (l *Layer) HalfPageUp() {
-	l.ScrollUp(l.viewHeight / 2)
+	l.scrollMu.Lock()
+	l.scrollToLocked(l.scrollY - l.viewHeight/2)
+	l.scrollMu.Unlock()
 }
 
 // blit copies the visible portion of the layer to the destination buffer.
@@ -211,7 +266,10 @@ func (l *Layer) blit(dst *Buffer, dstX, dstY, width, height int) {
 	if l.buffer == nil {
 		return
 	}
-	dst.Blit(l.buffer, 0, l.scrollY, dstX, dstY, width, height)
+	l.scrollMu.Lock()
+	sy := l.scrollY
+	l.scrollMu.Unlock()
+	dst.Blit(l.buffer, 0, sy, dstX, dstY, width, height)
 }
 
 // SetLine updates a single line in the layer buffer with styled spans.
@@ -262,7 +320,9 @@ func (l *Layer) EnsureSize(width, height int) {
 	newBuf := NewBuffer(newWidth, newHeight)
 	newBuf.Blit(l.buffer, 0, 0, 0, 0, l.buffer.Width(), l.buffer.Height())
 	l.buffer = newBuf
+	l.scrollMu.Lock()
 	l.updateMaxScroll()
+	l.scrollMu.Unlock()
 }
 
 // Clear clears the entire layer buffer.

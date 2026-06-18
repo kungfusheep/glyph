@@ -2,7 +2,44 @@ package glyph
 
 import (
 	"testing"
+	"time"
 )
+
+// TestLayerScrollConcurrentRenderNoRace guards the Layer scroll-state race
+// (Kestrel recap m778): render() drives SetViewport→updateMaxScroll (writing
+// scrollY/maxScroll/viewport) while an input handler calls ScrollTo/ScrollDown on
+// the same Layer. With no sync those tear; this drives both goroutines. Run
+// under -race. Also a deadlock guard: the layer's Render callback calls back into
+// ScrollY()/ScrollTo() (recap's renderDiffLayer pattern), so the scroll lock must
+// not be held across Render().
+func TestLayerScrollConcurrentRenderNoRace(t *testing.T) {
+	layer := NewLayer()
+	layer.Render = func() {
+		// consumer pattern: read+restore scroll across a re-render (renderDiffLayer)
+		y := layer.ScrollY()
+		layer.SetBuffer(NewBuffer(layer.ViewportWidth(), 40)) // content taller than viewport → maxScroll>0
+		layer.ScrollTo(y)
+	}
+	tmpl := Build(VBox(LayerView(layer).Grow(1)))
+	app := newEffectTestApp(tmpl, 20, 8)
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 3000; i++ {
+			app.render() // SetViewport→updateMaxScroll + prepare→Render + blit(scrollY)
+		}
+		close(done)
+	}()
+	for i := 0; i < 3000; i++ {
+		layer.ScrollDown(2) // input goroutine: reads scrollY/maxScroll/viewHeight, writes scrollY
+		layer.ScrollTo(0)
+	}
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("deadlock: render()/Render-callback re-entered the scroll lock")
+	}
+}
 
 func TestLayerBlit(t *testing.T) {
 	t.Run("single layer blits to correct position", func(t *testing.T) {
