@@ -371,11 +371,17 @@ func (l *Layer) ScreenCursor() (x, y int, visible bool) {
 		return 0, 0, false
 	}
 
+	// snapshot scroll state under the lock: ScreenCursor runs on the render
+	// goroutine (render()) while input handlers write scrollY via ScrollTo etc.
+	l.scrollMu.Lock()
+	scrollY, viewHeight := l.scrollY, l.viewHeight
+	l.scrollMu.Unlock()
+
 	// cursor Y relative to viewport (account for scroll)
-	viewY := l.cursor.Y - l.scrollY
+	viewY := l.cursor.Y - scrollY
 
 	// check if cursor is within visible viewport
-	if viewY < 0 || viewY >= l.viewHeight {
+	if viewY < 0 || viewY >= viewHeight {
 		return 0, 0, false
 	}
 

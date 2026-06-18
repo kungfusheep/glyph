@@ -14,6 +14,8 @@ import (
 // not be held across Render().
 func TestLayerScrollConcurrentRenderNoRace(t *testing.T) {
 	layer := NewLayer()
+	layer.ShowCursor()
+	layer.SetCursor(0, 12) // visible cursor → render() consults ScreenCursor (reads scrollY/viewHeight)
 	layer.Render = func() {
 		// consumer pattern: read+restore scroll across a re-render (renderDiffLayer)
 		y := layer.ScrollY()
@@ -26,7 +28,8 @@ func TestLayerScrollConcurrentRenderNoRace(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 3000; i++ {
-			app.render() // SetViewport→updateMaxScroll + prepare→Render + blit(scrollY)
+			app.render()         // SetViewport→updateMaxScroll + prepare→Render + blit(scrollY)
+			layer.ScreenCursor() // render goroutine reads scrollY/viewHeight (c865) — must be guarded
 		}
 		close(done)
 	}()
