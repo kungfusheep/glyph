@@ -41,6 +41,16 @@ type ScrollViewC struct {
 	// can position the view before the first frame.
 	pendingScroll    int
 	hasPendingScroll bool
+
+	// startH remembers the render-buffer height that held the content last frame
+	// (plus a viewport of headroom). render() resumes from it so tall content
+	// settles in a single Execute pass instead of re-growing from 500 every frame;
+	// it tracks content size both up and down.
+	startH int
+
+	// lastPasses is how many Execute passes the last render() needed to size the
+	// buffer (1 in steady state thanks to startH; >1 only when content outgrows it).
+	lastPasses int
 }
 
 type ScrollViewFn func(children ...Component) *ScrollViewC
@@ -356,12 +366,19 @@ func (sv *ScrollViewC) render() {
 	if h < 500 {
 		h = 500
 	}
+	// resume from last frame's fitting height so tall content (long chat/log — the
+	// case the cap clipped) renders in one pass, not log2(N) re-grows every frame.
+	if sv.startH > h {
+		h = sv.startH
+	}
 	var buf *Buffer
+	sv.lastPasses = 0
 	for {
 		buf = NewBuffer(w, h)
 		buf.defaultStyle = sv.layer.defaultStyle
 		buf.Clear()
 		sv.childTmpl.Execute(buf, int16(w), int16(h))
+		sv.lastPasses++
 		// ContentHeight == h means the content reached the last row — it may be clipped, so
 		// grow and re-render until it fits with room to spare (bounded against runaway).
 		if buf.ContentHeight() < h || h >= 1<<16 {
@@ -369,6 +386,10 @@ func (sv *ScrollViewC) render() {
 		}
 		h *= 2
 	}
+	// remember a start height that holds this frame's content plus a viewport of
+	// headroom: steady-state and slow growth render in one pass next frame, while a
+	// large shrink lets the start height fall back down (avoids over-allocating).
+	sv.startH = buf.ContentHeight() + sv.layer.ViewportHeight()
 
 	// trim to actual content (or at least viewport height)
 	contentH := buf.ContentHeight()
