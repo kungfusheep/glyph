@@ -125,6 +125,52 @@ func TestNodeRefStaysLiveThroughExitAnimationThenZeroes(t *testing.T) {
 	}
 }
 
+// recap's EXACT help-overlay close path: an If-gated Overlay (renders in phase 4)
+// whose ref-bearing node has an Out animation. The ref must stay live through the
+// fade and zero only after the Out completes and the branch drops — otherwise a
+// dodge effect outside the If keeps exempting a phantom region after close.
+func TestOverlayWithOutAnimationRefZeroesAfterClose(t *testing.T) {
+	open := true
+	var ref NodeRef
+	tmpl := Build(VBox(
+		Text("background"),
+		If(&open).Then(
+			Overlay.Centered()(
+				VBox.Border(BorderRounded).NodeRef(&ref).
+					Opacity(In(Animate(1.0)).Out(
+						Animate.Duration(200*time.Millisecond).Ease(EaseLinear)(0.0),
+					))(Text("help")),
+			),
+		),
+	))
+	base := time.Unix(11000, 0)
+	clock := base
+	tmpl.nowFn = func() time.Time { return clock }
+
+	buf := NewBuffer(40, 10)
+	tmpl.Execute(buf, 40, 10)
+	if ref.W == 0 || ref.H == 0 {
+		t.Fatalf("ref should populate while open: W%d H%d", ref.W, ref.H)
+	}
+
+	open = false
+	clock = base.Add(50 * time.Millisecond)
+	buf.Clear()
+	tmpl.Execute(buf, 40, 10)
+	if ref.W == 0 || ref.H == 0 {
+		t.Fatalf("ref must stay live mid Out-animation: W%d H%d", ref.W, ref.H)
+	}
+
+	for _, ms := range []int{250, 300, 400} {
+		clock = base.Add(time.Duration(ms) * time.Millisecond)
+		buf.Clear()
+		tmpl.Execute(buf, 40, 10)
+	}
+	if ref.W != 0 || ref.H != 0 {
+		t.Errorf("overlay ref must zero after the Out completes: W%d H%d (phantom dodge persists)", ref.W, ref.H)
+	}
+}
+
 // regression for the frozen per-item watch target: a tween watching an ITEM
 // FIELD inside ForEach must follow each element's value, not the compile-time
 // dummy's. This is the field-watch form of the toast fade.

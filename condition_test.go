@@ -1479,3 +1479,30 @@ func BenchmarkNodeRefZeroingPerFrame(b *testing.B) {
 		tmpl.Execute(buf, 40, int16(n+2))
 	}
 }
+
+// recap's real composition (regression for the path the first #27 tests missed):
+// an If-gated OVERLAY renders in phase 4, not the phase-3 walk. Its NodeRef must
+// still zero when the overlay is gated out, or a screen-effect dodge keeps a phantom.
+func TestOverlayRefZeroesWhenGatedOut(t *testing.T) {
+	open := true
+	var ref NodeRef
+	tmpl := Build(VBox(
+		Text("background"),
+		If(&open).Then(
+			Overlay.Centered()(
+				VBox.Border(BorderRounded).NodeRef(&ref)(Text("help")),
+			),
+		),
+	))
+	buf := NewBuffer(40, 10)
+	tmpl.Execute(buf, 40, 10)
+	if ref.W == 0 || ref.H == 0 {
+		t.Fatalf("overlay ref should populate while open: W%d H%d", ref.W, ref.H)
+	}
+	open = false
+	buf.Clear()
+	tmpl.Execute(buf, 40, 10)
+	if ref.W != 0 || ref.H != 0 {
+		t.Errorf("gated-out OVERLAY ref must zero (got W%d H%d) — phantom dodge region", ref.W, ref.H)
+	}
+}
