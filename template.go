@@ -3108,7 +3108,18 @@ const (
 	richStatic uint8 = iota
 	richPtr
 	richOff
+	richMdPtr // bound markdown source via global *string (mdSrcPtr)
+	richMdOff // bound markdown source via ForEach offset (mdSrcOff)
 )
+
+// mdCache holds the last tokenised result for one bound source string, so a render
+// re-tokenises only when the source changes (parse-on-change). For ForEach, one entry
+// per item identity lives in opRichText.mdCacheMap; the global case uses mdCacheOne.
+type mdCache struct {
+	src   string
+	spans []Span
+	valid bool
+}
 
 type opRichText struct {
 	mode        uint8
@@ -3119,6 +3130,42 @@ type opRichText struct {
 	spanStrPtrs []*string // global *string spans; typed so the GC pins them
 	charWrap    bool
 	preserveBG  bool
+
+	// markdown mode (richMdPtr/richMdOff): a bound source string tokenised to spans,
+	// cached parse-on-change. markdown=false renders the source as one plain span.
+	mdSrcPtr   *string                    // richMdPtr: global source (GC-pinned)
+	mdSrcOff   uintptr                    // richMdOff: offset from elemBase
+	markdown   bool                       // tokenise (true) vs single plain span (false)
+	mdCacheOne mdCache                    // global (richMdPtr) cache
+	mdCacheMap map[unsafe.Pointer]*mdCache // per-item cache for richMdOff (key: elemBase)
+}
+
+// mdSpansFor returns the cached spans for src, re-tokenising only when src changed.
+// key is the item identity for ForEach (nil = global). Render-goroutine only, so the
+// map needs no lock.
+func (rt *opRichText) mdSpansFor(key unsafe.Pointer, src string) []Span {
+	tokenise := func() []Span {
+		if rt.markdown {
+			return parseInlineMarkdownSpans(src)
+		}
+		return []Span{{Text: src}}
+	}
+	if key == nil {
+		if rt.mdCacheOne.valid && rt.mdCacheOne.src == src {
+			return rt.mdCacheOne.spans
+		}
+		rt.mdCacheOne = mdCache{src: src, spans: tokenise(), valid: true}
+		return rt.mdCacheOne.spans
+	}
+	if rt.mdCacheMap == nil {
+		rt.mdCacheMap = make(map[unsafe.Pointer]*mdCache)
+	}
+	if e := rt.mdCacheMap[key]; e != nil && e.valid && e.src == src {
+		return e.spans
+	}
+	e := &mdCache{src: src, spans: tokenise(), valid: true}
+	rt.mdCacheMap[key] = e
+	return e.spans
 }
 
 func (rt *opRichText) resolve(elemBase unsafe.Pointer) []Span {
@@ -3131,6 +3178,14 @@ func (rt *opRichText) resolve(elemBase unsafe.Pointer) []Span {
 			return nil
 		}
 		spans = *(*[]Span)(unsafe.Pointer(uintptr(elemBase) + rt.off))
+	case richMdPtr:
+		return rt.mdSpansFor(nil, *rt.mdSrcPtr)
+	case richMdOff:
+		if elemBase == nil {
+			return nil
+		}
+		src := *(*string)(unsafe.Pointer(uintptr(elemBase) + rt.mdSrcOff))
+		return rt.mdSpansFor(elemBase, src)
 	default:
 		spans = rt.staticSpans
 	}
@@ -3760,6 +3815,21 @@ func (t *Template) compileBox(box Box, parent int16, depth int, elemBase unsafe.
 
 func (t *Template) compileRichText(v richTextNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	ext := &opRichText{charWrap: v.charWrap, preserveBG: v.preserveBG}
+
+	// bound markdown/plain source: an in-item pointer becomes an offset from elemBase
+	// (so each ForEach item tokenises its own value); anything else stays a real
+	// *string the GC pins. Mirrors the *[]Span and Textf *string handling below.
+	if v.mdSrc != nil {
+		ext.markdown = v.markdown
+		if elemBase != nil && isWithinRange(unsafe.Pointer(v.mdSrc), elemBase, elemSize) {
+			ext.mode = richMdOff
+			ext.mdSrcOff = uintptr(unsafe.Pointer(v.mdSrc)) - uintptr(elemBase)
+		} else {
+			ext.mode = richMdPtr
+			ext.mdSrcPtr = v.mdSrc
+		}
+		return t.addOp(Op{Kind: OpRichText, Parent: parent, Ext: ext}, depth)
+	}
 
 	switch spans := v.Spans.(type) {
 	case []Span:

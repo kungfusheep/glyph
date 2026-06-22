@@ -703,6 +703,21 @@ type richTextNode struct {
 	spanPtrs   []*string // per-span *string pointers for Textf (nil = static text)
 	charWrap   bool
 	preserveBG bool
+	mdSrc      *string // bound markdown source (set by Rich(*string)); see .Markdown()
+	markdown   bool    // tokenise mdSrc as inline markdown each frame (parse-on-change cached)
+}
+
+// Markdown renders the bound string (from Rich(&str)) as inline markdown:
+// **bold** / *italic* / `code` / ~~strike~~ and a leading "- " bullet. The source is
+// re-read every frame and tokenised parse-on-change (cached until the string changes),
+// so steady-state render adds no tokenisation cost. Styling is attribute-only, so it
+// inherits the surrounding colour and survives a theme switch. Composes inside ForEach:
+// a per-item bound string tokenises its own value (cache keyed by item identity).
+//
+//	Rich(&msg.Body).Markdown()
+func (r richTextNode) Markdown() richTextNode {
+	r.markdown = true
+	return r
 }
 
 // CharWrap switches the rich text to character-exact wrapping: every rune is laid
@@ -740,6 +755,9 @@ func Rich(parts ...any) richTextNode {
 			return richTextNode{Spans: v}
 		case []Span:
 			return richTextNode{Spans: v}
+		case *string:
+			// bound source — render plain unless .Markdown() upgrades it to tokenised
+			return richTextNode{mdSrc: v}
 		}
 	}
 	spans := make([]Span, 0, len(parts))
