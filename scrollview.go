@@ -347,16 +347,28 @@ func (sv *ScrollViewC) render() {
 		sv.layer.screenY+sv.layer.viewHeight,
 	)
 
-	// use a generous height so content isn't clipped, then trim to actual
+	// render into a buffer tall enough to hold ALL content, then trim to actual. Start
+	// generous and GROW if the content filled the buffer — a fixed cap clipped tall content
+	// (e.g. a long chat), so scroll-to-end couldn't reach the last rows and the latest message
+	// rendered truncated (recap chat, todo:3ff01295). Growing keeps the common case (content
+	// shorter than the cap) at a single pass.
 	h := sv.layer.ViewportHeight()
 	if h < 500 {
 		h = 500
 	}
-
-	buf := NewBuffer(w, h)
-	buf.defaultStyle = sv.layer.defaultStyle
-	buf.Clear()
-	sv.childTmpl.Execute(buf, int16(w), int16(h))
+	var buf *Buffer
+	for {
+		buf = NewBuffer(w, h)
+		buf.defaultStyle = sv.layer.defaultStyle
+		buf.Clear()
+		sv.childTmpl.Execute(buf, int16(w), int16(h))
+		// ContentHeight == h means the content reached the last row — it may be clipped, so
+		// grow and re-render until it fits with room to spare (bounded against runaway).
+		if buf.ContentHeight() < h || h >= 1<<16 {
+			break
+		}
+		h *= 2
+	}
 
 	// trim to actual content (or at least viewport height)
 	contentH := buf.ContentHeight()
