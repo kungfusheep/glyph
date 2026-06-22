@@ -76,6 +76,55 @@ func TestToastExitWithInOutVocabulary(t *testing.T) {
 	}
 }
 
+// the stale-NodeRef contract (proposal #27): a ref zeroes when its node stops
+// rendering — but a node mid Out-animation is RETAINED and still rendered, so its
+// ref must stay live through the whole fade and zero only once the branch is truly
+// dropped. (If it zeroed when the condition first flipped, a closing overlay's dodge
+// ref would release mid-fade and the effect would darken it — the #379 stacking.)
+func TestNodeRefStaysLiveThroughExitAnimationThenZeroes(t *testing.T) {
+	alive := true
+	var ref NodeRef
+	tmpl := Build(VBox(
+		If(&alive).Then(
+			VBox.NodeRef(&ref).Opacity(In(1.0).Out(
+				Animate.Duration(200 * time.Millisecond).Ease(EaseLinear)(0.0),
+			))(Text("overlay")),
+		),
+	))
+	base := time.Unix(9000, 0)
+	clock := base
+	tmpl.nowFn = func() time.Time { return clock }
+
+	buf := NewBuffer(20, 4)
+	tmpl.Execute(buf, 20, 4)
+	if ref.W == 0 || ref.H == 0 {
+		t.Fatalf("ref should be live while shown: W%d H%d", ref.W, ref.H)
+	}
+
+	// close it: condition false, but the branch retains + animates out
+	alive = false
+	clock = base.Add(50 * time.Millisecond)
+	buf.Clear()
+	tmpl.Execute(buf, 20, 4)
+	if !tmpl.Animating() {
+		t.Fatal("exiting branch should mark the template animating")
+	}
+	if ref.W == 0 || ref.H == 0 {
+		t.Fatalf("ref must STAY LIVE mid Out-animation (retained branch still renders): W%d H%d", ref.W, ref.H)
+	}
+
+	// fade completes; branch is dropped and no longer rendered
+	clock = base.Add(400 * time.Millisecond)
+	buf.Clear()
+	tmpl.Execute(buf, 20, 4)
+	clock = base.Add(450 * time.Millisecond)
+	buf.Clear()
+	tmpl.Execute(buf, 20, 4)
+	if ref.W != 0 || ref.H != 0 {
+		t.Errorf("ref must ZERO once the exiting branch is dropped: W%d H%d", ref.W, ref.H)
+	}
+}
+
 // regression for the frozen per-item watch target: a tween watching an ITEM
 // FIELD inside ForEach must follow each element's value, not the compile-time
 // dummy's. This is the field-watch form of the toast fade.

@@ -1405,3 +1405,77 @@ func TestTextf(t *testing.T) {
 		}
 	})
 }
+
+// proposal #27: a NodeRef whose node is gated out by If(false) must report zero
+// bounds, not last frame's stale rect — otherwise effect dodge / hit-testing see a
+// phantom node where closed content used to be (the #379 FocusShade bright-hole).
+func TestNodeRefZeroesWhenGatedOut(t *testing.T) {
+	show := true
+	var ref NodeRef
+	tmpl := Build(VBox(
+		If(&show).Then(
+			VBox.Border(BorderRounded).NodeRef(&ref)(Text("overlay")),
+		),
+	))
+	buf := NewBuffer(30, 5)
+	tmpl.Execute(buf, 30, 5)
+	if ref.W == 0 || ref.H == 0 {
+		t.Fatalf("ref should be live while shown: W%d H%d", ref.W, ref.H)
+	}
+
+	show = false
+	buf.Clear()
+	tmpl.Execute(buf, 30, 5)
+	if ref.W != 0 || ref.H != 0 {
+		t.Errorf("gated-out ref must zero (got W%d H%d Op%.2f) — stale rect is a phantom node", ref.W, ref.H, NodeOpacity(&ref))
+	}
+}
+
+// a ForEach that empties must zero the ref on its (shared) item container — nothing
+// renders, so nothing should report bounds.
+func TestNodeRefZeroesWhenForEachEmpties(t *testing.T) {
+	type Row struct{ Label string }
+	rows := []Row{{Label: "a"}, {Label: "b"}}
+	var ref NodeRef
+	tmpl := Build(VBox(
+		ForEach(&rows, func(r *Row) Component {
+			return VBox.NodeRef(&ref)(Text(&r.Label))
+		}),
+	))
+	buf := NewBuffer(20, 6)
+	tmpl.Execute(buf, 20, 6)
+	if ref.H == 0 {
+		t.Fatalf("ref should be live with items present: H%d", ref.H)
+	}
+
+	rows = rows[:0]
+	buf.Clear()
+	tmpl.Execute(buf, 20, 6)
+	if ref.W != 0 || ref.H != 0 {
+		t.Errorf("ref must zero when the ForEach renders nothing: W%d H%d", ref.W, ref.H)
+	}
+}
+
+// guards the per-frame cost of zeroing refs: a template with many refs should pay a
+// negligible, allocation-free sweep. A regression (e.g. re-collecting every frame)
+// shows up here.
+func BenchmarkNodeRefZeroingPerFrame(b *testing.B) {
+	const n = 200
+	flags := make([]bool, n)
+	refs := make([]NodeRef, n)
+	for i := range flags {
+		flags[i] = true
+	}
+	kids := make([]Component, n)
+	for i := range kids {
+		kids[i] = If(&flags[i]).Then(VBox.NodeRef(&refs[i])(Text("x")))
+	}
+	tmpl := Build(VBox(kids...))
+	buf := NewBuffer(40, n+2)
+	tmpl.Execute(buf, 40, int16(n+2))
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tmpl.Execute(buf, 40, int16(n+2))
+	}
+}

@@ -163,6 +163,16 @@ type Template struct {
 	// Pending screen effects collected from tree (cleared each frame)
 	pendingScreenEffects []Effect
 
+	// every NodeRef attached anywhere in this template + its sub-templates,
+	// collected once (lazily) on first Execute. Each frame they are zeroed before
+	// render and the render walk repopulates the ones it actually draws, so a node
+	// gated out (If(false), unselected branch, dropped ForEach item) reports zero
+	// bounds — coverage/dodge/hit checks against a stale rect can't see a phantom.
+	// A retained Out-animating branch still renders, so its ref stays live through
+	// the fade and only zeroes once the branch is truly dropped.
+	refOps        []*NodeRef
+	refsCollected bool
+
 	// scratch buffers for per-frame reuse (avoid nil-slice allocs in hot paths)
 	flexScratchIdx  []int16   // flex child indices (shared by VBox + HBox phases)
 	flexScratchGrow []float32 // flex grow values (shared by VBox + HBox phases)
@@ -530,6 +540,73 @@ func routeChildTemplates(t *Template) []*Template {
 		}
 	}
 	return children
+}
+
+// collectRefOps gathers every NodeRef attached in this template and all of its
+// sub-templates (If/Switch/Match branches, ForEach item body, overlay bodies),
+// recursively. The set is static after Build, so Execute collects it once. Refs
+// behind a Layer (ScrollView/Log content templates) are reached when THAT template
+// executes, not here — each Execute owns the refs in its own subtree.
+func (t *Template) collectRefOps() {
+	if t == nil {
+		return
+	}
+	for i := range t.ops {
+		if t.ops[i].NodeRef != nil {
+			t.refOps = append(t.refOps, t.ops[i].NodeRef)
+		}
+		switch ext := t.ops[i].Ext.(type) {
+		case *opIf:
+			ext.thenTmpl.appendRefOpsInto(t)
+			ext.elseTmpl.appendRefOpsInto(t)
+		case *opSwitch:
+			for _, c := range ext.cases {
+				c.appendRefOpsInto(t)
+			}
+			ext.def.appendRefOpsInto(t)
+		case *opMatch:
+			for _, c := range ext.cases {
+				c.appendRefOpsInto(t)
+			}
+			ext.def.appendRefOpsInto(t)
+		case *opForEach:
+			ext.iterTmpl.appendRefOpsInto(t)
+		case *opOverlay:
+			ext.childTmpl.appendRefOpsInto(t)
+		}
+	}
+}
+
+// appendRefOpsInto walks sub *Template and appends its (and its descendants')
+// NodeRefs into dst.refOps.
+func (sub *Template) appendRefOpsInto(dst *Template) {
+	if sub == nil {
+		return
+	}
+	for i := range sub.ops {
+		if sub.ops[i].NodeRef != nil {
+			dst.refOps = append(dst.refOps, sub.ops[i].NodeRef)
+		}
+		switch ext := sub.ops[i].Ext.(type) {
+		case *opIf:
+			ext.thenTmpl.appendRefOpsInto(dst)
+			ext.elseTmpl.appendRefOpsInto(dst)
+		case *opSwitch:
+			for _, c := range ext.cases {
+				c.appendRefOpsInto(dst)
+			}
+			ext.def.appendRefOpsInto(dst)
+		case *opMatch:
+			for _, c := range ext.cases {
+				c.appendRefOpsInto(dst)
+			}
+			ext.def.appendRefOpsInto(dst)
+		case *opForEach:
+			ext.iterTmpl.appendRefOpsInto(dst)
+		case *opOverlay:
+			ext.childTmpl.appendRefOpsInto(dst)
+		}
+	}
 }
 
 func setRouteBranchActive(branches []*Template, activeIdx int) {
@@ -5342,6 +5419,18 @@ func (t *Template) Execute(buf *Buffer, screenW, screenH int16) {
 
 	// Phase 2b: Flex distribution (top → down) - expand flex children
 	t.distributeFlexGrow(screenH)
+
+	// Zero every NodeRef before rendering: the render walk below repopulates the
+	// ones it actually draws (including retained Out-animating branches, which still
+	// render), so any node NOT rendered this frame keeps zero bounds instead of a
+	// stale rect. Collected once — the ref set is static after Build.
+	if !t.refsCollected {
+		t.collectRefOps()
+		t.refsCollected = true
+	}
+	for _, ref := range t.refOps {
+		*ref = Rect{}
+	}
 
 	// Phase 3: Render (top → down)
 	t.render(buf, 0, 0, screenW)
