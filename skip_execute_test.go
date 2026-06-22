@@ -274,3 +274,50 @@ func TestEffectOscOscillatesWhileSkippingExecute(t *testing.T) {
 		t.Fatal("the effect osc stopped sustaining effect frames")
 	}
 }
+
+// recap's real scenario through the APP path (not bare Execute): an If-gated overlay
+// carrying a NodeRef that a screen-effect dodges, with effect-only frames in the mix
+// (the breathing FocusShade). After the overlay closes, the dodge must RELEASE — the
+// ref must zero and stay zero across subsequent effect-only frames, or a phantom
+// un-dimmed region persists (Pete's #442 report).
+func TestDodgeReleasesAfterOverlayCloseThroughAppPath(t *testing.T) {
+	open := true
+	var ref NodeRef
+	bg := "background"
+	tmpl := Build(VBox(
+		Text(&bg),
+		If(&open).Then(
+			Overlay.Centered()(
+				VBox.Border(BorderRounded).NodeRef(&ref)(Text("HELP")),
+			),
+		),
+		ScreenEffect(SEVignette().Smooth().Strength(0.9).Dodge(&ref)),
+	))
+	var clk time.Duration
+	tmpl.nowFn = func() time.Time { return time.Unix(0, 0).Add(clk) }
+	a := newEffectTestApp(tmpl, 30, 12)
+
+	a.appDirty.Store(true)
+	a.render() // open: ref populated, vignette dodges the help rect
+	if ref.W == 0 || ref.H == 0 {
+		t.Fatalf("ref should populate while open: W%d H%d", ref.W, ref.H)
+	}
+
+	// close (as a keypress does: RequestRender → appDirty → full Execute)
+	open = false
+	a.RequestRender()
+	a.render()
+	if ref.W != 0 || ref.H != 0 {
+		t.Fatalf("ref not zeroed after close through app path: W%d H%d", ref.W, ref.H)
+	}
+
+	// breathing-effect frames must NOT resurrect the dodge region
+	for i := 0; i < 5; i++ {
+		clk += 100 * time.Millisecond
+		a.requestEffectFrame()
+		a.render()
+	}
+	if ref.W != 0 || ref.H != 0 {
+		t.Errorf("ref resurrected on effect-only frames: W%d H%d (phantom dodge persists)", ref.W, ref.H)
+	}
+}
