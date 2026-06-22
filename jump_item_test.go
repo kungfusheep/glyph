@@ -37,6 +37,40 @@ func TestJumpItemResolvesPerForEachItem(t *testing.T) {
 	}
 }
 
+// the EXPORTED activation path: external packages (e.g. calendar) collect jump
+// targets at an exact size via a low-level Execute, which needs a public way to
+// activate jump mode — the regression when Active (public field) became active
+// (unexported atomic.Bool). JumpMode.SetActive restores it race-safely.
+func TestJumpModeSetActiveDrivesExactSizeCollection(t *testing.T) {
+	type cell struct{ Label string }
+	cells := []cell{{Label: "a"}, {Label: "b"}, {Label: "c"}}
+
+	app := NewApp()
+	app.JumpMode().SetActive(true) // the exported activation external tests rely on
+	if !app.JumpModeActive() {
+		t.Fatal("SetActive(true) should activate jump mode")
+	}
+
+	tmpl := Build(VBox(
+		ForEach(&cells, func(c *cell) Component {
+			return JumpItem(Text(&c.Label), func(c *cell) {})
+		}),
+	))
+	tmpl.SetApp(app)
+	buf := NewBuffer(120, 40) // an EXACT size of the caller's choosing, not the screen
+	tmpl.Execute(buf, 120, 40)
+	app.JumpMode().AssignLabels()
+
+	if got := len(app.JumpMode().Targets); got != 3 {
+		t.Fatalf("targets at exact size = %d, want 3 (exported activation path broken)", got)
+	}
+
+	app.JumpMode().SetActive(false)
+	if app.JumpModeActive() {
+		t.Fatal("SetActive(false) should deactivate jump mode")
+	}
+}
+
 // JumpItemRef passes the rendered geometry alongside the item, so overlays
 // can anchor beside the selected row.
 func TestJumpItemRefPassesGeometry(t *testing.T) {
