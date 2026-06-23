@@ -107,6 +107,12 @@ func inlineSpans(text string, base Style) []Span {
 	return out
 }
 
+// MarkdownSpans tokenises inline markdown into styled spans using the same
+// parser as Rich(&s).Markdown().
+func MarkdownSpans(text string) []Span {
+	return parseInlineMarkdownSpans(text)
+}
+
 func withAttr(s Style, a Attribute) Style {
 	s.Attr = s.Attr.With(a)
 	return s

@@ -51,6 +51,25 @@ func TestParseInlineMarkdownSpans(t *testing.T) {
 	}
 }
 
+func TestMarkdownSpansUsesInlineMarkdownParser(t *testing.T) {
+	spans := MarkdownSpans("a **b** `c`")
+	var text string
+	attr := map[string]Attribute{}
+	for _, s := range spans {
+		text += s.Text
+		attr[s.Text] = s.Style.Attr
+	}
+	if text != "a b c" {
+		t.Fatalf("reassembled text = %q, want %q", text, "a b c")
+	}
+	if attr["b"]&AttrBold == 0 {
+		t.Error("**b** should be bold")
+	}
+	if attr["c"]&AttrInverse == 0 {
+		t.Error("`c` should render as code")
+	}
+}
+
 // the cache must re-tokenise ONLY when the source changes: a cache hit returns the
 // SAME backing slice (no realloc/re-parse), which is what keeps steady-state render
 // free of tokenisation cost.
@@ -159,10 +178,10 @@ func TestMarkdownWidth(t *testing.T) {
 		want int
 	}{
 		{"plain", 5},
-		{"**bold**", 4},      // renders "bold"
-		{"a *b* `c`", 5},     // "a b c"
-		{"~~no~~", 2},        // "no"
-		{"- item", 6},        // "• item" (bullet + space + item = 2+? -> "• "=2, "item"=4)
+		{"**bold**", 4},  // renders "bold"
+		{"a *b* `c`", 5}, // "a b c"
+		{"~~no~~", 2},    // "no"
+		{"- item", 6},    // "• item" (bullet + space + item = 2+? -> "• "=2, "item"=4)
 		{"", 0},
 	}
 	for _, c := range cases {
