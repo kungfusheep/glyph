@@ -3119,7 +3119,15 @@ type mdCache struct {
 	src   string
 	spans []Span
 	valid bool
+	seq   uint64 // last access (opRichText.mdSeq) — drives orphan eviction for ForEach keys
 }
+
+// mdCacheEvict bounds the per-op ForEach markdown cache. A ForEach slice that grows by
+// append reallocates its backing array, so every elemBase key changes and the old
+// entries orphan. Live items are touched (seq-stamped) every frame; orphans fall stale
+// and are swept once the map exceeds this. Set well above any realistic single-frame
+// rendered-item count so live entries are never evicted mid-frame.
+const mdCacheEvict = 1024
 
 type opRichText struct {
 	mode        uint8
@@ -3138,6 +3146,7 @@ type opRichText struct {
 	markdown   bool                       // tokenise (true) vs single plain span (false)
 	mdCacheOne mdCache                    // global (richMdPtr) cache
 	mdCacheMap map[unsafe.Pointer]*mdCache // per-item cache for richMdOff (key: elemBase)
+	mdSeq      uint64                     // monotonic access counter for cache eviction
 }
 
 // mdSpansFor returns the cached spans for src, re-tokenising only when src changed.
@@ -3160,11 +3169,22 @@ func (rt *opRichText) mdSpansFor(key unsafe.Pointer, src string) []Span {
 	if rt.mdCacheMap == nil {
 		rt.mdCacheMap = make(map[unsafe.Pointer]*mdCache)
 	}
+	rt.mdSeq++
 	if e := rt.mdCacheMap[key]; e != nil && e.valid && e.src == src {
+		e.seq = rt.mdSeq
 		return e.spans
 	}
-	e := &mdCache{src: src, spans: tokenise(), valid: true}
+	e := &mdCache{src: src, spans: tokenise(), valid: true, seq: rt.mdSeq}
 	rt.mdCacheMap[key] = e
+	// bound the map: when it overgrows, drop keys not touched within the last
+	// mdCacheEvict accesses — orphaned elemBases from a reallocated ForEach slice.
+	if len(rt.mdCacheMap) > mdCacheEvict {
+		for k, v := range rt.mdCacheMap {
+			if rt.mdSeq-v.seq >= mdCacheEvict {
+				delete(rt.mdCacheMap, k)
+			}
+		}
+	}
 	return e.spans
 }
 

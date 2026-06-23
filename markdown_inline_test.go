@@ -1,6 +1,9 @@
 package glyph
 
-import "testing"
+import (
+	"testing"
+	"unsafe"
+)
 
 func TestParseInlineMarkdownSpans(t *testing.T) {
 	spans := parseInlineMarkdownSpans("a **b** `c` *d* ~~e~~")
@@ -131,5 +134,19 @@ func BenchmarkMarkdownSteadyState(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		tmpl.Execute(buf, 60, 3)
+	}
+}
+
+// the per-item ForEach cache must stay bounded: a slice that grows by append
+// reallocates, orphaning every elemBase key. Simulate heavy key churn and assert the
+// map doesn't grow without bound (recap review c981).
+func TestMarkdownCacheEvictsOrphanedKeys(t *testing.T) {
+	rt := &opRichText{markdown: true}
+	keys := make([]int, mdCacheEvict*3) // distinct real addresses as fake elemBases
+	for i := range keys {
+		rt.mdSpansFor(unsafe.Pointer(&keys[i]), "**x**")
+	}
+	if len(rt.mdCacheMap) > mdCacheEvict {
+		t.Fatalf("mdCacheMap unbounded: %d entries (cap %d) — orphaned keys not evicted", len(rt.mdCacheMap), mdCacheEvict)
 	}
 }
