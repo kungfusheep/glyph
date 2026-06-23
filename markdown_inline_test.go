@@ -195,3 +195,16 @@ func TestMarkdownWidth(t *testing.T) {
 		}
 	}
 }
+
+// MarkdownSpansInto with a reused buffer must tokenise WITHOUT allocating — spans
+// reference substrings of the input (no copy), the caller owns the slice growth.
+// This is the point of the storage-passing variant: per-frame measurement, zero-alloc.
+func TestMarkdownSpansIntoZeroAlloc(t *testing.T) {
+	buf := make([]Span, 0, 32)
+	allocs := testing.AllocsPerRun(200, func() {
+		buf = MarkdownSpansInto(buf[:0], "the **quick** brown `fox` jumps *over* the ~~lazy~~ dog")
+	})
+	if allocs != 0 {
+		t.Fatalf("MarkdownSpansInto with a reused buffer should be zero-alloc, got %.1f allocs/op", allocs)
+	}
+}
