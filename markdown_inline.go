@@ -111,3 +111,16 @@ func withAttr(s Style, a Attribute) Style {
 	s.Attr = s.Attr.With(a)
 	return s
 }
+
+// MarkdownWidth returns the rendered cell-width of an inline-markdown string — what
+// Rich(&s).Markdown() actually draws, with the markers (**, *, ~~, `, leading "- ")
+// consumed. Use it to size content to markdown output: measuring the raw string
+// over-counts the markers (a "**bold**" line measures 8 but renders 4). It tokenises
+// with the same parser as the renderer, so the width always matches what is drawn.
+func MarkdownWidth(s string) int {
+	w := 0
+	for _, span := range parseInlineMarkdownSpans(s) {
+		w += StringWidth(span.Text)
+	}
+	return w
+}

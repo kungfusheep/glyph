@@ -150,3 +150,29 @@ func TestMarkdownCacheEvictsOrphanedKeys(t *testing.T) {
 		t.Fatalf("mdCacheMap unbounded: %d entries (cap %d) — orphaned keys not evicted", len(rt.mdCacheMap), mdCacheEvict)
 	}
 }
+
+// MarkdownWidth must report the RENDERED width (markers consumed), matching what
+// Rich(&s).Markdown() draws — not the raw string length. Content-hug sizing needs this.
+func TestMarkdownWidth(t *testing.T) {
+	cases := []struct {
+		src  string
+		want int
+	}{
+		{"plain", 5},
+		{"**bold**", 4},      // renders "bold"
+		{"a *b* `c`", 5},     // "a b c"
+		{"~~no~~", 2},        // "no"
+		{"- item", 6},        // "• item" (bullet + space + item = 2+? -> "• "=2, "item"=4)
+		{"", 0},
+	}
+	for _, c := range cases {
+		if got := MarkdownWidth(c.src); got != c.want {
+			// rebuild rendered text for the failure message
+			var rendered string
+			for _, s := range parseInlineMarkdownSpans(c.src) {
+				rendered += s.Text
+			}
+			t.Errorf("MarkdownWidth(%q) = %d, want %d (renders %q)", c.src, got, c.want, rendered)
+		}
+	}
+}
