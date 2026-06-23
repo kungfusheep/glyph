@@ -634,3 +634,64 @@ func TestOnModalRoutesListBindVimNav(t *testing.T) {
 		t.Fatalf("'k' should move 2->1, got %d", sel)
 	}
 }
+
+// CheckList.Selection(*int) parity (recap #451 follow-up): the canonical modal
+// multi-select — CheckList(&items).Selection(&sel).BindVimNav().BindToggle — must be
+// fully component-driven, with selection held in an EXTERNAL pointer so it survives a
+// rebuilt-every-frame overlay. j moves the external sel; space toggles the selected item.
+func TestCheckListExternalSelectionUnderModal(t *testing.T) {
+	type item struct {
+		Name string
+		Done bool
+	}
+	app := NewApp()
+	showOverlay := false
+	items := []item{{Name: "a"}, {Name: "b"}, {Name: "c"}}
+	sel := 0
+
+	build := func() Component {
+		return VBox(
+			If(&showOverlay).Then(
+				Overlay.Centered()(
+					VBox(
+						On.Modal(Key("<Esc>", func() { showOverlay = false })),
+						CheckList(&items).
+							Selection(&sel).
+							Checked(func(i *item) *bool { return &i.Done }).
+							Render(func(i *item) Component { return Text(&i.Name) }).
+							BindVimNav().
+							BindToggle("<Space>"),
+					),
+				),
+			),
+		)
+	}
+	app.SetView(build())
+
+	showOverlay = true
+	app.render()
+
+	if !dispatchRune(app, 'j') {
+		t.Fatal("modal CheckList.BindVimNav should handle 'j'")
+	}
+	if sel != 1 {
+		t.Fatalf("'j' should move EXTERNAL selection 0->1, got %d", sel)
+	}
+	if !app.Input().Dispatch(riffkey.Key{Special: riffkey.SpecialSpace}) {
+		t.Fatal("modal CheckList.BindToggle should handle <Space>")
+	}
+	if !items[1].Done {
+		t.Fatalf("space should toggle the selected (external sel=1) item's checkbox")
+	}
+
+	// the external pointer means selection survives a full View rebuild (the
+	// overlay-rebuilt-every-frame case CheckList couldn't serve before)
+	app.SetView(build())
+	app.render()
+	if sel != 1 {
+		t.Fatalf("external selection must persist across rebuild, got %d", sel)
+	}
+	if !dispatchRune(app, 'j') || sel != 2 {
+		t.Fatalf("nav continues from persisted selection after rebuild, got %d", sel)
+	}
+}

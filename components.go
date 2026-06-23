@@ -3342,6 +3342,18 @@ func CheckList[T any](items *[]T) *CheckListC[T] {
 	return c
 }
 
+// Selection binds an external selection index, mirroring ListC.Selection. Without
+// it CheckList owns selection internally — fine for a stable view, but an overlay
+// that rebuilds its View() every frame needs the selection to persist across
+// rebuilds, which only an external pointer gives. With it the canonical modal
+// multi-select is fully component-driven:
+//
+//	CheckList(&items).Selection(&sel).BindVimNav().BindToggle("<Space>")
+func (c *CheckListC[T]) Selection(sel *int) *CheckListC[T] {
+	c.selected = sel
+	return c
+}
+
 // Checked provides the bool pointer that controls each item's checkbox.
 // fn: func(item *T) *bool. return a pointer to the item's checked field.
 func (c *CheckListC[T]) Checked(fn func(*T) *bool) *CheckListC[T] {
