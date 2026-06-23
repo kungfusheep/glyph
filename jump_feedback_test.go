@@ -398,8 +398,8 @@ func TestJumpModeConcurrentRenderNoRace(t *testing.T) {
 	<-done
 }
 
-// TestJumpModeLayerRenderNoDeadlock guards the re-entrancy that 0cdb24c hit: a
-// consumer's layer Render callback (recap's renderDiffLayer) calls JumpModeActive()
+// TestJumpModeLayerRenderNoDeadlock guards the re-entrancy: a
+// consumer's layer Render callback (e.g. a diff/scroll layer) calls JumpModeActive()
 // DURING the main render's Execute. If render holds the jump lock across Execute and
 // JumpModeActive() also locks it, that's a same-goroutine re-lock → deadlock. This
 // drives exactly that shape with a timeout guard.

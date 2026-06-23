@@ -9,8 +9,8 @@ import (
 // An If branch is laid out at content height (layout(0)) and only its ROOT used to be
 // stretched to the row height afterwards — the branch's INTERNAL flex never re-ran, so
 // Grow children and height-0 stretch elements (scrollbars, vrules) inside an If-wrapped
-// pane kept the content-sized pass and collapsed (recap's "comments scrollbar track is
-// 2 lines high" bug). stretchIfContent now redistributes the branch's flex against the
+// pane kept the content-sized pass and collapsed (e.g. a scrollbar track rendering
+// only 2 lines high). stretchIfContent now redistributes the branch's flex against the
 // stretched height, mirroring propagateFlexToIf on the VBox flex path.
 func TestIfBranchStretchRedistributesInternalFlex(t *testing.T) {
 	show := true

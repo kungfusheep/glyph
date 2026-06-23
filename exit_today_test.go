@@ -125,7 +125,7 @@ func TestNodeRefStaysLiveThroughExitAnimationThenZeroes(t *testing.T) {
 	}
 }
 
-// recap's EXACT help-overlay close path: an If-gated Overlay (renders in phase 4)
+// an exact help-overlay close path: an If-gated Overlay (renders in phase 4)
 // whose ref-bearing node has an Out animation. The ref must stay live through the
 // fade and zero only after the Out completes and the branch drops — otherwise a
 // dodge effect outside the If keeps exempting a phantom region after close.

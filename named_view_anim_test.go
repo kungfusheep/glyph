@@ -6,7 +6,7 @@ import "testing"
 // drive their own frames. The anim ticker only spins when requestRender != nil; SetView
 // set it explicitly, but View/UpdateView relied on SetApp — which previously left it nil,
 // freezing every tween in a named view (the "focus animations broken between views" bug
-// once recap moved its inbox/todo to named views). This guards the wiring at the source.
+// that surfaces once an app moves panes to named views). This guards the wiring at the source.
 func TestNamedViewWiresAnimationRenderer(t *testing.T) {
 	app := NewApp()
 

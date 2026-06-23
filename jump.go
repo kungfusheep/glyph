@@ -48,7 +48,7 @@ type JumpTarget struct {
 // render→Execute). The split that keeps it correct AND deadlock-free:
 //
 //   - active is an atomic.Bool, so JumpModeActive() is a lock-free read. Consumer
-//     code (a custom layer's Render callback, e.g. recap's diff view) calls it
+//     code (a custom layer's Render callback, e.g. a diff/scroll view) calls it
 //     DURING the main render's Execute — a locking accessor there would re-enter
 //     and deadlock, since render is the same goroutine. atomic dodges that.
 //   - Targets/Input/ScopeRects are guarded by mu, but mu is NEVER held across

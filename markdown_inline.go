@@ -16,8 +16,8 @@ import "strings"
 //
 // v1 limitation: bold/strike recurse so they nest, but bold nested inside *italic*
 // (`*x **y** z*`) does not compose to both attrs (the italic delimiter match stops at
-// the inner `**`). Visible text is always preserved. recap's cases don't nest; richer
-// nesting can follow if needed.
+// the inner `**`). Visible text is always preserved. Common chat/prose bodies don't
+// nest; richer nesting can follow if needed.
 func parseInlineMarkdownSpans(text string) []Span {
 	// leading "- " bullet: emit a bullet glyph, then parse the remainder inline.
 	var prefix []Span

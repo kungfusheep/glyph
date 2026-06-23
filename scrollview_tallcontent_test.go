@@ -7,7 +7,7 @@ import (
 
 // content taller than the internal render buffer (the old fixed 500-row cap) must still be
 // reachable: scroll-to-end has to reveal the LAST line, not a clipped middle one. Repro for
-// recap chat truncation (todo:3ff01295): a long conversation clipped its latest message.
+// e.g. a long chat conversation clipping its latest message.
 func TestScrollView_TallContentScrollToEnd(t *testing.T) {
 	const n = 700 // > the old 500 cap
 	lines := make([]Component, n)

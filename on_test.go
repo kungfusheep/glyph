@@ -454,7 +454,7 @@ func TestOnModalSwitchesFromElseBranchToThenBranch(t *testing.T) {
 	}
 }
 
-// the calendar m298 handoff: a Form (FocusManager-managed Input) inside an
+// focus handoff: a Form (FocusManager-managed Input) inside an
 // If+Overlay must get keyboard focus activated when the overlay shows, and
 // release it symmetrically when it hides — the FM rides the same visibility
 // edges as the modal router.
@@ -588,10 +588,9 @@ func TestModalRouterUpBeforeNextKeyInRealLoop(t *testing.T) {
 	}
 }
 
-// authoritative answer to Komorebi's question (recap #451): does a List's
-// .BindVimNav() j/k navigation fire when the list is rendered inside an On.Modal
-// key scope? It must — component bindings in a modal scope are wired into the
-// modal router (app.go wireChildRouteScopes), same as a sibling Input/FilterList.
+// a List's .BindVimNav() j/k navigation must fire when the list is rendered inside an
+// On.Modal key scope: component bindings in a modal scope are wired into the modal
+// router (app.go wireChildRouteScopes), same as a sibling Input/FilterList.
 func TestOnModalRoutesListBindVimNav(t *testing.T) {
 	app := NewApp()
 	showOverlay := false
@@ -635,9 +634,9 @@ func TestOnModalRoutesListBindVimNav(t *testing.T) {
 	}
 }
 
-// CheckList.Selection(*int) parity (recap #451 follow-up): the canonical modal
-// multi-select — CheckList(&items).Selection(&sel).BindVimNav().BindToggle — must be
-// fully component-driven, with selection held in an EXTERNAL pointer so it survives a
+// CheckList.Selection(*int) parity with List: the canonical modal multi-select —
+// CheckList(&items).Selection(&sel).BindVimNav().BindToggle — must be fully
+// component-driven, with selection held in an EXTERNAL pointer so it survives a
 // rebuilt-every-frame overlay. j moves the external sel; space toggles the selected item.
 func TestCheckListExternalSelectionUnderModal(t *testing.T) {
 	type item struct {

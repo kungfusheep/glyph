@@ -17,8 +17,8 @@ type Layer struct {
 	// blit reads scrollY) on the frame goroutine while input handlers scroll
 	// (ScrollTo/ScrollDown/PageDown/…) and read ViewportHeight/ScrollY on another.
 	// NEVER hold scrollMu across the Render callback: consumer Render code calls
-	// back into ScrollY()/ScrollTo()/ViewportWidth() (recap's renderDiffLayer), so
-	// holding it there would re-enter and deadlock (the jump-fix lesson).
+	// back into ScrollY()/ScrollTo()/ViewportWidth() (a consumer's diff/scroll layer), so
+	// holding it there would re-enter and deadlock.
 	scrollMu  sync.Mutex
 	buffer    *Buffer
 	scrollY   int

@@ -5,12 +5,12 @@ import (
 	"time"
 )
 
-// TestLayerScrollConcurrentRenderNoRace guards the Layer scroll-state race
-// (Kestrel recap m778): render() drives SetViewport→updateMaxScroll (writing
+// TestLayerScrollConcurrentRenderNoRace guards the Layer scroll-state race:
+// render() drives SetViewport→updateMaxScroll (writing
 // scrollY/maxScroll/viewport) while an input handler calls ScrollTo/ScrollDown on
 // the same Layer. With no sync those tear; this drives both goroutines. Run
 // under -race. Also a deadlock guard: the layer's Render callback calls back into
-// ScrollY()/ScrollTo() (recap's renderDiffLayer pattern), so the scroll lock must
+// ScrollY()/ScrollTo() (a consumer's diff/scroll layer pattern), so the scroll lock must
 // not be held across Render().
 func TestLayerScrollConcurrentRenderNoRace(t *testing.T) {
 	layer := NewLayer()

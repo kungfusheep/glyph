@@ -69,7 +69,7 @@ func TestSkipExecuteOnEffectFrame(t *testing.T) {
 	}
 }
 
-// TestAnimatingTemplateNotSkipped (Komorebi's guard): an animating template under
+// TestAnimatingTemplateNotSkipped: an animating template under
 // an active effect must NOT be skipped — its animated cells advance frame to frame.
 func TestAnimatingTemplateNotSkipped(t *testing.T) {
 	clock := time.Unix(0, 0)
@@ -275,7 +275,7 @@ func TestEffectOscOscillatesWhileSkippingExecute(t *testing.T) {
 	}
 }
 
-// recap's real scenario through the APP path (not bare Execute): an If-gated overlay
+// a real app scenario through the APP path (not bare Execute): an If-gated overlay
 // carrying a NodeRef that a screen-effect dodges, with effect-only frames in the mix
 // (the breathing FocusShade). After the overlay closes, the dodge must RELEASE — the
 // ref must zero and stay zero across subsequent effect-only frames, or a phantom

@@ -37,10 +37,10 @@ func TestJumpItemResolvesPerForEachItem(t *testing.T) {
 	}
 }
 
-// the EXPORTED activation path: external packages (e.g. calendar) collect jump
-// targets at an exact size via a low-level Execute, which needs a public way to
-// activate jump mode — the regression when Active (public field) became active
-// (unexported atomic.Bool). JumpMode.Activate/Deactivate restore it race-safely.
+// the EXPORTED activation path: external packages collect jump targets at an exact
+// size via a low-level Execute, which needs a public way to activate jump mode — the
+// regression when Active (public field) became active (unexported atomic.Bool).
+// JumpMode.Activate/Deactivate restore it race-safely.
 func TestJumpModeActivateDrivesExactSizeCollection(t *testing.T) {
 	type cell struct{ Label string }
 	cells := []cell{{Label: "a"}, {Label: "b"}, {Label: "c"}}

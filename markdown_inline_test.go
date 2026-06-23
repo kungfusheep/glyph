@@ -139,7 +139,7 @@ func BenchmarkMarkdownSteadyState(b *testing.B) {
 
 // the per-item ForEach cache must stay bounded: a slice that grows by append
 // reallocates, orphaning every elemBase key. Simulate heavy key churn and assert the
-// map doesn't grow without bound (recap review c981).
+// map doesn't grow without bound.
 func TestMarkdownCacheEvictsOrphanedKeys(t *testing.T) {
 	rt := &opRichText{markdown: true}
 	keys := make([]int, mdCacheEvict*3) // distinct real addresses as fake elemBases

@@ -850,7 +850,7 @@ func TestConditionInsideForEach(t *testing.T) {
 func TestBareForEachAsConditionBranch(t *testing.T) {
 	// a bare ForEach used directly as an If branch (no wrapping container) must
 	// lay out and render per outer element. the inner slice is a field offset on
-	// a value-slice element, so it rebases per row. recap #370 fold shape.
+	// a value-slice element, so it rebases per row (a per-row fold shape).
 	type Comment struct {
 		Open    bool
 		Body    []string
@@ -893,7 +893,7 @@ func TestBareForEachAsConditionBranch(t *testing.T) {
 }
 
 func TestForEachInIfInsideListRow(t *testing.T) {
-	// recap #370 exact shape: per-row fold inside a List, two sibling Ifs each
+	// per-row fold inside a List, two sibling Ifs each
 	// wrapping a ForEach over a per-row sub-slice. List has its own iter path,
 	// so this guards that the root-level ForEach branch layout reaches it too.
 	type Row struct{ Spans []Span }
@@ -1480,7 +1480,7 @@ func BenchmarkNodeRefZeroingPerFrame(b *testing.B) {
 	}
 }
 
-// recap's real composition (regression for the path the first #27 tests missed):
+// a real-world composition (regression for the path the first overlay-ref tests missed):
 // an If-gated OVERLAY renders in phase 4, not the phase-3 walk. Its NodeRef must
 // still zero when the overlay is gated out, or a screen-effect dodge keeps a phantom.
 func TestOverlayRefZeroesWhenGatedOut(t *testing.T) {

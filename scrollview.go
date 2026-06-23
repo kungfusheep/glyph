@@ -360,7 +360,7 @@ func (sv *ScrollViewC) render() {
 	// render into a buffer tall enough to hold ALL content, then trim to actual. Start
 	// generous and GROW if the content filled the buffer — a fixed cap clipped tall content
 	// (e.g. a long chat), so scroll-to-end couldn't reach the last rows and the latest message
-	// rendered truncated (recap chat, todo:3ff01295). Growing keeps the common case (content
+	// rendered truncated (e.g. a long chat). Growing keeps the common case (content
 	// shorter than the cap) at a single pass.
 	h := sv.layer.ViewportHeight()
 	if h < 500 {
