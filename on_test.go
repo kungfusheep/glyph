@@ -587,3 +587,50 @@ func TestModalRouterUpBeforeNextKeyInRealLoop(t *testing.T) {
 		t.Fatalf("real loop: the modal should catch the y after x opened it (no RenderNow needed): root=%d modal=%d", rootHits, modalHits)
 	}
 }
+
+// authoritative answer to Komorebi's question (recap #451): does a List's
+// .BindVimNav() j/k navigation fire when the list is rendered inside an On.Modal
+// key scope? It must — component bindings in a modal scope are wired into the
+// modal router (app.go wireChildRouteScopes), same as a sibling Input/FilterList.
+func TestOnModalRoutesListBindVimNav(t *testing.T) {
+	app := NewApp()
+	showOverlay := false
+	items := []string{"alice", "bob", "carol"}
+	sel := 0
+	list := List(&items).Selection(&sel).
+		Render(func(s *string) Component { return Text(s) }).
+		BindVimNav()
+
+	app.SetView(VBox(
+		If(&showOverlay).Then(
+			Overlay.Centered()(
+				VBox(
+					On.Modal(Key("<Esc>", func() { showOverlay = false })),
+					list,
+				),
+			),
+		),
+	))
+
+	app.render()
+	if dispatchRune(app, 'j') {
+		t.Fatal("hidden modal list handled 'j'")
+	}
+
+	showOverlay = true
+	app.render()
+	if !dispatchRune(app, 'j') {
+		t.Fatal("modal-scoped List.BindVimNav should handle 'j'")
+	}
+	if sel != 1 {
+		t.Fatalf("'j' under On.Modal should move selection 0->1, got %d", sel)
+	}
+	dispatchRune(app, 'j')
+	if sel != 2 {
+		t.Fatalf("second 'j' should move 1->2, got %d", sel)
+	}
+	dispatchRune(app, 'k')
+	if sel != 1 {
+		t.Fatalf("'k' should move 2->1, got %d", sel)
+	}
+}
