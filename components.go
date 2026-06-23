@@ -3321,6 +3321,8 @@ type CheckListC[T any] struct {
 	markerStyle      Style
 	style            Style
 	selectedStyle    Style
+	styleDyn         any // *Style/conditionNode/tweenNode for a live (theme-reactive) style
+	selectedStyleDyn any
 	gap              int8
 	declaredBindings []binding
 	cached           *selectionList
@@ -3387,15 +3389,39 @@ func (c *CheckListC[T]) MarkerStyle(s Style) *CheckListC[T] {
 	return c
 }
 
-// Style sets the component style.
-func (c *CheckListC[T]) Style(s Style) *CheckListC[T] {
-	c.style = s
+// Style sets the default style for non-selected rows.
+// Accepts Style, *Style, conditionNode, or tweenNode (a pointer/dynamic value is
+// read live each frame, so a theme reassignment recolours — parity with List.Style).
+func (c *CheckListC[T]) Style(s any) *CheckListC[T] {
+	switch v := s.(type) {
+	case Style:
+		c.style = v
+		if c.cached != nil {
+			c.cached.Style = v
+		}
+	default:
+		c.styleDyn = s
+		if c.cached != nil {
+			c.cached.StyleDyn = s
+		}
+	}
 	return c
 }
 
 // SelectedStyle sets the style for the selected row.
-func (c *CheckListC[T]) SelectedStyle(s Style) *CheckListC[T] {
-	c.selectedStyle = s
+// Accepts Style, *Style, conditionNode, or tweenNode (read live each frame).
+func (c *CheckListC[T]) SelectedStyle(s any) *CheckListC[T] {
+	if v, ok := s.(Style); ok {
+		c.selectedStyle = v
+		if c.cached != nil {
+			c.cached.SelectedStyle = v
+		}
+		return c
+	}
+	c.selectedStyleDyn = s
+	if c.cached != nil {
+		c.cached.SelectedStyleDyn = s
+	}
 	return c
 }
 
@@ -3599,12 +3625,14 @@ func (c *CheckListC[T]) toSelectionList() *selectionList {
 		c.render = renderFn
 
 		c.cached = &selectionList{
-			Items:         c.items,
-			Selected:      c.selected,
-			Marker:        c.marker,
-			MarkerStyle:   c.markerStyle,
-			Style:         c.style,
-			SelectedStyle: c.selectedStyle,
+			Items:            c.items,
+			Selected:         c.selected,
+			Marker:           c.marker,
+			MarkerStyle:      c.markerStyle,
+			Style:            c.style,
+			SelectedStyle:    c.selectedStyle,
+			StyleDyn:         c.styleDyn,
+			SelectedStyleDyn: c.selectedStyleDyn,
 		}
 
 		// Build the render function with checkbox marks

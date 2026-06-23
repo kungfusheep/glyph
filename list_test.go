@@ -313,3 +313,32 @@ func BenchmarkSelectionListScrollRender(b *testing.B) {
 		}
 	}
 }
+
+// CheckList.Style/SelectedStyle must accept a live *Style (parity with List): a theme
+// var reassigned after build must recolour on the next render, since views are built
+// once at registration. The non-selected row carries Style; assert it tracks the pointer.
+func TestCheckListStyleAcceptsLivePointer(t *testing.T) {
+	items := []string{"alpha", "beta"}
+	st := Style{FG: RGB(200, 0, 0)}
+	sel := 0 // row 0 selected, so row 1 ("beta") is the non-selected row carrying Style
+	cl := CheckList(&items).
+		Selection(&sel).
+		Checked(func(s *string) *bool { b := false; return &b }).
+		Render(func(s *string) Component { return Text(s) }).
+		Style(&st)
+	tmpl := Build(VBox(cl))
+	buf := NewBuffer(20, 4)
+	tmpl.Execute(buf, 20, 4)
+
+	if got := buf.Get(4, 1).Style.FG; got != (RGB(200, 0, 0)) {
+		t.Fatalf("non-selected row FG = %v, want red from the live *Style", got)
+	}
+
+	// theme switch: reassign the style var; the live pointer must recolour next frame
+	st = Style{FG: RGB(0, 200, 0)}
+	buf.Clear()
+	tmpl.Execute(buf, 20, 4)
+	if got := buf.Get(4, 1).Style.FG; got != (RGB(0, 200, 0)) {
+		t.Fatalf("after theme reassignment FG = %v, want green — Style(&st) not read live (frozen-at-build parity gap)", got)
+	}
+}
