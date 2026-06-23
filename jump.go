@@ -72,13 +72,16 @@ type JumpMode struct {
 func (jm *JumpMode) isActive() bool  { return jm.active.Load() }
 func (jm *JumpMode) setActive(b bool) { jm.active.Store(b) }
 
-// SetActive activates or deactivates jump mode. It is the exported, race-safe
-// replacement for the old public Active field (now an atomic.Bool): external
-// packages need it to drive jump-target collection at an EXACT size via a
-// low-level Execute — set it true, Build + Execute(buf, w, h) at the target size,
-// then AssignLabels and read Targets. EnterJumpMode is not a substitute there: it
-// renders at the screen size and self-deactivates when a render finds no targets.
-func (jm *JumpMode) SetActive(b bool) { jm.active.Store(b) }
+// Activate and Deactivate are the exported, race-safe replacement for the old public
+// Active field (now an atomic.Bool). External packages need them to drive jump-target
+// collection at an EXACT size via a low-level Execute: Activate, then Build +
+// Execute(buf, w, h) at the target size, then AssignLabels and read Targets, then
+// Deactivate. They mirror App.EnterJumpMode/ExitJumpMode at the JumpMode level but
+// WITHOUT the interactive entry — EnterJumpMode renders at the screen size and
+// self-deactivates if that render finds no targets, so it can't collect at an exact,
+// off-screen size.
+func (jm *JumpMode) Activate()   { jm.active.Store(true) }
+func (jm *JumpMode) Deactivate() { jm.active.Store(false) }
 
 func (jm *JumpMode) setScope(rects []*NodeRef) {
 	jm.mu.Lock()

@@ -40,15 +40,15 @@ func TestJumpItemResolvesPerForEachItem(t *testing.T) {
 // the EXPORTED activation path: external packages (e.g. calendar) collect jump
 // targets at an exact size via a low-level Execute, which needs a public way to
 // activate jump mode — the regression when Active (public field) became active
-// (unexported atomic.Bool). JumpMode.SetActive restores it race-safely.
-func TestJumpModeSetActiveDrivesExactSizeCollection(t *testing.T) {
+// (unexported atomic.Bool). JumpMode.Activate/Deactivate restore it race-safely.
+func TestJumpModeActivateDrivesExactSizeCollection(t *testing.T) {
 	type cell struct{ Label string }
 	cells := []cell{{Label: "a"}, {Label: "b"}, {Label: "c"}}
 
 	app := NewApp()
-	app.JumpMode().SetActive(true) // the exported activation external tests rely on
+	app.JumpMode().Activate() // the exported activation external tests rely on
 	if !app.JumpModeActive() {
-		t.Fatal("SetActive(true) should activate jump mode")
+		t.Fatal("Activate() should activate jump mode")
 	}
 
 	tmpl := Build(VBox(
@@ -65,9 +65,9 @@ func TestJumpModeSetActiveDrivesExactSizeCollection(t *testing.T) {
 		t.Fatalf("targets at exact size = %d, want 3 (exported activation path broken)", got)
 	}
 
-	app.JumpMode().SetActive(false)
+	app.JumpMode().Deactivate()
 	if app.JumpModeActive() {
-		t.Fatal("SetActive(false) should deactivate jump mode")
+		t.Fatal("Deactivate() should deactivate jump mode")
 	}
 }
 
