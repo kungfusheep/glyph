@@ -19,6 +19,7 @@ type ScrollViewC struct {
 	margin       [4]int16
 	scrollbar    bool
 	anchorBottom bool // when content underflows the viewport, hug the bottom edge
+	feather      int  // rows of edge fade shown at an overflowing edge (0 = off)
 
 	scrollbarTrackStyle  any
 	scrollbarThumbStyle  any
@@ -219,6 +220,19 @@ func (f ScrollViewFn) AnchorBottom() ScrollViewFn {
 	}
 }
 
+// Feather fades n rows toward the background at an overflowing edge: the top when
+// scrolled down from the top, the bottom when there is more below. The fade appears
+// only where content actually overflows (no feather at the top when at the top, none at
+// the bottom when scrolled to the end), so it doubles as a scroll-position cue. Needs an
+// RGB-ish background to blend toward; with a terminal-default background it is a no-op.
+func (f ScrollViewFn) Feather(n int) ScrollViewFn {
+	return func(children ...Component) *ScrollViewC {
+		sv := f(children...)
+		sv.feather = n
+		return sv
+	}
+}
+
 // ScrollbarVisible reserves the scrollbar gutter and fades the scrollbar in
 // while the condition is true.
 func (f ScrollViewFn) ScrollbarVisible(visible *bool) ScrollViewFn {
@@ -295,6 +309,7 @@ func (sv *ScrollViewC) ScrollTo(y int) {
 }
 
 func (t *Template) compileScrollViewC(v *ScrollViewC, parent int16, depth int) int16 {
+	v.layer.feather = v.feather
 	layerView := LayerView(v.layer).Grow(v.flexGrow)
 	if v.scrollbar {
 		layerView = LayerView(v.layer).Grow(1)

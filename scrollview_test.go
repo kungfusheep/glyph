@@ -284,3 +284,92 @@ func TestScrollView_AnchorBottomBoundaryHandoff(t *testing.T) {
 		t.Fatalf("under-seam after ScrollToEnd: bottom row = %q, want line4 (ScrollTo must be inert)", got)
 	}
 }
+
+// Feather fades the overflowing edges toward the background: top only when scrolled down,
+// bottom only when more remains; middle rows and the off-flag path are untouched.
+func TestScrollView_FeatherFadesOverflowingEdges(t *testing.T) {
+	const n = 30
+	rows := func() []Component {
+		cs := make([]Component, n)
+		for i := range cs {
+			cs[i] = Text(fmt.Sprintf("row%d", i)).FG(RGB(200, 200, 200))
+		}
+		return cs
+	}
+	render := func(feather, scrollTo int) *Buffer {
+		sv := ScrollView.Grow(1).Feather(feather)(rows()...)
+		screen := NewBuffer(10, 8)
+		tmpl := Build(VBox(sv))
+		sv.Layer().defaultStyle = Style{BG: RGB(0, 0, 0)}
+		tmpl.Execute(screen, 10, 8) // first pass computes maxScroll
+		sv.Layer().defaultStyle = Style{BG: RGB(0, 0, 0)}
+		sv.Layer().ScrollTo(scrollTo)
+		screen.Clear()
+		tmpl.Execute(screen, 10, 8)
+		return screen
+	}
+	fg := func(b *Buffer, y int) Color { return b.Get(0, y).Style.FG }
+
+	// mid-scroll: both edges overflow → both fade; a middle row does not.
+	base := render(0, 10)
+	feat := render(2, 10)
+	if fg(feat, 0) == fg(base, 0) {
+		t.Error("mid-scroll: top edge row should be faded (scrolled down), unchanged")
+	}
+	if fg(feat, 7) == fg(base, 7) {
+		t.Error("mid-scroll: bottom edge row should be faded (more below), unchanged")
+	}
+	if fg(feat, 4) != fg(base, 4) {
+		t.Error("mid-scroll: middle row must NOT fade")
+	}
+
+	// at the top: top edge must NOT fade; bottom still overflows → fades.
+	baseTop := render(0, 0)
+	featTop := render(2, 0)
+	if fg(featTop, 0) != fg(baseTop, 0) {
+		t.Error("at top: top edge must NOT fade (nothing above)")
+	}
+	if fg(featTop, 7) == fg(baseTop, 7) {
+		t.Error("at top: bottom edge should still fade (more below)")
+	}
+
+	// at the end: bottom edge must NOT fade; top still overflows → fades.
+	baseEnd := render(0, 1<<20)
+	featEnd := render(2, 1<<20)
+	if fg(featEnd, 7) != fg(baseEnd, 7) {
+		t.Error("at end: bottom edge must NOT fade (scrolled all the way down)")
+	}
+	if fg(featEnd, 0) == fg(baseEnd, 0) {
+		t.Error("at end: top edge should still fade (more above)")
+	}
+}
+
+// Feather(0) (the default) leaves blit output byte-for-byte identical — off-path guard.
+func TestScrollView_FeatherZeroUnchanged(t *testing.T) {
+	rows := make([]Component, 30)
+	for i := range rows {
+		rows[i] = Text(fmt.Sprintf("row%d", i)).FG(RGB(200, 200, 200))
+	}
+	mk := func(feather int) *Buffer {
+		sv := ScrollView.Grow(1).Feather(feather)(rows...)
+		screen := NewBuffer(10, 8)
+		tmpl := Build(VBox(sv))
+		sv.Layer().defaultStyle = Style{BG: RGB(0, 0, 0)}
+		tmpl.Execute(screen, 10, 8)
+		sv.Layer().defaultStyle = Style{BG: RGB(0, 0, 0)}
+		sv.Layer().ScrollTo(10)
+		screen.Clear()
+		tmpl.Execute(screen, 10, 8)
+		return screen
+	}
+	off := mk(0)
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 10; x++ {
+			c := off.Get(x, y)
+			// with feather 0, an edge cell's FG is the raw content colour, not blended.
+			if c.Rune == 'r' && c.Style.FG != RGB(200, 200, 200) {
+				t.Fatalf("Feather(0): cell (%d,%d) FG = %+v, want raw RGB(200,200,200) — off-path altered", x, y, c.Style.FG)
+			}
+		}
+	}
+}

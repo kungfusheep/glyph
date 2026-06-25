@@ -462,3 +462,30 @@ func TestLayerReRendersOnHeightChange(t *testing.T) {
 		t.Fatal("width change should still re-render")
 	}
 }
+
+// Feather adds work only at the overflowing edges and only when enabled; the off-path
+// (feather 0) must match plain blit. These two benchmarks prove no per-frame regression
+// off-path and bounded edge cost on-path.
+func benchmarkLayerBlit(b *testing.B, feather int) {
+	l := NewLayer()
+	l.feather = feather
+	l.defaultStyle = Style{BG: RGB(0, 0, 0)}
+	src := NewBuffer(80, 400)
+	for y := 0; y < 400; y++ {
+		for x := 0; x < 80; x++ {
+			src.SetFast(x, y, Cell{Rune: 'x', Style: Style{FG: RGB(200, 200, 200)}})
+		}
+	}
+	l.SetBuffer(src)
+	l.SetViewport(80, 40)
+	l.ScrollTo(180) // mid-scroll: both edges feather
+	dst := NewBuffer(80, 40)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		l.blit(dst, 0, 0, 80, 40)
+	}
+}
+
+func BenchmarkLayerBlit(b *testing.B)        { benchmarkLayerBlit(b, 0) }
+func BenchmarkLayerBlitFeather(b *testing.B) { benchmarkLayerBlit(b, 3) }
