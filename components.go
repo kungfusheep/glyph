@@ -1,9 +1,27 @@
 package glyph
 
 import (
+	"fmt"
 	"reflect"
 	"unsafe"
 )
+
+// validatePercentWidth enforces WidthPct's 0.0-1.0 fraction contract at build time.
+// A static float outside [0,1] — or an out-of-contract type like an int (WidthPct(42)
+// reads as "42%" but the contract is a fraction, so it would mean 4200%) — panics with a
+// message that names the right call. Silent no-op on a bad arg used to vanish the element;
+// loud-at-build surfaces the mistake at the call site, and glyph builds once so there is no
+// per-frame cost.
+func validatePercentWidth(val float64) float32 {
+	if val < 0 || val > 1 {
+		panic(fmt.Sprintf("WidthPct takes a 0.0-1.0 fraction; got %v — e.g. WidthPct(0.42) for 42%%", val))
+	}
+	return float32(val)
+}
+
+func panicPercentWidthType(val any) {
+	panic(fmt.Sprintf("WidthPct takes a 0.0-1.0 fraction (float32/float64), *float32, or a dynamic value (condition/tween/osc); got %T (%v) — e.g. WidthPct(0.42) for 42%%, not WidthPct(42)", val, val))
+}
 
 // binding represents a declared key binding on a component.
 // stored as data during construction, wired to a router during setup.
@@ -352,17 +370,19 @@ func (f VBoxFn) WidthPct(pct any) VBoxFn {
 		v := f(children...)
 		switch val := pct.(type) {
 		case float32:
-			v.percentWidth = val
+			v.percentWidth = validatePercentWidth(float64(val))
 		case float64:
-			v.percentWidth = float32(val)
+			v.percentWidth = validatePercentWidth(val)
 		case *float32:
 			v.percentWidthPtr = val
 		case conditionNode:
 			v.percentWidthCond = val
 		case tweenNode:
 			v.percentWidthCond = val
-	case OscC:
+		case OscC:
 			v.percentWidthCond = val
+		default:
+			panicPercentWidthType(val)
 		}
 		return v
 	}
@@ -752,17 +772,19 @@ func (f HBoxFn) WidthPct(pct any) HBoxFn {
 		h := f(children...)
 		switch val := pct.(type) {
 		case float32:
-			h.percentWidth = val
+			h.percentWidth = validatePercentWidth(float64(val))
 		case float64:
-			h.percentWidth = float32(val)
+			h.percentWidth = validatePercentWidth(val)
 		case *float32:
 			h.percentWidthPtr = val
 		case conditionNode:
 			h.percentWidthCond = val
 		case tweenNode:
 			h.percentWidthCond = val
-	case OscC:
+		case OscC:
 			h.percentWidthCond = val
+		default:
+			panicPercentWidthType(val)
 		}
 		return h
 	}

@@ -1361,3 +1361,40 @@ func BenchmarkNoClipRender(b *testing.B) {
 		tmpl.Execute(buf, 60, 30)
 	}
 }
+
+// WidthPct must FAIL LOUD on an out-of-contract arg instead of silently no-opping (which
+// vanished the element). The contract is a 0.0-1.0 fraction; an int or an out-of-range
+// float panics at build with a message naming the right call.
+func TestWidthPctFailsLoudOnBadArg(t *testing.T) {
+	mustPanic := func(name string, build func()) {
+		t.Helper()
+		defer func() {
+			if r := recover(); r == nil {
+				t.Errorf("%s: expected a build-time panic, got none (silent no-op regressed)", name)
+			}
+		}()
+		build()
+	}
+
+	// int reads as a percentage but the contract is a fraction — must panic, not drop.
+	mustPanic("VBox.WidthPct(42)", func() { VBox.WidthPct(42)(Text("x")) })
+	mustPanic("HBox.WidthPct(42)", func() { HBox.WidthPct(42)(Text("x")) })
+	// out-of-range float (e.g. someone passes 50 meaning 50%) must panic too.
+	mustPanic("VBox.WidthPct(1.5)", func() { VBox.WidthPct(1.5)(Text("x")) })
+	mustPanic("VBox.WidthPct(-0.1)", func() { VBox.WidthPct(-0.1)(Text("x")) })
+	// unmatched type must panic.
+	mustPanic("VBox.WidthPct(string)", func() { VBox.WidthPct("42")(Text("x")) })
+
+	// the valid 0-1 fraction must still work (and actually lay out) — regression guard.
+	left, right := "L", "R"
+	view := HBox.Width(40)(
+		VBox.WidthPct(0.25)(Text(&left)),
+		VBox.Grow(1)(Text(&right)),
+	)
+	buf := NewBuffer(40, 1)
+	Build(view).Execute(buf, 40, 1)
+	// 0.25 * 40 = 10 columns for the left col; "R" lands at column 10.
+	if got := buf.GetLine(0); !strings.HasPrefix(got, "L") || got[10] != 'R' {
+		t.Errorf("WidthPct(0.25) layout = %q, want L in col0 and R at col10", got)
+	}
+}
