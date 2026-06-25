@@ -4,8 +4,58 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
+
+// firstTruncatedCSI scans s for a CSI (ESC [) interrupted by another ESC before its
+// final byte — the signature of two terminal writes interleaving mid-sequence. Returns
+// the offending substring, or "" if every CSI is well-formed.
+func firstTruncatedCSI(s string) string {
+	for i := 0; i+1 < len(s); i++ {
+		if s[i] != 0x1b || s[i+1] != '[' {
+			continue
+		}
+		j := i + 2
+		for j < len(s) {
+			c := s[j]
+			if c >= 0x40 && c <= 0x7e { // final byte: CSI complete
+				break
+			}
+			if c == 0x1b { // another ESC before the final byte: severed
+				return s[i:j]
+			}
+			j++
+		}
+	}
+	return ""
+}
+
+// Every terminal write must be atomic w.r.t. every other: a flush frame's escape
+// sequences must never be severed by a concurrent direct write. Reproduces the shape
+// that corrupts in practice — a diff-frame flush vs a burst of row CUPs from a direct
+// cursor move — and must run clean under -race (concurrent writes to one io.Writer race
+// without writeMu).
+func TestScreenConcurrentWritesNotSevered(t *testing.T) {
+	s, out := newTestScreen(200, 30)
+	for x := 0; x < 200; x++ {
+		s.back.Set(x, 1, Cell{Rune: 'a', Style: Style{FG: RGB(99, 96, 92), BG: RGB(28, 28, 28)}})
+	}
+	s.Flush()
+	frame := append([]byte(nil), s.buf.Bytes()...)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 40; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); s.emit(frame) }()                // flush-style frame write
+		go func(i int) { defer wg.Done(); s.MoveCursor(120+i, 24) }(i) // row-25 CUP burst (the injector)
+	}
+	wg.Wait()
+
+	if bad := firstTruncatedCSI(out.String()); bad != "" {
+		t.Fatalf("severed escape sequence in concurrent output: %q", bad)
+	}
+}
 
 func newTestScreen(w, h int) (*Screen, *bytes.Buffer) {
 	var out bytes.Buffer

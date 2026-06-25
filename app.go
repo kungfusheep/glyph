@@ -1328,7 +1328,9 @@ func (a *App) run(startView string) error {
 		if a.defaultStyle.BG.Mode == ColorRGB {
 			a.screen.SetTerminalBG(a.defaultStyle.BG)
 			bg := a.defaultStyle.BG
-			fmt.Fprintf(a.screen.writer, "\x1b[48;2;%d;%d;%dm\x1b[2J\x1b[H", bg.R, bg.G, bg.B)
+			// route through the screen's serialised emit, not a raw writer Fprintf,
+			// so it can't interleave with a concurrent flush.
+			a.screen.emit([]byte(fmt.Sprintf("\x1b[48;2;%d;%d;%dm\x1b[2J\x1b[H", bg.R, bg.G, bg.B)))
 		}
 	}
 

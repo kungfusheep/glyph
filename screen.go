@@ -41,6 +41,16 @@ type Screen struct {
 
 	// Synchronization - protects buffer access during resize
 	mu sync.Mutex
+
+	// writeMu serialises EVERY write to the terminal (writer). Render flushes run
+	// under the app's renderMu, but direct emits — cursor moves, show/hide, cursor
+	// shape/colour, terminal-bg OSC, terminal queries — do not, so without this a
+	// direct write can interleave mid-escape-sequence with a flush and sever the
+	// stream (severed CSI -> screen corruption). Every terminal write goes through
+	// emit/writeString, which hold writeMu. It is a LEAF lock: acquired last, the
+	// write performed, released immediately — never held across mu/renderMu — so it
+	// cannot deadlock.
+	writeMu sync.Mutex
 }
 
 // Size represents dimensions.
@@ -195,12 +205,12 @@ func (s *Screen) SetTerminalBG(c Color) {
 	osc = append(osc, hexDigit(c.G>>4), hexDigit(c.G&0xF))
 	osc = append(osc, hexDigit(c.B>>4), hexDigit(c.B&0xF))
 	osc = append(osc, 0x07) // BEL terminator
-	s.writer.Write(wrapTmuxPassthrough(osc))
+	s.emit(wrapTmuxPassthrough(osc))
 }
 
 // ResetTerminalBG restores the terminal's default background (OSC 111).
 func (s *Screen) ResetTerminalBG() {
-	s.writer.Write(wrapTmuxPassthrough([]byte("\x1b]111\x07")))
+	s.emit(wrapTmuxPassthrough([]byte("\x1b]111\x07")))
 }
 
 // wrapTmuxPassthrough wraps an escape sequence so tmux forwards it to the
@@ -318,7 +328,7 @@ func (s *Screen) ExitInlineMode(linesUsed int, clear bool) error {
 		}
 		clearBuf.WriteString("\r")      // Ensure at start of line
 		clearBuf.WriteString("\x1b[0m") // Reset style
-		s.writer.Write(clearBuf.Bytes())
+		s.emit(clearBuf.Bytes())
 	} else if linesUsed > 0 {
 		// Move cursor below content
 		var moveBuf bytes.Buffer
@@ -327,7 +337,7 @@ func (s *Screen) ExitInlineMode(linesUsed int, clear bool) error {
 		}
 		moveBuf.WriteString("\r\n")    // New line after content
 		moveBuf.WriteString("\x1b[0m") // Reset style
-		s.writer.Write(moveBuf.Bytes())
+		s.emit(moveBuf.Bytes())
 	} else {
 		// Reset style
 		s.writeString("\x1b[0m")
@@ -595,7 +605,7 @@ func (s *Screen) FlushInline(height, prevLines int) int {
 	}
 	s.buf.WriteString("\r")
 
-	s.writer.Write(s.buf.Bytes())
+	s.emit(s.buf.Bytes())
 	s.back.ClearDirtyFlags()
 
 	return linesRendered
@@ -697,9 +707,20 @@ func (s *Screen) writeColor(buf *bytes.Buffer, c Color, fg bool) {
 	}
 }
 
-// writeString is a helper to write a string directly to the terminal.
+// emit writes b to the terminal under writeMu so no two terminal writes interleave
+// mid-escape-sequence. Every []byte write to s.writer goes through here.
+func (s *Screen) emit(b []byte) {
+	s.writeMu.Lock()
+	s.writer.Write(b)
+	s.writeMu.Unlock()
+}
+
+// writeString is a helper to write a string directly to the terminal, serialised
+// against every other terminal write via writeMu (see emit).
 func (s *Screen) writeString(str string) {
+	s.writeMu.Lock()
 	io.WriteString(s.writer, str)
+	s.writeMu.Unlock()
 }
 
 // Clear clears the back buffer.
@@ -727,7 +748,7 @@ func (s *Screen) MoveCursor(x, y int) {
 	b = append(b, ';')
 	b = appendInt(b, x+1)
 	b = append(b, 'H')
-	s.writer.Write(b)
+	s.emit(b)
 }
 
 // BufferCursor writes cursor positioning and visibility to the internal buffer.
@@ -781,7 +802,7 @@ func (s *Screen) FlushBuffer() {
 		if s.syncOutput {
 			s.buf.WriteString("\x1b[?2026l") // end synchronized update
 		}
-		s.writer.Write(s.buf.Bytes())
+		s.emit(s.buf.Bytes())
 	}
 }
 
@@ -806,7 +827,7 @@ func (s *Screen) SetCursorShape(shape CursorShape) {
 	b = append(b, "\x1b["...)
 	b = appendInt(b, int(shape))
 	b = append(b, " q"...)
-	s.writer.Write(b)
+	s.emit(b)
 }
 
 // appendInt appends an integer to a byte slice without allocation.
@@ -873,7 +894,7 @@ func (s *Screen) QueryDefaultColors() (fg, bg Color) {
 		}
 		query = append(query, ";?\x07"...)
 	}
-	s.writer.Write(query)
+	s.emit(query)
 
 	// read responses (larger buffer for 18 colour responses)
 	var resp [1024]byte
