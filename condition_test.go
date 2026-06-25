@@ -847,6 +847,88 @@ func TestConditionInsideForEach(t *testing.T) {
 	})
 }
 
+// The headline leak case: a per-item If inside a ForEach over an append/realloc slice.
+// When the slice's backing array reallocates, every element address (the opIf.itemBranches
+// key) changes; the bounded perItemCache must (a) not leak the orphaned selectors and
+// (b) keep each item rendering its OWN branch at the new addresses — never bleeding a stale
+// selector into a different item.
+func TestIfInForEachSurvivesSliceRealloc(t *testing.T) {
+	type Row struct {
+		Name string
+		On   bool
+	}
+	// start small so the first appends are guaranteed to reallocate the backing array.
+	rows := make([]Row, 0, 2)
+	rows = append(rows, Row{Name: "r0", On: true}, Row{Name: "r1", On: false})
+
+	view := VBox(
+		ForEach(&rows, func(r *Row) Component {
+			return If(&r.On).Eq(true).
+				Then(Text(&r.Name).Bold()).
+				Else(Text(&r.Name))
+		}),
+	)
+	tmpl := Build(view)
+	buf := NewBuffer(12, 64)
+	tmpl.Execute(buf, 12, 64)
+
+	// locate the opIf so we can assert its per-item cache stays bounded under churn.
+	// the per-item If lives in the ForEach's iterTmpl, not the top-level ops.
+	var findIf func(tt *Template) *opIf
+	findIf = func(tt *Template) *opIf {
+		if tt == nil {
+			return nil
+		}
+		for i := range tt.ops {
+			switch e := tt.ops[i].Ext.(type) {
+			case *opIf:
+				return e
+			case *opForEach:
+				if c := findIf(e.iterTmpl); c != nil {
+					return c
+				}
+			}
+		}
+		return nil
+	}
+	theIf := findIf(tmpl)
+	if theIf == nil {
+		t.Fatal("no opIf found in compiled template")
+	}
+
+	// churn: append many rows over many frames, forcing repeated reallocation. Each new row
+	// alternates On so its own branch is checkable; re-render every frame so live items stay
+	// stamped and orphans accumulate then evict.
+	const total = perItemCacheCap + 200
+	for i := 2; i < total; i++ {
+		rows = append(rows, Row{Name: "x", On: i%2 == 0})
+		tmpl.Execute(buf, 12, 64)
+	}
+
+	// (a) bounded: the orphaned selectors from every realloc must have been swept.
+	if n := len(theIf.itemBranches.m); n > perItemCacheCap {
+		t.Fatalf("opIf.itemBranches leaked: %d entries (cap %d) after churning %d rows",
+			n, perItemCacheCap, total)
+	}
+
+	// (b) correct own-values: the first two rows keep their distinct names and branches at
+	// whatever addresses the final backing array gave them.
+	tmpl.Execute(buf, 12, 64)
+	if got := extractLine(buf, 0, 2); got != "r0" {
+		t.Errorf("row 0 name after realloc = %q, want r0", got)
+	}
+	if got := extractLine(buf, 1, 2); got != "r1" {
+		t.Errorf("row 1 name after realloc = %q, want r1", got)
+	}
+	// r0.On=true -> bold; r1.On=false -> not bold. A bled-in stale selector would cross these.
+	if buf.Get(0, 0).Style.Attr&AttrBold == 0 {
+		t.Error("row 0 (On=true) should be bold — its own Then branch")
+	}
+	if buf.Get(0, 1).Style.Attr&AttrBold != 0 {
+		t.Error("row 1 (On=false) must NOT be bold — stale selector bled across items")
+	}
+}
+
 func TestBareForEachAsConditionBranch(t *testing.T) {
 	// a bare ForEach used directly as an If branch (no wrapping container) must
 	// lay out and render per outer element. the inner slice is a field offset on

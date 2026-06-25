@@ -155,7 +155,7 @@ type Template struct {
 	// nested tween items maps so the outermost condition can record
 	// per-item displayed values for transition detection
 	compilePropertyPtr    *Color
-	compileTweenItemsMaps []map[unsafe.Pointer]*perItemColorState
+	compileTweenItemsMaps []*perItemCache[perItemColorState]
 
 	// Pending overlays to render after main content (cleared each frame)
 	pendingOverlays []pendingOverlay
@@ -1397,7 +1397,7 @@ func (t *Template) compileCondColor(cond conditionNode, elemBase unsafe.Pointer,
 				displayed := *propPtr
 				key := t.elemBase
 				for _, items := range tweenMaps {
-					if state, ok := items[key]; ok {
+					if state := items.peek(key); state != nil {
 						state.lastDisplayed = displayed
 					}
 				}
@@ -1737,27 +1737,26 @@ func (t *Template) compileTweenScalar(tw tweenNode, elemBase unsafe.Pointer, ele
 	}
 
 	if elemBase != nil && elemSize > 0 {
-		items := make(map[unsafe.Pointer]*perItemFloat64State)
+		items := &perItemCache[perItemFloat64State]{}
 		t.itemEvals = append(t.itemEvals, func() {
 			key := t.elemBase
 			if key == nil {
 				return
 			}
-			state, ok := items[key]
-			if !ok {
+			state := items.getOrCreate(key, func() *perItemFloat64State {
 				initial := target()
-				state = &perItemFloat64State{
+				s := &perItemFloat64State{
 					lastTarget:      initial,
 					startVal:        initial,
 					current:         initial,
 					needsFirstFrame: hasFrom,
 				}
 				if hasFrom {
-					state.startVal = fromVal
-					state.current = fromVal
+					s.startVal = fromVal
+					s.current = fromVal
 				}
-				items[key] = state
-			}
+				return s
+			})
 			run(state, t.isExitRenderingFor(key), key)
 		})
 		return
@@ -1949,16 +1948,15 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 			}
 			return *outWatchPtr
 		}
-		items := make(map[unsafe.Pointer]*perItemFloat64State)
+		items := &perItemCache[perItemFloat64State]{}
 		t.itemEvals = append(t.itemEvals, func() {
 			key := t.elemBase
 			if key == nil {
 				return
 			}
-			state, ok := items[key]
-			if !ok {
+			state := items.getOrCreate(key, func() *perItemFloat64State {
 				initial := readWatch(key)
-				state = &perItemFloat64State{
+				s := &perItemFloat64State{
 					lastTarget:      initial,
 					startVal:        initial,
 					current:         initial,
@@ -1966,11 +1964,11 @@ func (t *Template) compileTweenFloat64(tw tweenNode, armed *bool, elemBase unsaf
 					wasActive:       armed == nil,
 				}
 				if hasFrom {
-					state.startVal = fromVal
-					state.current = fromVal
+					s.startVal = fromVal
+					s.current = fromVal
 				}
-				items[key] = state
-			}
+				return s
+			})
 
 			dur := durVal
 			if durPtr != nil {
@@ -2348,8 +2346,8 @@ type perItemStyleState struct {
 	exitLeaseActive bool
 }
 
-func (t *Template) compileTweenColorItems(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr) (*Color, map[unsafe.Pointer]*perItemColorState) {
-	items := make(map[unsafe.Pointer]*perItemColorState)
+func (t *Template) compileTweenColorItems(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr) (*Color, *perItemCache[perItemColorState]) {
+	items := &perItemCache[perItemColorState]{}
 	ptr := t.compileTweenColorInner(tw, elemBase, elemSize, items)
 	if elemBase == nil || elemSize == 0 {
 		return ptr, nil // not ForEach, no per-item tracking
@@ -2361,7 +2359,7 @@ func (t *Template) compileTweenColor(tw tweenNode, elemBase unsafe.Pointer, elem
 	return t.compileTweenColorInner(tw, elemBase, elemSize, nil)
 }
 
-func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr, sharedItems map[unsafe.Pointer]*perItemColorState) *Color {
+func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer, elemSize uintptr, sharedItems *perItemCache[perItemColorState]) *Color {
 	root := t.evalRoot()
 	watchPtr := t.resolveTweenTargetColor(tw.getTarget(), elemBase, elemSize)
 	storage := new(Color)
@@ -2533,20 +2531,19 @@ func (t *Template) compileTweenColorInner(tw tweenNode, elemBase unsafe.Pointer,
 	if inForEach {
 		items := sharedItems
 		if items == nil {
-			items = make(map[unsafe.Pointer]*perItemColorState)
+			items = &perItemCache[perItemColorState]{}
 		}
 		t.itemEvals = append(t.itemEvals, func() {
 			key := t.elemBase
 			target := readWatch()
-			state, ok := items[key]
-			if !ok {
-				state = &perItemColorState{lastTarget: target, startVal: target, current: target, needsFirstFrame: hasFrom}
+			state := items.getOrCreate(key, func() *perItemColorState {
+				s := &perItemColorState{lastTarget: target, startVal: target, current: target, needsFirstFrame: hasFrom}
 				if hasFrom {
-					state.startVal = fromVal
-					state.current = fromVal
+					s.startVal = fromVal
+					s.current = fromVal
 				}
-				items[key] = state
-			}
+				return s
+			})
 			run(state, t.isExitRenderingFor(key))
 		})
 	} else {
@@ -2731,19 +2728,18 @@ func (t *Template) compileTweenStyle(tw tweenNode, elemBase unsafe.Pointer, elem
 	}
 
 	if inForEach {
-		items := make(map[unsafe.Pointer]*perItemStyleState)
+		items := &perItemCache[perItemStyleState]{}
 		t.itemEvals = append(t.itemEvals, func() {
 			key := t.elemBase
 			target := readWatch()
-			state, ok := items[key]
-			if !ok {
-				state = &perItemStyleState{lastTarget: target, startVal: target, current: target, needsFirstFrame: hasFrom}
+			state := items.getOrCreate(key, func() *perItemStyleState {
+				s := &perItemStyleState{lastTarget: target, startVal: target, current: target, needsFirstFrame: hasFrom}
 				if hasFrom {
-					state.startVal = fromVal
-					state.current = fromVal
+					s.startVal = fromVal
+					s.current = fromVal
 				}
-				items[key] = state
-			}
+				return s
+			})
 			run(state, t.isExitRenderingFor(key))
 		})
 	} else {
@@ -2847,7 +2843,7 @@ type opIf struct {
 	thenTmpl     *Template
 	elseTmpl     *Template
 	branch       branchSelector
-	itemBranches map[unsafe.Pointer]*branchSelector
+	itemBranches perItemCache[branchSelector]
 }
 
 func (c *opIf) eval(elemBase unsafe.Pointer) bool {
@@ -2864,15 +2860,7 @@ func (c *opIf) selector(elemBase unsafe.Pointer) *branchSelector {
 	if elemBase == nil {
 		return &c.branch
 	}
-	if c.itemBranches == nil {
-		c.itemBranches = make(map[unsafe.Pointer]*branchSelector)
-	}
-	selector := c.itemBranches[elemBase]
-	if selector == nil {
-		selector = &branchSelector{}
-		c.itemBranches[elemBase] = selector
-	}
-	return selector
+	return c.itemBranches.getOrCreate(elemBase, func() *branchSelector { return &branchSelector{} })
 }
 
 type opForEach struct {
@@ -2950,7 +2938,7 @@ type opSwitch struct {
 	cases        []*Template
 	def          *Template
 	branch       branchSelector
-	itemBranches map[unsafe.Pointer]*branchSelector
+	itemBranches perItemCache[branchSelector]
 }
 
 type opMatch struct {
@@ -2958,37 +2946,21 @@ type opMatch struct {
 	cases        []*Template
 	def          *Template
 	branch       branchSelector
-	itemBranches map[unsafe.Pointer]*branchSelector
+	itemBranches perItemCache[branchSelector]
 }
 
 func (s *opSwitch) selector(elemBase unsafe.Pointer) *branchSelector {
 	if elemBase == nil {
 		return &s.branch
 	}
-	if s.itemBranches == nil {
-		s.itemBranches = make(map[unsafe.Pointer]*branchSelector)
-	}
-	selector := s.itemBranches[elemBase]
-	if selector == nil {
-		selector = &branchSelector{}
-		s.itemBranches[elemBase] = selector
-	}
-	return selector
+	return s.itemBranches.getOrCreate(elemBase, func() *branchSelector { return &branchSelector{} })
 }
 
 func (m *opMatch) selector(elemBase unsafe.Pointer) *branchSelector {
 	if elemBase == nil {
 		return &m.branch
 	}
-	if m.itemBranches == nil {
-		m.itemBranches = make(map[unsafe.Pointer]*branchSelector)
-	}
-	selector := m.itemBranches[elemBase]
-	if selector == nil {
-		selector = &branchSelector{}
-		m.itemBranches[elemBase] = selector
-	}
-	return selector
+	return m.itemBranches.getOrCreate(elemBase, func() *branchSelector { return &branchSelector{} })
 }
 
 type opCustomRenderer struct {
@@ -3112,6 +3084,94 @@ const (
 	richMdOff // bound markdown source via ForEach offset (mdSrcOff)
 )
 
+// perItemCacheCap bounds any per-ForEach-item state map keyed by elemBase. A ForEach
+// slice that grows by append reallocates its backing array, so every elemBase changes
+// and the old entries orphan. Live items are touched (seq-stamped) every frame; orphans
+// fall stale and are swept once the map exceeds this cap. Set well above any realistic
+// single-frame rendered-item count so live entries are never evicted mid-frame.
+//
+// The cap invariant is stated in ACCESSES PER FRAME: it holds only at ~1 access/item/frame,
+// which is why each map gets its OWN perItemCache instance (never a shared store). A merged
+// store would (a) collide on keys — two ops rendering the same item share its address — and
+// (b) see (items × sites) accesses/frame, shrinking the live-safety margin.
+const perItemCacheCap = 1024
+
+// perItemEntry wraps a stored value with its last-access seq for orphan eviction.
+type perItemEntry[T any] struct {
+	val *T
+	seq uint64
+}
+
+// perItemCache is a bounded store of per-item state keyed by elemBase, with the seq-stamp
+// orphan eviction proven by the markdown cache. Each access stamps a monotonic seq; when the
+// map overgrows perItemCacheCap, entries not touched within the last cap accesses are swept.
+// Render-goroutine only — no lock. One instance per logical map (see perItemCacheCap).
+type perItemCache[T any] struct {
+	m   map[unsafe.Pointer]*perItemEntry[T]
+	seq uint64
+}
+
+// get stamps the access seq and returns the stored value for key (nil if absent). The stamp
+// keeps live items fresh so they survive eviction; a read of an orphaned key returns nil.
+func (c *perItemCache[T]) get(key unsafe.Pointer) *T {
+	c.seq++
+	if e := c.m[key]; e != nil {
+		e.seq = c.seq
+		return e.val
+	}
+	return nil
+}
+
+// peek reads the stored value for key WITHOUT stamping the access seq — for a secondary
+// read in a frame where another access already kept the item live (e.g. recording the
+// displayed value after the tween run stamped it). Keeps the cap invariant at 1
+// stamping-access/item/frame so the live-safety margin is not eroded.
+func (c *perItemCache[T]) peek(key unsafe.Pointer) *T {
+	if e := c.m[key]; e != nil {
+		return e.val
+	}
+	return nil
+}
+
+// set stores v for key at the CURRENT seq (reusing the seq from the preceding get, so a
+// get+set pair is one access) and sweeps orphans when the map overgrows the cap.
+func (c *perItemCache[T]) set(key unsafe.Pointer, v *T) {
+	if c.m == nil {
+		c.m = make(map[unsafe.Pointer]*perItemEntry[T])
+	}
+	c.m[key] = &perItemEntry[T]{val: v, seq: c.seq}
+	c.evict()
+}
+
+// getOrCreate returns the value for key, creating it via newFn (and sweeping) when absent.
+// One access per call: the steady-state hit is a map lookup + seq write, alloc-free.
+func (c *perItemCache[T]) getOrCreate(key unsafe.Pointer, newFn func() *T) *T {
+	c.seq++
+	if e := c.m[key]; e != nil {
+		e.seq = c.seq
+		return e.val
+	}
+	if c.m == nil {
+		c.m = make(map[unsafe.Pointer]*perItemEntry[T])
+	}
+	v := newFn()
+	c.m[key] = &perItemEntry[T]{val: v, seq: c.seq}
+	c.evict()
+	return v
+}
+
+// evict sweeps keys not touched within the last perItemCacheCap accesses, but only once the
+// map has overgrown the cap — orphaned elemBases from a reallocated ForEach slice.
+func (c *perItemCache[T]) evict() {
+	if len(c.m) > perItemCacheCap {
+		for k, e := range c.m {
+			if c.seq-e.seq >= perItemCacheCap {
+				delete(c.m, k)
+			}
+		}
+	}
+}
+
 // mdCache holds the last tokenised result for one bound source string, so a render
 // re-tokenises only when the source changes (parse-on-change). For ForEach, one entry
 // per item identity lives in opRichText.mdCacheMap; the global case uses mdCacheOne.
@@ -3119,15 +3179,7 @@ type mdCache struct {
 	src   string
 	spans []Span
 	valid bool
-	seq   uint64 // last access (opRichText.mdSeq) — drives orphan eviction for ForEach keys
 }
-
-// mdCacheEvict bounds the per-op ForEach markdown cache. A ForEach slice that grows by
-// append reallocates its backing array, so every elemBase key changes and the old
-// entries orphan. Live items are touched (seq-stamped) every frame; orphans fall stale
-// and are swept once the map exceeds this. Set well above any realistic single-frame
-// rendered-item count so live entries are never evicted mid-frame.
-const mdCacheEvict = 1024
 
 type opRichText struct {
 	mode        uint8
@@ -3141,12 +3193,11 @@ type opRichText struct {
 
 	// markdown mode (richMdPtr/richMdOff): a bound source string tokenised to spans,
 	// cached parse-on-change. markdown=false renders the source as one plain span.
-	mdSrcPtr   *string                    // richMdPtr: global source (GC-pinned)
-	mdSrcOff   uintptr                    // richMdOff: offset from elemBase
-	markdown   bool                       // tokenise (true) vs single plain span (false)
-	mdCacheOne mdCache                    // global (richMdPtr) cache
-	mdCacheMap map[unsafe.Pointer]*mdCache // per-item cache for richMdOff (key: elemBase)
-	mdSeq      uint64                     // monotonic access counter for cache eviction
+	mdSrcPtr   *string              // richMdPtr: global source (GC-pinned)
+	mdSrcOff   uintptr              // richMdOff: offset from elemBase
+	markdown   bool                 // tokenise (true) vs single plain span (false)
+	mdCacheOne mdCache              // global (richMdPtr) cache
+	mdCacheMap perItemCache[mdCache] // per-item cache for richMdOff (key: elemBase)
 }
 
 // mdSpansFor returns the cached spans for src, re-tokenising only when src changed.
@@ -3166,25 +3217,18 @@ func (rt *opRichText) mdSpansFor(key unsafe.Pointer, src string) []Span {
 		rt.mdCacheOne = mdCache{src: src, spans: tokenise(), valid: true}
 		return rt.mdCacheOne.spans
 	}
-	if rt.mdCacheMap == nil {
-		rt.mdCacheMap = make(map[unsafe.Pointer]*mdCache)
-	}
-	rt.mdSeq++
-	if e := rt.mdCacheMap[key]; e != nil && e.valid && e.src == src {
-		e.seq = rt.mdSeq
+	// get stamps the access; on a hit with the same source, reuse the cached spans.
+	// On a source change, re-tokenise in place (same key, already stamped). On a miss,
+	// create and store (the set reuses the get's seq, so it counts as one access).
+	if e := rt.mdCacheMap.get(key); e != nil {
+		if e.valid && e.src == src {
+			return e.spans
+		}
+		e.src, e.spans, e.valid = src, tokenise(), true
 		return e.spans
 	}
-	e := &mdCache{src: src, spans: tokenise(), valid: true, seq: rt.mdSeq}
-	rt.mdCacheMap[key] = e
-	// bound the map: when it overgrows, drop keys not touched within the last
-	// mdCacheEvict accesses — orphaned elemBases from a reallocated ForEach slice.
-	if len(rt.mdCacheMap) > mdCacheEvict {
-		for k, v := range rt.mdCacheMap {
-			if rt.mdSeq-v.seq >= mdCacheEvict {
-				delete(rt.mdCacheMap, k)
-			}
-		}
-	}
+	e := &mdCache{src: src, spans: tokenise(), valid: true}
+	rt.mdCacheMap.set(key, e)
 	return e.spans
 }
 

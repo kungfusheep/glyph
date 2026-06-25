@@ -161,12 +161,12 @@ func BenchmarkMarkdownSteadyState(b *testing.B) {
 // map doesn't grow without bound.
 func TestMarkdownCacheEvictsOrphanedKeys(t *testing.T) {
 	rt := &opRichText{markdown: true}
-	keys := make([]int, mdCacheEvict*3) // distinct real addresses as fake elemBases
+	keys := make([]int, perItemCacheCap*3) // distinct real addresses as fake elemBases
 	for i := range keys {
 		rt.mdSpansFor(unsafe.Pointer(&keys[i]), "**x**")
 	}
-	if len(rt.mdCacheMap) > mdCacheEvict {
-		t.Fatalf("mdCacheMap unbounded: %d entries (cap %d) — orphaned keys not evicted", len(rt.mdCacheMap), mdCacheEvict)
+	if len(rt.mdCacheMap.m) > perItemCacheCap {
+		t.Fatalf("mdCacheMap unbounded: %d entries (cap %d) — orphaned keys not evicted", len(rt.mdCacheMap.m), perItemCacheCap)
 	}
 }
 
