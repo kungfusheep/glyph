@@ -16,8 +16,9 @@ type ScrollViewC struct {
 	children  []Component
 	flexGrow  float32
 	heightPtr *int16
-	margin    [4]int16
-	scrollbar bool
+	margin       [4]int16
+	scrollbar    bool
+	anchorBottom bool // when content underflows the viewport, hug the bottom edge
 
 	scrollbarTrackStyle  any
 	scrollbarThumbStyle  any
@@ -201,6 +202,19 @@ func (f ScrollViewFn) Scrollbar() ScrollViewFn {
 	return func(children ...Component) *ScrollViewC {
 		sv := f(children...)
 		sv.scrollbar = true
+		return sv
+	}
+}
+
+// AnchorBottom hugs the content to the bottom edge when it is shorter than the
+// viewport — the slack falls at the TOP instead of below the last line. Use it for
+// chat/log lanes with a composer pinned beneath: few messages sit just above the
+// composer, and once content overflows the viewport, normal scrolling resumes
+// unchanged (the flag is a no-op when content is taller than the viewport).
+func (f ScrollViewFn) AnchorBottom() ScrollViewFn {
+	return func(children ...Component) *ScrollViewC {
+		sv := f(children...)
+		sv.anchorBottom = true
 		return sv
 	}
 }
@@ -392,12 +406,25 @@ func (sv *ScrollViewC) render() {
 	sv.startH = buf.ContentHeight() + sv.layer.ViewportHeight()
 
 	// trim to actual content (or at least viewport height)
-	contentH := buf.ContentHeight()
-	if contentH < sv.layer.ViewportHeight() {
-		contentH = sv.layer.ViewportHeight()
-	}
-	if contentH < h {
-		buf.Resize(w, contentH)
+	vh := sv.layer.ViewportHeight()
+	rawContentH := buf.ContentHeight()
+	if sv.anchorBottom && rawContentH > 0 && rawContentH < vh {
+		// underflow + bottom-anchor: build a viewport-tall buffer and place the measured
+		// content in its BOTTOM rows, so the slack falls at the top. maxScroll stays 0
+		// (buffer == viewport height), so this never fights ScrollTo, which is a no-op here.
+		anchored := NewBuffer(w, vh)
+		anchored.defaultStyle = sv.layer.defaultStyle
+		anchored.Clear()
+		anchored.Blit(buf, 0, 0, 0, vh-rawContentH, w, rawContentH)
+		buf = anchored
+	} else {
+		contentH := rawContentH
+		if contentH < vh {
+			contentH = vh
+		}
+		if contentH < h {
+			buf.Resize(w, contentH)
+		}
 	}
 
 	scrollY := sv.layer.ScrollY()
