@@ -394,9 +394,11 @@ func (l *Layer) blit(dst *Buffer, dstX, dstY, width, height int) {
 	ms := l.maxScroll
 	animating := l.scrollAnimating
 	l.scrollMu.Unlock()
-	dst.Blit(l.buffer, 0, sy, dstX, dstY, width, height)
 	if l.feather > 0 {
-		l.applyFeather(dst, dstX, dstY, width, height, sy, ms)
+		l.blitFeathered(dst, dstX, dstY, width, height, sy, ms)
+	} else {
+		// off-path: ordinary layers pay nothing beyond this branch — same plain Blit.
+		dst.Blit(l.buffer, 0, sy, dstX, dstY, width, height)
 	}
 	// While an offset ease is in flight, request the next frame so it advances to the
 	// target. RequestRender only signals (no scroll lock), so this is safe after unlock.
@@ -405,56 +407,74 @@ func (l *Layer) blit(dst *Buffer, dstX, dstY, width, height int) {
 	}
 }
 
-// applyFeather fades the top/bottom edge rows of the just-blitted region toward the
-// layer background, but only where content overflows: the top when scrolled down
-// (sy > 0) and the bottom when not yet at the end (sy < maxScroll). The fade encodes
-// scroll state — it appears exactly when there is more to see in that direction.
-// Runs only when feather > 0; the off-path (feather == 0) leaves blit untouched.
-func (l *Layer) applyFeather(dst *Buffer, dstX, dstY, width, height, sy, ms int) {
+// blitFeathered copies the visible region while fading the top/bottom edge rows toward
+// the layer background in the SAME pass — the fade is native to the copy, not a read-back
+// post-process. Edges fade only where content overflows: the top when scrolled down
+// (sy > 0) and the bottom when not yet at the end (sy < maxScroll), so the fade encodes
+// scroll state — it appears exactly when there is more to see in that direction. The
+// unfaded middle band is one bulk Blit; only the edge rows go cell-by-cell.
+func (l *Layer) blitFeathered(dst *Buffer, dstX, dstY, width, height, sy, ms int) {
 	target := l.defaultStyle.BG
-	if target.Mode == ColorDefault {
-		// no known background to blend toward — degrade to no fade.
+	topActive := sy > 0
+	botActive := sy < ms
+	if target.Mode == ColorDefault || (!topActive && !botActive) {
+		// nothing to fade toward, or no overflow in either direction — plain copy.
+		dst.Blit(l.buffer, 0, sy, dstX, dstY, width, height)
 		return
 	}
 	n := l.feather
 	if n > height {
 		n = height
 	}
-	topActive := sy > 0
-	botActive := sy < ms
-	if !topActive && !botActive {
-		return
+	topN := 0
+	if topActive {
+		topN = n
+	}
+	botN := 0
+	if botActive {
+		botN = n
+	}
+	// middle band never fades — copy it in one bulk Blit.
+	if midH := height - topN - botN; midH > 0 {
+		dst.Blit(l.buffer, 0, sy+topN, dstX, dstY+topN, width, midH)
 	}
 	for r := 0; r < height; r++ {
-		if r >= n && r < height-n {
-			continue // middle rows never fade — keeps the work bounded to the edges
+		if r >= topN && r < height-botN {
+			continue // covered by the bulk middle Blit
 		}
-		// per-row fade strength: strongest at the very edge, vanishing n rows in.
-		// when both edges reach a row (short viewport), take the stronger.
-		t := 0.0
-		if topActive && r < n {
-			if tt := float64(n-r) / float64(n+1); tt > t {
-				t = tt
-			}
-		}
-		if botActive && r >= height-n {
-			if bb := float64(n-(height-1-r)) / float64(n+1); bb > t {
-				t = bb
-			}
-		}
+		t := featherRowT(r, n, height, topActive, botActive)
 		if t <= 0 {
+			// not actually faded (e.g. a row only the inactive edge would reach) — plain copy.
+			dst.Blit(l.buffer, 0, sy+r, dstX, dstY+r, width, 1)
 			continue
 		}
 		y := dstY + r
-		for x := dstX; x < dstX+width; x++ {
-			c := dst.Get(x, y)
+		for x := 0; x < width; x++ {
+			c := l.buffer.Get(x, sy+r)
 			c.Style.FG = lerpIfRGB(c.Style.FG, target, t)
 			if c.Style.BG.Mode != ColorDefault {
 				c.Style.BG = lerpIfRGB(c.Style.BG, target, t)
 			}
-			dst.SetFast(x, y, c)
+			dst.SetFast(dstX+x, y, c)
 		}
 	}
+}
+
+// featherRowT is the per-row fade strength: strongest at the very edge, vanishing n rows
+// in. When both edges reach a row (short viewport), take the stronger.
+func featherRowT(r, n, height int, topActive, botActive bool) float64 {
+	t := 0.0
+	if topActive && r < n {
+		if tt := float64(n-r) / float64(n+1); tt > t {
+			t = tt
+		}
+	}
+	if botActive && r >= height-n {
+		if bb := float64(n-(height-1-r)) / float64(n+1); bb > t {
+			t = bb
+		}
+	}
+	return t
 }
 
 // SetLine updates a single line in the layer buffer with styled spans.
