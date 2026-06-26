@@ -1,8 +1,10 @@
 package glyph
 
 import (
+	"math"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Layer is a pre-rendered buffer with scroll management.
@@ -59,6 +61,31 @@ type Layer struct {
 	// the top edge when scrolled down from the top, the bottom edge when not yet at the
 	// end. 0 (default) leaves blit byte-for-byte unchanged.
 	feather int
+
+	// Bound scroll offset (ADR 38). When scrollTarget != nil it is the SINGLE source of
+	// truth for the scroll position: every scroll method writes it (clamped), and blit
+	// reads the eased displayed value moving toward it. This dissolves the stale-pending
+	// vs manual-scroll race by construction (one value, last-write-wins). nil keeps the
+	// legacy scrollY path. scrollEaseDur 0 = instant (no animation); >0 eases the
+	// displayed offset toward the target over that duration with scrollEaseFn.
+	scrollTarget    *int
+	scrollEaseDur   time.Duration
+	scrollEaseFn    func(float64) float64
+	scrollShown     float64   // current displayed offset (eased); valid once scrollShownSet
+	scrollShownSet  bool
+	scrollAnimFrom  float64   // displayed value when the current ease began
+	scrollAnimT0    time.Time // when the current ease began
+	scrollAnimTo    int       // target the current ease heads to (detects retargets)
+	scrollAnimating bool
+	nowFn           func() time.Time // clock hook for tests; nil = time.Now
+}
+
+// now returns the layer's clock (real time, or a test hook).
+func (l *Layer) now() time.Time {
+	if l.nowFn != nil {
+		return l.nowFn()
+	}
+	return time.Now()
 }
 
 // NewLayer creates a new empty layer.
@@ -104,8 +131,16 @@ func (l *Layer) updateMaxScroll() {
 	if l.maxScroll < 0 {
 		l.maxScroll = 0
 	}
-	// Clamp current scroll to new bounds
-	if l.scrollY > l.maxScroll {
+	// Clamp current scroll to new bounds. For a bound offset, clamp the target itself so
+	// it never sits out of range and snaps when content later grows (ADR 38 grow-guard).
+	if l.scrollTarget != nil {
+		if *l.scrollTarget > l.maxScroll {
+			*l.scrollTarget = l.maxScroll
+		}
+		if *l.scrollTarget < 0 {
+			*l.scrollTarget = 0
+		}
+	} else if l.scrollY > l.maxScroll {
 		l.scrollY = l.maxScroll
 	}
 }
@@ -156,10 +191,22 @@ func (l *Layer) prepare() {
 	l.Render()
 }
 
-// ScrollY returns the current scroll position.
+// ScrollY returns the current scroll position. When an offset is bound this is the
+// logical target (where scrolling is headed), clamped — not the mid-animation displayed
+// value — so consumers checking "am I near the bottom?" see the destination.
 func (l *Layer) ScrollY() int {
 	l.scrollMu.Lock()
 	defer l.scrollMu.Unlock()
+	if l.scrollTarget != nil {
+		y := *l.scrollTarget
+		if y < 0 {
+			y = 0
+		}
+		if y > l.maxScroll {
+			y = l.maxScroll
+		}
+		return y
+	}
 	return l.scrollY
 }
 
@@ -192,7 +239,9 @@ func (l *Layer) ViewportWidth() int {
 	return l.viewWidth
 }
 
-// scrollToLocked clamps and sets scrollY; caller holds scrollMu.
+// scrollToLocked clamps and sets the scroll position; caller holds scrollMu. When an
+// offset is bound (ADR 38) it writes the bound target — the single source of truth the
+// displayed offset eases toward — instead of the legacy scrollY field.
 func (l *Layer) scrollToLocked(y int) {
 	if y < 0 {
 		y = 0
@@ -200,7 +249,76 @@ func (l *Layer) scrollToLocked(y int) {
 	if y > l.maxScroll {
 		y = l.maxScroll
 	}
+	if l.scrollTarget != nil {
+		*l.scrollTarget = y
+		return
+	}
 	l.scrollY = y
+}
+
+// currentScrollLocked is the logical scroll position relative scrolls build on; caller
+// holds scrollMu. Bound: the target (where we're headed), so HalfPageDown advances from
+// the destination, not a stale scrollY. Unbound: scrollY.
+func (l *Layer) currentScrollLocked() int {
+	if l.scrollTarget != nil {
+		return *l.scrollTarget
+	}
+	return l.scrollY
+}
+
+// displayedOffsetLocked returns the offset blit should draw at; caller holds scrollMu.
+// Unbound: the legacy scrollY. Bound: the target clamped to [0,maxScroll] (written back
+// so it never sits out of range and snaps after a content grow), eased toward over
+// scrollEaseDur. Sets scrollAnimating while an ease is in flight so blit can request
+// the next frame. Instant (dur 0) snaps to the target.
+func (l *Layer) displayedOffsetLocked() int {
+	if l.scrollTarget == nil {
+		return l.scrollY
+	}
+	target := *l.scrollTarget
+	if target < 0 {
+		target = 0
+	}
+	if target > l.maxScroll {
+		target = l.maxScroll
+	}
+	*l.scrollTarget = target // write back the clamp (grow-snap guard)
+
+	if l.scrollEaseDur <= 0 {
+		l.scrollShown = float64(target)
+		l.scrollShownSet = true
+		l.scrollAnimating = false
+		return target
+	}
+	if !l.scrollShownSet {
+		l.scrollShown = float64(target)
+		l.scrollShownSet = true
+		l.scrollAnimating = false
+		return target
+	}
+	// (re)start an ease when the target moves away from where we're shown/heading.
+	if int(math.Round(l.scrollShown)) == target {
+		l.scrollAnimating = false
+		l.scrollShown = float64(target)
+		return target
+	}
+	if !l.scrollAnimating || l.scrollAnimTo != target {
+		l.scrollAnimFrom = l.scrollShown
+		l.scrollAnimT0 = l.now()
+		l.scrollAnimTo = target
+		l.scrollAnimating = true
+	}
+	p := float64(l.now().Sub(l.scrollAnimT0)) / float64(l.scrollEaseDur)
+	if p >= 1 {
+		l.scrollShown = float64(target)
+		l.scrollAnimating = false
+		return target
+	}
+	if l.scrollEaseFn != nil {
+		p = l.scrollEaseFn(p)
+	}
+	l.scrollShown = l.scrollAnimFrom + p*(float64(target)-l.scrollAnimFrom)
+	return int(math.Round(l.scrollShown))
 }
 
 // ScrollTo sets the scroll position, clamping to valid range.
@@ -213,56 +331,56 @@ func (l *Layer) ScrollTo(y int) {
 // ScrollDown scrolls down by n lines.
 func (l *Layer) ScrollDown(n int) {
 	l.scrollMu.Lock()
-	l.scrollToLocked(l.scrollY + n)
+	l.scrollToLocked(l.currentScrollLocked() + n)
 	l.scrollMu.Unlock()
 }
 
 // ScrollUp scrolls up by n lines.
 func (l *Layer) ScrollUp(n int) {
 	l.scrollMu.Lock()
-	l.scrollToLocked(l.scrollY - n)
+	l.scrollToLocked(l.currentScrollLocked() - n)
 	l.scrollMu.Unlock()
 }
 
 // ScrollToTop scrolls to the top.
 func (l *Layer) ScrollToTop() {
 	l.scrollMu.Lock()
-	l.scrollY = 0
+	l.scrollToLocked(0)
 	l.scrollMu.Unlock()
 }
 
 // ScrollToEnd scrolls to the bottom.
 func (l *Layer) ScrollToEnd() {
 	l.scrollMu.Lock()
-	l.scrollY = l.maxScroll
+	l.scrollToLocked(l.maxScroll)
 	l.scrollMu.Unlock()
 }
 
 // PageDown scrolls down by one viewport height.
 func (l *Layer) PageDown() {
 	l.scrollMu.Lock()
-	l.scrollToLocked(l.scrollY + l.viewHeight)
+	l.scrollToLocked(l.currentScrollLocked() + l.viewHeight)
 	l.scrollMu.Unlock()
 }
 
 // PageUp scrolls up by one viewport height.
 func (l *Layer) PageUp() {
 	l.scrollMu.Lock()
-	l.scrollToLocked(l.scrollY - l.viewHeight)
+	l.scrollToLocked(l.currentScrollLocked() - l.viewHeight)
 	l.scrollMu.Unlock()
 }
 
 // HalfPageDown scrolls down by half a viewport.
 func (l *Layer) HalfPageDown() {
 	l.scrollMu.Lock()
-	l.scrollToLocked(l.scrollY + l.viewHeight/2)
+	l.scrollToLocked(l.currentScrollLocked() + l.viewHeight/2)
 	l.scrollMu.Unlock()
 }
 
 // HalfPageUp scrolls up by half a viewport.
 func (l *Layer) HalfPageUp() {
 	l.scrollMu.Lock()
-	l.scrollToLocked(l.scrollY - l.viewHeight/2)
+	l.scrollToLocked(l.currentScrollLocked() - l.viewHeight/2)
 	l.scrollMu.Unlock()
 }
 
@@ -272,12 +390,18 @@ func (l *Layer) blit(dst *Buffer, dstX, dstY, width, height int) {
 		return
 	}
 	l.scrollMu.Lock()
-	sy := l.scrollY
+	sy := l.displayedOffsetLocked()
 	ms := l.maxScroll
+	animating := l.scrollAnimating
 	l.scrollMu.Unlock()
 	dst.Blit(l.buffer, 0, sy, dstX, dstY, width, height)
 	if l.feather > 0 {
 		l.applyFeather(dst, dstX, dstY, width, height, sy, ms)
+	}
+	// While an offset ease is in flight, request the next frame so it advances to the
+	// target. RequestRender only signals (no scroll lock), so this is safe after unlock.
+	if animating && l.app != nil {
+		l.app.RequestRender()
 	}
 }
 

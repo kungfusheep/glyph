@@ -20,6 +20,7 @@ type ScrollViewC struct {
 	scrollbar    bool
 	anchorBottom bool // when content underflows the viewport, hug the bottom edge
 	feather      int  // rows of edge fade shown at an overflowing edge (0 = off)
+	scrollOffset any  // bound offset: *int (instant) or Animate(...) tween (animated)
 
 	scrollbarTrackStyle  any
 	scrollbarThumbStyle  any
@@ -220,6 +221,27 @@ func (f ScrollViewFn) AnchorBottom() ScrollViewFn {
 	}
 }
 
+// ScrollState returns a managed scroll-offset cell. Pass it to ScrollOffset — directly
+// for an instant offset, or wrapped in Animate for a smooth eased scroll. Allocate it
+// ONCE at build (glyph builds the tree once, so this is a setup call, not per-frame).
+func ScrollState() *int { return new(int) }
+
+// ScrollOffset binds the scroll position to a managed offset (ADR 38). The ScrollView's
+// scroll methods — ScrollTo/ScrollDown/HalfPageDown/ScrollToEnd etc. — then drive that
+// offset and blit reads it, so there is ONE source of truth (no stale-pending vs manual
+// race). Pass a *int (e.g. ScrollState()) for an instant offset, or an Animate over it
+// for a smooth eased scroll. Headline form:
+//
+//	ScrollView.Grow(1).ScrollOffset(Animate(ScrollState()))(rows...)
+//	app.Handle("<C-d>", sv.HalfPageDown) // smooth — sets the target, the offset eases
+func (f ScrollViewFn) ScrollOffset(offset any) ScrollViewFn {
+	return func(children ...Component) *ScrollViewC {
+		sv := f(children...)
+		sv.scrollOffset = offset
+		return sv
+	}
+}
+
 // Feather fades n rows toward the background at an overflowing edge: the top when
 // scrolled down from the top, the bottom when there is more below. The fade appears
 // only where content actually overflows (no feather at the top when at the top, none at
@@ -310,6 +332,19 @@ func (sv *ScrollViewC) ScrollTo(y int) {
 
 func (t *Template) compileScrollViewC(v *ScrollViewC, parent int16, depth int) int16 {
 	v.layer.feather = v.feather
+	// Bind the scroll offset (ADR 38): a *int is instant; an Animate tween over an *int
+	// eases the displayed offset toward the target. Wrong-typed offsets are ignored
+	// (the legacy scrollY path stays), so this can't break an existing view.
+	switch o := v.scrollOffset.(type) {
+	case *int:
+		v.layer.scrollTarget = o
+	case tweenNode:
+		if p, ok := o.getTarget().(*int); ok {
+			v.layer.scrollTarget = p
+			v.layer.scrollEaseDur = o.getTweenDuration()
+			v.layer.scrollEaseFn = o.getTweenEasing()
+		}
+	}
 	layerView := LayerView(v.layer).Grow(v.flexGrow)
 	if v.scrollbar {
 		layerView = LayerView(v.layer).Grow(1)

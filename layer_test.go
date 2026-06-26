@@ -1,6 +1,7 @@
 package glyph
 
 import (
+	"sync"
 	"testing"
 	"time"
 )
@@ -489,3 +490,130 @@ func benchmarkLayerBlit(b *testing.B, feather int) {
 
 func BenchmarkLayerBlit(b *testing.B)        { benchmarkLayerBlit(b, 0) }
 func BenchmarkLayerBlitFeather(b *testing.B) { benchmarkLayerBlit(b, 3) }
+
+// boundRead locks and returns the displayed (eased) offset blit would draw at.
+func boundRead(l *Layer) int {
+	l.scrollMu.Lock()
+	defer l.scrollMu.Unlock()
+	return l.displayedOffsetLocked()
+}
+
+// A bound offset with no easing is the single source of truth: scroll methods write it,
+// the displayed offset tracks it instantly, and a stale programmatic scroll cannot
+// clobber a later manual one (ADR 38 pending-vs-manual dissolved by construction).
+func TestLayerBoundOffsetInstant(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 100)) // content height 100
+	l.SetViewport(10, 10)           // maxScroll = 90
+	target := 0
+	l.scrollTarget = &target
+
+	l.ScrollTo(40)
+	if got := boundRead(l); got != 40 || target != 40 {
+		t.Fatalf("ScrollTo(40): displayed=%d target=%d, want 40/40", got, target)
+	}
+	l.HalfPageDown() // +5 from 40
+	if target != 45 {
+		t.Errorf("HalfPageDown from 40: target=%d, want 45", target)
+	}
+	l.ScrollToEnd()
+	if got := boundRead(l); got != 90 {
+		t.Errorf("ScrollToEnd: displayed=%d, want 90 (maxScroll)", got)
+	}
+
+	// pending-vs-manual: a stale programmatic scroll-to-bottom, then a manual scroll —
+	// the manual wins; there is no separate pending slot to re-apply and yank back.
+	l.ScrollTo(1 << 30) // programmatic "to bottom" (clamps to 90)
+	l.ScrollTo(12)      // manual scroll lands at 12
+	if got := boundRead(l); got != 12 {
+		t.Fatalf("manual scroll after programmatic: displayed=%d, want 12 (no stale clobber)", got)
+	}
+}
+
+// A bound offset with an Animate eases the displayed value toward the target over the
+// duration; the logical position (ScrollY) is the target immediately.
+func TestLayerBoundOffsetAnimates(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 100))
+	l.SetViewport(10, 10) // maxScroll 90
+	target := 0
+	l.scrollTarget = &target
+	l.scrollEaseDur = 100 * time.Millisecond
+	l.scrollEaseFn = EaseLinear
+	clock := time.Unix(1000, 0)
+	l.nowFn = func() time.Time { return clock }
+
+	_ = boundRead(l) // first read establishes shown=0 at target 0
+	target = 80      // retarget; ScrollY is the destination immediately
+	if got := l.ScrollY(); got != 80 {
+		t.Fatalf("ScrollY after retarget = %d, want 80 (logical target)", got)
+	}
+	// t0: ease begins, displayed still ~0
+	if got := boundRead(l); got != 0 {
+		t.Errorf("ease start: displayed=%d, want 0", got)
+	}
+	clock = clock.Add(50 * time.Millisecond) // halfway, linear
+	if got := boundRead(l); got != 40 {
+		t.Errorf("ease halfway: displayed=%d, want 40", got)
+	}
+	clock = clock.Add(50 * time.Millisecond) // complete
+	if got := boundRead(l); got != 80 {
+		t.Errorf("ease complete: displayed=%d, want 80", got)
+	}
+	if l.scrollAnimating {
+		t.Error("animation should be settled at the target")
+	}
+}
+
+// The grow-guard: a target clamped to maxScroll must not snap when content later grows.
+func TestLayerBoundOffsetGrowGuard(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 20)) // content 20
+	l.SetViewport(10, 10)          // maxScroll 10
+	target := 0
+	l.scrollTarget = &target
+
+	l.ScrollTo(1 << 30) // to bottom -> clamps to 10, and writes the clamp back
+	if target != 10 {
+		t.Fatalf("target after clamp = %d, want 10 (written back, not left huge)", target)
+	}
+	// content grows; maxScroll rises. A stale out-of-range target would snap to the new
+	// max — but it was clamped to 10, so it stays at 10.
+	l.SetBuffer(NewBuffer(10, 200)) // content 200
+	l.SetViewport(10, 10)           // maxScroll 190
+	if got := boundRead(l); got != 10 {
+		t.Errorf("after content grow: displayed=%d, want 10 (no snap to new max)", got)
+	}
+}
+
+// The bound-offset method path is concurrency-safe: scroll methods write the target and
+// blit reads the displayed offset, both under scrollMu. Must be clean under -race.
+func TestLayerBoundOffsetConcurrent(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 1000))
+	l.SetViewport(10, 10)
+	target := 0
+	l.scrollTarget = &target
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func(i int) { defer wg.Done(); l.ScrollTo(i * 7) }(i)
+		go func() { defer wg.Done(); _ = boundRead(l) }()
+	}
+	wg.Wait()
+}
+
+// The per-frame displayed-offset read must be alloc-free (ADR 38 perf requirement).
+func BenchmarkLayerBoundOffsetRead(b *testing.B) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 100))
+	l.SetViewport(10, 10)
+	target := 45
+	l.scrollTarget = &target // instant path = the steady-state read
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = boundRead(l)
+	}
+}

@@ -3,7 +3,55 @@ package glyph
 import (
 	"fmt"
 	"testing"
+	"time"
 )
+
+// The headline: ScrollView.ScrollOffset(...) binds the offset, and the ScrollView's
+// scroll methods drive it — no var, no pointer, no hard cut. Instant form here (the
+// eased form's frame-by-frame easing is covered at the Layer level).
+func TestScrollView_ScrollOffsetBindsAndDrives(t *testing.T) {
+	rows := make([]Component, 60)
+	for i := range rows {
+		rows[i] = Text(fmt.Sprintf("line%d", i))
+	}
+	sv := ScrollView.Grow(1).ScrollOffset(ScrollState())(rows...)
+	tmpl := Build(VBox(sv))
+
+	if sv.Layer().scrollTarget == nil {
+		t.Fatal("ScrollOffset(ScrollState()) did not bind the layer offset")
+	}
+	screen := NewBuffer(12, 6)
+	tmpl.Execute(screen, 12, 6) // viewport 6, content 60 -> maxScroll 54
+
+	// a scroll METHOD drives the bound target; instant offset reaches the end.
+	sv.Layer().ScrollToEnd()
+	if got := sv.Layer().ScrollY(); got != 54 {
+		t.Fatalf("ScrollToEnd via bound offset: ScrollY=%d, want 54 (maxScroll)", got)
+	}
+	screen.Clear()
+	tmpl.Execute(screen, 12, 6)
+	if got := screen.GetLine(5); got != "line59" {
+		t.Errorf("after ScrollToEnd: bottom row = %q, want line59", got)
+	}
+}
+
+// ScrollOffset(Animate(ScrollState())) binds BOTH the offset and the ease config, so the
+// same scroll methods become animation-aware (the headline DX).
+func TestScrollView_ScrollOffsetAnimateBindsEase(t *testing.T) {
+	sv := ScrollView.Grow(1).ScrollOffset(
+		Animate.Duration(120 * time.Millisecond).Ease(EaseOutCubic)(ScrollState()),
+	)(Text("a"), Text("b"))
+	Build(VBox(sv))
+	if sv.Layer().scrollTarget == nil {
+		t.Fatal("Animate(ScrollState()) did not bind the offset")
+	}
+	if sv.Layer().scrollEaseDur != 120*time.Millisecond {
+		t.Errorf("ease duration = %v, want 120ms (Animate config not bound)", sv.Layer().scrollEaseDur)
+	}
+	if sv.Layer().scrollEaseFn == nil {
+		t.Error("ease function not bound from Animate")
+	}
+}
 
 func TestScrollView_RendersChildren(t *testing.T) {
 	sv := ScrollView.Grow(1)(
