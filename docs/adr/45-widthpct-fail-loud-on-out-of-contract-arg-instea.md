@@ -60,11 +60,24 @@ Open question for review: whether to ALSO accept `int` 0/1 as a convenience, or 
 all ints as out-of-contract (recommended — an int percent is the misuse we are
 guarding). Default to reject-with-message unless there is a real 0/1 use case.
 
+## Amendment (post-review)
+
+The build-time panic is on the wrong TYPE only — NOT on a float's range. A percent
+width outside `[0,1]` is legitimate: a static `WidthPct(1.2)` is a deliberate 120%
+over-width, and animations routinely overshoot past 100% or below 0% (spring/overshoot
+easing). The original range guard would have rejected valid values. (Animated/dynamic
+percents were never range-checked — they flow through the `*float32`/condition/tween/osc
+arms — so only static literals were affected, but static over/under-percent is valid
+too.) The guard that remains is the one that catches the actual silent-drop footgun: a
+wrong-typed argument (an `int`, or any unmatched type) panics; floats of any magnitude
+are accepted.
+
 ## Technical
 
 - `WidthPct` (and the `HBoxFn`/`VBoxFn` variants) gain a `default:` arm in the type
-  switch that panics with a fraction-contract message; a `float32`/`float64` > 1 (and
-  < 0) likewise panics. The `*float32`/condition/tween/osc cases are unchanged.
+  switch that panics with a fraction-contract message (catching `int` and any other
+  unmatched type — the silent-drop bug). `float32`/`float64` are accepted at ANY value
+  (no range clamp); `*float32`/condition/tween/osc cases are unchanged.
 - This is construction-time only; no change to the layout hot path.
 
 ## Risks

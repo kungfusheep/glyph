@@ -6,19 +6,12 @@ import (
 	"unsafe"
 )
 
-// validatePercentWidth enforces WidthPct's 0.0-1.0 fraction contract at build time.
-// A static float outside [0,1] — or an out-of-contract type like an int (WidthPct(42)
-// reads as "42%" but the contract is a fraction, so it would mean 4200%) — panics with a
-// message that names the right call. Silent no-op on a bad arg used to vanish the element;
-// loud-at-build surfaces the mistake at the call site, and glyph builds once so there is no
-// per-frame cost.
-func validatePercentWidth(val float64) float32 {
-	if val < 0 || val > 1 {
-		panic(fmt.Sprintf("WidthPct takes a 0.0-1.0 fraction; got %v — e.g. WidthPct(0.42) for 42%%", val))
-	}
-	return float32(val)
-}
-
+// panicPercentWidthType is the loud-at-build guard for WidthPct's REAL footgun: a
+// silently-dropped argument of the wrong TYPE (e.g. an int — WidthPct(42) reads as "42%"
+// but the fraction contract makes it ambiguous, and an int literal was the silent no-op
+// that vanished the element). The fraction is NOT range-clamped: a static value outside
+// [0,1] is legitimate (e.g. WidthPct(1.2) for a deliberate 120% over-width, or a static
+// start value you then animate), and animated/dynamic percents already overshoot freely.
 func panicPercentWidthType(val any) {
 	panic(fmt.Sprintf("WidthPct takes a 0.0-1.0 fraction (float32/float64), *float32, or a dynamic value (condition/tween/osc); got %T (%v) — e.g. WidthPct(0.42) for 42%%, not WidthPct(42)", val, val))
 }
@@ -370,9 +363,9 @@ func (f VBoxFn) WidthPct(pct any) VBoxFn {
 		v := f(children...)
 		switch val := pct.(type) {
 		case float32:
-			v.percentWidth = validatePercentWidth(float64(val))
+			v.percentWidth = val
 		case float64:
-			v.percentWidth = validatePercentWidth(val)
+			v.percentWidth = float32(val)
 		case *float32:
 			v.percentWidthPtr = val
 		case conditionNode:
@@ -772,9 +765,9 @@ func (f HBoxFn) WidthPct(pct any) HBoxFn {
 		h := f(children...)
 		switch val := pct.(type) {
 		case float32:
-			h.percentWidth = validatePercentWidth(float64(val))
+			h.percentWidth = val
 		case float64:
-			h.percentWidth = validatePercentWidth(val)
+			h.percentWidth = float32(val)
 		case *float32:
 			h.percentWidthPtr = val
 		case conditionNode:

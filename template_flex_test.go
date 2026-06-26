@@ -1376,16 +1376,31 @@ func TestWidthPctFailsLoudOnBadArg(t *testing.T) {
 		build()
 	}
 
-	// int reads as a percentage but the contract is a fraction — must panic, not drop.
+	mustNotPanic := func(name string, build func()) {
+		t.Helper()
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("%s: unexpected panic %v — a static over/under-percent is legitimate", name, r)
+			}
+		}()
+		build()
+	}
+
+	// The real footgun: a wrong TYPE silently dropped. An int reads as a percentage but
+	// the fraction contract makes it ambiguous (and an int literal was the silent no-op
+	// that vanished the element) — must panic, not drop.
 	mustPanic("VBox.WidthPct(42)", func() { VBox.WidthPct(42)(Text("x")) })
 	mustPanic("HBox.WidthPct(42)", func() { HBox.WidthPct(42)(Text("x")) })
-	// out-of-range float (e.g. someone passes 50 meaning 50%) must panic too.
-	mustPanic("VBox.WidthPct(1.5)", func() { VBox.WidthPct(1.5)(Text("x")) })
-	mustPanic("VBox.WidthPct(-0.1)", func() { VBox.WidthPct(-0.1)(Text("x")) })
 	// unmatched type must panic.
 	mustPanic("VBox.WidthPct(string)", func() { VBox.WidthPct("42")(Text("x")) })
 
-	// the valid 0-1 fraction must still work (and actually lay out) — regression guard.
+	// A static float OUTSIDE [0,1] is NOT an error: >100% is a deliberate over-width and
+	// <0% is a valid animation start/overshoot value — these must be accepted, not panicked.
+	mustNotPanic("VBox.WidthPct(1.5)", func() { VBox.WidthPct(1.5)(Text("x")) })
+	mustNotPanic("VBox.WidthPct(-0.1)", func() { VBox.WidthPct(-0.1)(Text("x")) })
+	mustNotPanic("HBox.WidthPct(1.2)", func() { HBox.WidthPct(1.2)(Text("x")) })
+
+	// the valid 0-1 fraction must still lay out correctly — regression guard.
 	left, right := "L", "R"
 	view := HBox.Width(40)(
 		VBox.WidthPct(0.25)(Text(&left)),
@@ -1397,4 +1412,23 @@ func TestWidthPctFailsLoudOnBadArg(t *testing.T) {
 	if got := buf.GetLine(0); !strings.HasPrefix(got, "L") || got[10] != 'R' {
 		t.Errorf("WidthPct(0.25) layout = %q, want L in col0 and R at col10", got)
 	}
+
+	// a static >100% must actually produce an over-width column (not dropped to 0).
+	wide := "W"
+	wt := Build(HBox.Width(40)(VBox.WidthPct(1.5)(Text(&wide))))
+	wt.Execute(NewBuffer(60, 1), 60, 1)
+	// 1.5 * 40 = 60 columns requested for the column (over the 40 parent) — accepted, not 0.
+	if got := findPercentColWidth(wt); got <= 40 {
+		t.Errorf("WidthPct(1.5) produced width %d, want >40 (over-width accepted, not clamped/dropped)", got)
+	}
+}
+
+// findPercentColWidth returns the resolved width of the first OpContainer with a percent.
+func findPercentColWidth(t *Template) int16 {
+	for i := range t.ops {
+		if t.ops[i].Kind == OpContainer && t.ops[i].percentWidth() > 0 {
+			return t.geom[i].W
+		}
+	}
+	return -1
 }
