@@ -456,3 +456,71 @@ func TestScrollView_ManualScrollCancelsStalePending(t *testing.T) {
 		t.Fatalf("pending scroll-to-end with no external move: ScrollY=%d, want 54 (applied)", got)
 	}
 }
+
+// renderFeather builds a feathered ScrollView with `nrows` content rows in a viewport of
+// height vh, scrolled to scrollTo, and returns the painted screen. Content FG is
+// RGB(200,200,200) on a RGB(0,0,0) background so fades are exact-checkable via Lerp.
+func renderFeather(nrows, vh, feather, scrollTo int) *Buffer {
+	rows := make([]Component, nrows)
+	for i := range rows {
+		rows[i] = Text(fmt.Sprintf("row%d", i)).FG(RGB(200, 200, 200))
+	}
+	sv := ScrollView.Grow(1).Feather(feather)(rows...)
+	screen := NewBuffer(10, vh)
+	tmpl := Build(VBox(sv))
+	sv.Layer().defaultStyle = Style{BG: RGB(0, 0, 0)}
+	tmpl.Execute(screen, 10, int16(vh))
+	sv.Layer().defaultStyle = Style{BG: RGB(0, 0, 0)}
+	sv.Layer().ScrollTo(scrollTo)
+	screen.Clear()
+	tmpl.Execute(screen, 10, int16(vh))
+	return screen
+}
+
+// content that FITS the viewport (maxScroll==0) must NOT fade at either edge — the core
+// "don't fade static content" invariant. (ADR Testing case 1.)
+func TestScrollView_FeatherNoFadeWhenContentFits(t *testing.T) {
+	// 3 rows in an 8-row viewport: content fits, maxScroll==0.
+	feat := renderFeather(3, 8, 2, 0)
+	base := renderFeather(3, 8, 0, 0)
+	for y := 0; y < 3; y++ {
+		if feat.Get(0, y).Style.FG != base.Get(0, y).Style.FG {
+			t.Errorf("row %d faded though content fits (maxScroll==0); must stay static", y)
+		}
+		if feat.Get(0, y).Style.FG != (RGB(200, 200, 200)) {
+			t.Errorf("row %d FG = %+v, want raw content RGB(200,200,200)", y, feat.Get(0, y).Style.FG)
+		}
+	}
+}
+
+// exact depth + monotonic ramp: with Feather(3) at the top edge, EXACTLY rows 0..2 fade
+// (row 3 does not), strongest at the edge. (ADR Testing case: depth respected + ramp.)
+func TestScrollView_FeatherExactDepthAndRamp(t *testing.T) {
+	// 30 rows, viewport 12, scrolled to the middle so the TOP edge is active and the
+	// bottom edge (rows 9-11) is far from rows 0-3.
+	b := renderFeather(30, 12, 3, 13)
+	r := func(y int) uint8 { return b.Get(0, y).Style.FG.R } // content R=200; more fade -> lower R
+	// strongest at the edge, monotonically lifting back to content by row 3.
+	if !(r(0) < r(1) && r(1) < r(2) && r(2) < 200) {
+		t.Errorf("top ramp not monotonic/edge-strongest: R = %d,%d,%d (want increasing, all <200)", r(0), r(1), r(2))
+	}
+	if r(3) != 200 {
+		t.Errorf("row 3 R = %d, want 200 — exactly 3 rows should fade with Feather(3)", r(3))
+	}
+}
+
+// short-viewport overlap: when top and bottom feather regions overlap, a row is faded by
+// the STRONGER of the two (max), never double-dimmed. (ADR Testing case 2 — the max()
+// branch, otherwise uncovered.)
+func TestScrollView_FeatherOverlapMaxNoDoubleDim(t *testing.T) {
+	// viewport 4, Feather(3), mid-scroll (both edges active): top rows 0,1,2; bottom rows
+	// 1,2,3; rows 1,2 overlap and both resolve to t=0.5.
+	b := renderFeather(30, 4, 3, 13)
+	want := Lerp(RGB(200, 200, 200), RGB(0, 0, 0), 0.5) // single lerp at the max factor
+	// a double-dim (0.5 then 0.25) would push R below want.R (100) to ~75.
+	for _, y := range []int{1, 2} {
+		if got := b.Get(0, y).Style.FG; got != want {
+			t.Errorf("overlap row %d FG = %+v, want %+v (single max-lerp, not double-dimmed)", y, got, want)
+		}
+	}
+}

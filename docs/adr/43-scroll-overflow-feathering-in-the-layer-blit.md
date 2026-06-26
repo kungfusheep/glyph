@@ -108,8 +108,9 @@ buffer.
 - Per-frame cost in blit — mitigated by the off-path being unchanged and the
   on-path bounded to edge rows; gated by the required benchmark.
 - Colour-mode degradation (non-RGB no-fade) — documented, not silent.
-- Cursor row falling inside a faded edge — the cursor is drawn separately by the
-  framework after blit, so it is not dimmed; verify in a test.
+- Cursor row falling inside a faded edge — NOT a risk, structurally impossible: the
+  cursor is the TERMINAL cursor, positioned after render, not a buffer cell the feather
+  ever touches. No test needed (it cannot be dimmed by construction).
 
 ## Testing
 
