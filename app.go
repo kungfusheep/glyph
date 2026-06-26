@@ -92,6 +92,11 @@ type App struct {
 	// flush (render goroutine), read by the input goroutine.
 	lastWriteNs atomic.Int64
 
+	// lastInputNs is the time of the last input event (UnixNano), stamped at the central
+	// input read. Lock-free: written by the input goroutine, read by a consumer's
+	// idle-detection timer via LastInputUnixNano(). Tracks input, not renders.
+	lastInputNs atomic.Int64
+
 	// Cursor state
 	cursorX, cursorY int
 	cursorVisible    bool
@@ -724,6 +729,14 @@ func (a *App) CurrentView() string {
 // Input returns the riffkey input for modal handling (push/pop).
 func (a *App) Input() *riffkey.Input {
 	return a.input
+}
+
+// LastInputUnixNano returns the time of the last input event as Unix nanoseconds, or 0
+// before any input. Stamped at the central input read, so it tracks real interaction —
+// not renders (which also fire on background reloads). Poll it on a timer for idle
+// detection: now - LastInputUnixNano() crossing your threshold is "idle". Lock-free.
+func (a *App) LastInputUnixNano() int64 {
+	return a.lastInputNs.Load()
 }
 
 // Handle registers a key binding with a vim-style pattern.
@@ -1378,6 +1391,11 @@ func (a *App) run(startView string) error {
 		if !a.running {
 			return
 		}
+		// Stamp the last-input time. This is the one central place every key
+		// event passes, so it tracks real interaction — not renders, which also fire on
+		// background reloads. A single atomic store; consumers poll LastInputUnixNano()
+		// off the input path for idle detection.
+		a.lastInputNs.Store(time.Now().UnixNano())
 		// render immediately for zero-latency response — UNLESS the terminal is
 		// behind. when the last write took longer than a frame budget, the PTY is
 		// backed up; another synchronous blocking write here would queue behind it

@@ -694,3 +694,28 @@ func TestCheckListExternalSelectionUnderModal(t *testing.T) {
 		t.Fatalf("nav continues from persisted selection after rebuild, got %d", sel)
 	}
 }
+
+// LastInputUnixNano tracks REAL input from the central input read — not renders
+// (which fire on background reloads) and not programmatic Dispatch — so idle detection
+// reflects human interaction. Getter starts at 0, reflects the stamp, and a programmatic
+// dispatch does not move it.
+func TestApp_LastInputUnixNano(t *testing.T) {
+	app := NewApp()
+	if got := app.LastInputUnixNano(); got != 0 {
+		t.Fatalf("LastInputUnixNano before any input = %d, want 0", got)
+	}
+
+	// programmatic Dispatch routes a handler but is NOT the live input read, so it must
+	// not stamp — otherwise idle detection would false-negative on non-human events.
+	app.SetView(VBox(On(Key("x", func() {}))))
+	dispatchRune(app, 'x')
+	if got := app.LastInputUnixNano(); got != 0 {
+		t.Errorf("LastInputUnixNano after programmatic Dispatch = %d, want 0 (only the live input read stamps)", got)
+	}
+
+	// the getter reflects the stamp the live input read performs.
+	app.lastInputNs.Store(123456789)
+	if got := app.LastInputUnixNano(); got != 123456789 {
+		t.Errorf("LastInputUnixNano = %d, want 123456789", got)
+	}
+}
