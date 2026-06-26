@@ -44,6 +44,10 @@ type ScrollViewC struct {
 	// can position the view before the first frame.
 	pendingScroll    int
 	hasPendingScroll bool
+	// pendingFromY is the scroll position when the pending was queued. At apply time the
+	// pending is DROPPED if the layer moved externally (e.g. a manual scroll) since —
+	// a stale auto-scroll must not clobber the user's scroll.
+	pendingFromY int
 
 	// startH remembers the render-buffer height that held the content last frame
 	// (plus a viewport of headroom). render() resumes from it so tall content
@@ -327,6 +331,7 @@ func (sv *ScrollViewC) Refresh() {
 func (sv *ScrollViewC) ScrollTo(y int) {
 	sv.pendingScroll = y
 	sv.hasPendingScroll = true
+	sv.pendingFromY = sv.layer.ScrollY() // baseline to detect an external move before apply
 	sv.layer.Invalidate()
 }
 
@@ -480,9 +485,15 @@ func (sv *ScrollViewC) render() {
 	scrollY := sv.layer.ScrollY()
 	sv.layer.SetBuffer(buf)
 	if sv.hasPendingScroll {
-		sv.layer.ScrollTo(sv.pendingScroll)
 		sv.hasPendingScroll = false
-		return
+		// Drop a stale pending if the layer moved externally (a manual scroll) since
+		// ScrollTo queued it: a queued auto-scroll (e.g. scroll-to-end on a live refresh)
+		// must not clobber the user's scroll. Only apply when the position is unchanged
+		// from when the pending was set.
+		if scrollY == sv.pendingFromY {
+			sv.layer.ScrollTo(sv.pendingScroll)
+			return
+		}
 	}
 	sv.layer.ScrollTo(scrollY)
 }

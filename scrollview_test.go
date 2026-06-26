@@ -421,3 +421,38 @@ func TestScrollView_FeatherZeroUnchanged(t *testing.T) {
 		}
 	}
 }
+
+// A deferred pending scroll (ScrollViewC.ScrollTo, used for scroll-to-end on a live
+// refresh so it lands at the FRESH maxScroll) must NOT clobber a manual scroll made
+// before it applies — the drop-guard. If the layer moved externally since the
+// pending was queued, the pending is dropped.
+func TestScrollView_ManualScrollCancelsStalePending(t *testing.T) {
+	rows := make([]Component, 60)
+	for i := range rows {
+		rows[i] = Text(fmt.Sprintf("line%d", i))
+	}
+	sv := ScrollView.Grow(1)(rows...)
+	tmpl := Build(VBox(sv))
+	screen := NewBuffer(12, 6)
+	tmpl.Execute(screen, 12, 6) // viewport 6, content 60 -> maxScroll 54
+
+	// at the bottom; a live refresh queues a deferred scroll-to-end (pendingFromY = 54).
+	sv.Layer().ScrollToEnd()
+	sv.ScrollTo(1 << 30)
+	// user manually scrolls up to 30 BEFORE the pending applies.
+	sv.Layer().ScrollTo(30)
+	screen.Clear()
+	tmpl.Execute(screen, 12, 6)
+	if got := sv.Layer().ScrollY(); got != 30 {
+		t.Fatalf("manual scroll clobbered by stale pending: ScrollY=%d, want 30", got)
+	}
+
+	// control: a deferred scroll-to-end with NO external move still applies (fresh-max path).
+	sv.Layer().ScrollTo(20)
+	sv.ScrollTo(1 << 30) // pendingFromY = 20; no manual move follows
+	screen.Clear()
+	tmpl.Execute(screen, 12, 6)
+	if got := sv.Layer().ScrollY(); got != 54 {
+		t.Fatalf("pending scroll-to-end with no external move: ScrollY=%d, want 54 (applied)", got)
+	}
+}
