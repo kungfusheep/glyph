@@ -236,6 +236,30 @@ type Template struct {
 	root *Template
 }
 
+// structHash is a cheap FNV-1a fingerprint of the compiled tree's SHAPE — each op's
+// Kind, Depth, and Parent — independent of the data/pointers it carries. Two Builds
+// of the same declarative tree hash identically; structurally different trees don't.
+// Computed once at view registration (never per frame), it lets the App tell "the
+// same view redefined" from "a genuinely different view shown."
+func (t *Template) structHash() uint64 {
+	const (
+		offset64 = 14695981039346656037
+		prime64  = 1099511628211
+	)
+	h := uint64(offset64)
+	mix := func(v uint64) {
+		h ^= v
+		h *= prime64
+	}
+	for i := range t.ops {
+		op := &t.ops[i]
+		mix(uint64(op.Kind))
+		mix(uint64(uint8(op.Depth)))
+		mix(uint64(uint16(op.Parent)))
+	}
+	return h
+}
+
 type elemCompileContext struct {
 	base unsafe.Pointer
 	size uintptr
