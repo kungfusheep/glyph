@@ -62,28 +62,35 @@ type Layer struct {
 	// end. 0 (default) leaves blit byte-for-byte unchanged.
 	feather int
 
-	// Bound scroll offset (ADR 38). When scrollTarget != nil it is the SINGLE source of
-	// truth for the scroll position: every scroll method writes it (clamped), and blit
-	// reads the eased displayed value moving toward it. This dissolves the stale-pending
-	// vs manual-scroll race by construction (one value, last-write-wins). nil keeps the
-	// legacy scrollY path. scrollEaseDur 0 = instant (no animation); >0 eases the
-	// displayed offset toward the target over that duration with scrollEaseFn.
-	scrollTarget    *int
-	scrollEaseDur   time.Duration
-	scrollEaseFn    func(float64) float64
-	scrollShown     float64   // current displayed offset (eased); valid once scrollShownSet
-	scrollShownSet  bool
-	scrollAnimFrom  float64   // displayed value when the current ease began
-	scrollAnimT0    time.Time // when the current ease began
-	scrollAnimTo    int       // target the current ease heads to (detects retargets)
-	scrollAnimating bool
-	nowFn           func() time.Time // clock hook for tests; nil = time.Now
+	// Bound scroll offset + easing machinery (ADR 38), grouped so the scroll
+	// concern reads as one thing rather than a dozen scroll*-prefixed fields on
+	// Layer. See scrollEase.
+	ease scrollEase
+}
+
+// scrollEase is the ADR 38 bound-offset + easing state for a Layer. When target is
+// non-nil it is the SINGLE source of truth for the scroll position: every scroll
+// method writes it (clamped), and blit reads the eased displayed value moving toward
+// it — dissolving the stale-pending vs manual-scroll race by construction (one value,
+// last-write-wins). A nil target keeps the legacy scrollY path. dur 0 = instant; >0
+// eases the displayed offset toward the target over that duration with fn.
+type scrollEase struct {
+	target    *int
+	dur       time.Duration
+	fn        func(float64) float64
+	shown     float64   // current displayed offset (eased); valid once shownSet
+	shownSet  bool
+	animFrom  float64   // displayed value when the current ease began
+	animT0    time.Time // when the current ease began
+	animTo    int       // target the current ease heads to (detects retargets)
+	animating bool
+	nowFn     func() time.Time // clock hook for tests; nil = time.Now
 }
 
 // now returns the layer's clock (real time, or a test hook).
 func (l *Layer) now() time.Time {
-	if l.nowFn != nil {
-		return l.nowFn()
+	if l.ease.nowFn != nil {
+		return l.ease.nowFn()
 	}
 	return time.Now()
 }
@@ -133,12 +140,12 @@ func (l *Layer) updateMaxScroll() {
 	}
 	// Clamp current scroll to new bounds. For a bound offset, clamp the target itself so
 	// it never sits out of range and snaps when content later grows (ADR 38 grow-guard).
-	if l.scrollTarget != nil {
-		if *l.scrollTarget > l.maxScroll {
-			*l.scrollTarget = l.maxScroll
+	if l.ease.target != nil {
+		if *l.ease.target > l.maxScroll {
+			*l.ease.target = l.maxScroll
 		}
-		if *l.scrollTarget < 0 {
-			*l.scrollTarget = 0
+		if *l.ease.target < 0 {
+			*l.ease.target = 0
 		}
 	} else if l.scrollY > l.maxScroll {
 		l.scrollY = l.maxScroll
@@ -211,8 +218,8 @@ func (l *Layer) prepare() {
 func (l *Layer) ScrollY() int {
 	l.scrollMu.Lock()
 	defer l.scrollMu.Unlock()
-	if l.scrollTarget != nil {
-		y := *l.scrollTarget
+	if l.ease.target != nil {
+		y := *l.ease.target
 		if y < 0 {
 			y = 0
 		}
@@ -263,8 +270,8 @@ func (l *Layer) scrollToLocked(y int) {
 	if y > l.maxScroll {
 		y = l.maxScroll
 	}
-	if l.scrollTarget != nil {
-		*l.scrollTarget = y
+	if l.ease.target != nil {
+		*l.ease.target = y
 		return
 	}
 	l.scrollY = y
@@ -274,8 +281,8 @@ func (l *Layer) scrollToLocked(y int) {
 // holds scrollMu. Bound: the target (where we're headed), so HalfPageDown advances from
 // the destination, not a stale scrollY. Unbound: scrollY.
 func (l *Layer) currentScrollLocked() int {
-	if l.scrollTarget != nil {
-		return *l.scrollTarget
+	if l.ease.target != nil {
+		return *l.ease.target
 	}
 	return l.scrollY
 }
@@ -286,53 +293,53 @@ func (l *Layer) currentScrollLocked() int {
 // scrollEaseDur. Sets scrollAnimating while an ease is in flight so blit can request
 // the next frame. Instant (dur 0) snaps to the target.
 func (l *Layer) displayedOffsetLocked() int {
-	if l.scrollTarget == nil {
+	if l.ease.target == nil {
 		return l.scrollY
 	}
-	target := *l.scrollTarget
+	target := *l.ease.target
 	if target < 0 {
 		target = 0
 	}
 	if target > l.maxScroll {
 		target = l.maxScroll
 	}
-	*l.scrollTarget = target // write back the clamp (grow-snap guard)
+	*l.ease.target = target // write back the clamp (grow-snap guard)
 
-	if l.scrollEaseDur <= 0 {
-		l.scrollShown = float64(target)
-		l.scrollShownSet = true
-		l.scrollAnimating = false
+	if l.ease.dur <= 0 {
+		l.ease.shown = float64(target)
+		l.ease.shownSet = true
+		l.ease.animating = false
 		return target
 	}
-	if !l.scrollShownSet {
-		l.scrollShown = float64(target)
-		l.scrollShownSet = true
-		l.scrollAnimating = false
+	if !l.ease.shownSet {
+		l.ease.shown = float64(target)
+		l.ease.shownSet = true
+		l.ease.animating = false
 		return target
 	}
 	// (re)start an ease when the target moves away from where we're shown/heading.
-	if int(math.Round(l.scrollShown)) == target {
-		l.scrollAnimating = false
-		l.scrollShown = float64(target)
+	if int(math.Round(l.ease.shown)) == target {
+		l.ease.animating = false
+		l.ease.shown = float64(target)
 		return target
 	}
-	if !l.scrollAnimating || l.scrollAnimTo != target {
-		l.scrollAnimFrom = l.scrollShown
-		l.scrollAnimT0 = l.now()
-		l.scrollAnimTo = target
-		l.scrollAnimating = true
+	if !l.ease.animating || l.ease.animTo != target {
+		l.ease.animFrom = l.ease.shown
+		l.ease.animT0 = l.now()
+		l.ease.animTo = target
+		l.ease.animating = true
 	}
-	p := float64(l.now().Sub(l.scrollAnimT0)) / float64(l.scrollEaseDur)
+	p := float64(l.now().Sub(l.ease.animT0)) / float64(l.ease.dur)
 	if p >= 1 {
-		l.scrollShown = float64(target)
-		l.scrollAnimating = false
+		l.ease.shown = float64(target)
+		l.ease.animating = false
 		return target
 	}
-	if l.scrollEaseFn != nil {
-		p = l.scrollEaseFn(p)
+	if l.ease.fn != nil {
+		p = l.ease.fn(p)
 	}
-	l.scrollShown = l.scrollAnimFrom + p*(float64(target)-l.scrollAnimFrom)
-	return int(math.Round(l.scrollShown))
+	l.ease.shown = l.ease.animFrom + p*(float64(target)-l.ease.animFrom)
+	return int(math.Round(l.ease.shown))
 }
 
 // ScrollTo sets the scroll position, clamping to valid range.
@@ -406,7 +413,7 @@ func (l *Layer) blit(dst *Buffer, dstX, dstY, width, height int) {
 	l.scrollMu.Lock()
 	sy := l.displayedOffsetLocked()
 	ms := l.maxScroll
-	animating := l.scrollAnimating
+	animating := l.ease.animating
 	l.scrollMu.Unlock()
 	if l.feather > 0 {
 		l.blitFeathered(dst, dstX, dstY, width, height, sy, ms)

@@ -342,12 +342,12 @@ func (t *Template) compileScrollViewC(v *ScrollViewC, parent int16, depth int) i
 	// (the legacy scrollY path stays), so this can't break an existing view.
 	switch o := v.scrollOffset.(type) {
 	case *int:
-		v.layer.scrollTarget = o
+		v.layer.ease.target = o
 	case tweenNode:
 		if p, ok := o.getTarget().(*int); ok {
-			v.layer.scrollTarget = p
-			v.layer.scrollEaseDur = o.getTweenDuration()
-			v.layer.scrollEaseFn = o.getTweenEasing()
+			v.layer.ease.target = p
+			v.layer.ease.dur = o.getTweenDuration()
+			v.layer.ease.fn = o.getTweenEasing()
 		}
 	}
 	layerView := LayerView(v.layer).Grow(v.flexGrow)

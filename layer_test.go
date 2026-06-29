@@ -548,7 +548,7 @@ func TestLayerBoundOffsetInstant(t *testing.T) {
 	l.SetBuffer(NewBuffer(10, 100)) // content height 100
 	l.SetViewport(10, 10)           // maxScroll = 90
 	target := 0
-	l.scrollTarget = &target
+	l.ease.target = &target
 
 	l.ScrollTo(40)
 	if got := boundRead(l); got != 40 || target != 40 {
@@ -579,11 +579,11 @@ func TestLayerBoundOffsetAnimates(t *testing.T) {
 	l.SetBuffer(NewBuffer(10, 100))
 	l.SetViewport(10, 10) // maxScroll 90
 	target := 0
-	l.scrollTarget = &target
-	l.scrollEaseDur = 100 * time.Millisecond
-	l.scrollEaseFn = EaseLinear
+	l.ease.target = &target
+	l.ease.dur = 100 * time.Millisecond
+	l.ease.fn = EaseLinear
 	clock := time.Unix(1000, 0)
-	l.nowFn = func() time.Time { return clock }
+	l.ease.nowFn = func() time.Time { return clock }
 
 	_ = boundRead(l) // first read establishes shown=0 at target 0
 	target = 80      // retarget; ScrollY is the destination immediately
@@ -602,7 +602,7 @@ func TestLayerBoundOffsetAnimates(t *testing.T) {
 	if got := boundRead(l); got != 80 {
 		t.Errorf("ease complete: displayed=%d, want 80", got)
 	}
-	if l.scrollAnimating {
+	if l.ease.animating {
 		t.Error("animation should be settled at the target")
 	}
 }
@@ -613,7 +613,7 @@ func TestLayerBoundOffsetGrowGuard(t *testing.T) {
 	l.SetBuffer(NewBuffer(10, 20)) // content 20
 	l.SetViewport(10, 10)          // maxScroll 10
 	target := 0
-	l.scrollTarget = &target
+	l.ease.target = &target
 
 	l.ScrollTo(1 << 30) // to bottom -> clamps to 10, and writes the clamp back
 	if target != 10 {
@@ -635,7 +635,7 @@ func TestLayerBoundOffsetConcurrent(t *testing.T) {
 	l.SetBuffer(NewBuffer(10, 1000))
 	l.SetViewport(10, 10)
 	target := 0
-	l.scrollTarget = &target
+	l.ease.target = &target
 
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
@@ -652,7 +652,7 @@ func BenchmarkLayerBoundOffsetRead(b *testing.B) {
 	l.SetBuffer(NewBuffer(10, 100))
 	l.SetViewport(10, 10)
 	target := 45
-	l.scrollTarget = &target // instant path = the steady-state read
+	l.ease.target = &target // instant path = the steady-state read
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

@@ -17,7 +17,7 @@ func TestScrollView_ScrollOffsetBindsAndDrives(t *testing.T) {
 	sv := ScrollView.Grow(1).ScrollOffset(ScrollState())(rows...)
 	tmpl := Build(VBox(sv))
 
-	if sv.Layer().scrollTarget == nil {
+	if sv.Layer().ease.target == nil {
 		t.Fatal("ScrollOffset(ScrollState()) did not bind the layer offset")
 	}
 	screen := NewBuffer(12, 6)
@@ -42,13 +42,13 @@ func TestScrollView_ScrollOffsetAnimateBindsEase(t *testing.T) {
 		Animate.Duration(120 * time.Millisecond).Ease(EaseOutCubic)(ScrollState()),
 	)(Text("a"), Text("b"))
 	Build(VBox(sv))
-	if sv.Layer().scrollTarget == nil {
+	if sv.Layer().ease.target == nil {
 		t.Fatal("Animate(ScrollState()) did not bind the offset")
 	}
-	if sv.Layer().scrollEaseDur != 120*time.Millisecond {
-		t.Errorf("ease duration = %v, want 120ms (Animate config not bound)", sv.Layer().scrollEaseDur)
+	if sv.Layer().ease.dur != 120*time.Millisecond {
+		t.Errorf("ease duration = %v, want 120ms (Animate config not bound)", sv.Layer().ease.dur)
 	}
-	if sv.Layer().scrollEaseFn == nil {
+	if sv.Layer().ease.fn == nil {
 		t.Error("ease function not bound from Animate")
 	}
 }
