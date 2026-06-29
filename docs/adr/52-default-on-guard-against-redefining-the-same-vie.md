@@ -6,6 +6,17 @@
 - parties: tui
 - deliberation: recap proposal show 52 (3 comments)
 
+## Implementation amendment (scope narrowed on review)
+
+Shipped scope is **signal 1 only** — warn when the same view name is registered
+twice via `View()`. Signal 2 (distinct names whose compiled structure is identical)
+and the `structHash` fingerprint it required are **deferred**: the redefinition case
+is the unambiguous, high-confidence defect and stands on its own, whereas flagging
+structural twins risks false positives on legitimately similar-but-distinct views
+and wants more conviction before it ships. The fingerprint machinery can return with
+signal 2 if that case proves real. The rest of the design below stands as written;
+treat the signal-2 / `structHash` sections as the deferred follow-up, not shipped.
+
 # Proposal: a default-on guard against redefining the same view instead of using control flow
 
 ## Problem

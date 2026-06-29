@@ -144,12 +144,11 @@ type App struct {
 	setViewLimit int // 0 = unlimited
 
 	// view-redefine diagnostic: a default-on, behaviourally-inert nudge toward
-	// control flow instead of duplicate/redefined named views. Keyed at View()
+	// control flow when a named view is registered twice. Keyed at View()
 	// registration; zero per-frame cost. diagOut defaults to os.Stderr.
-	viewShapeNames map[uint64]string // structural fingerprint -> first view name with that shape
-	viewDiagWarned map[string]bool   // dedup set so each finding prints at most once
-	viewDiagOff    bool              // SetViewDiagnostic(false) silences it
-	diagOut        io.Writer         // nil -> os.Stderr (hook for tests)
+	viewDiagWarned map[string]bool // dedup set so each finding prints at most once
+	viewDiagOff    bool            // SetViewDiagnostic(false) silences it
+	diagOut        io.Writer       // nil -> os.Stderr (hook for tests)
 }
 
 // NewApp creates a new TUI application (fullscreen, alternate buffer).
@@ -278,22 +277,19 @@ func (a *App) SetViewLimit(n int) *App {
 }
 
 // SetViewDiagnostic toggles the default-on guard that warns (once, to stderr) when
-// a named view is registered twice or when two distinct views are structurally
-// identical — both signs of redefining views instead of using If/Switch + pointer
-// state. It is behaviourally inert (a log line only); turn it off for tests or
-// embedders that legitimately register identical-shaped views.
+// a named view is registered twice — a sign of redefining views instead of using
+// If/Switch + pointer state. It is behaviourally inert (a log line only); turn it
+// off for tests or embedders that legitimately re-register a view via View().
 func (a *App) SetViewDiagnostic(on bool) *App {
 	a.viewDiagOff = !on
 	return a
 }
 
-// checkViewRedefine emits a one-time stderr nudge toward control flow when a View()
-// registration looks like a redefinition. Two signals, both keyed at registration
-// (zero per-frame cost): (1) the same name registered again — UpdateView is the
-// sanctioned recompile path and never reaches here; (2) a distinct name whose
-// compiled structure is identical to an already-registered view — the
-// copy-paste-a-whole-view defect. Each finding prints at most once.
-func (a *App) checkViewRedefine(name string, tmpl *Template) {
+// checkViewRedefine emits a one-time stderr nudge toward control flow when the same
+// view name is registered more than once via View() — keyed at registration, so
+// zero per-frame cost. UpdateView is the sanctioned recompile path and never reaches
+// here. Each name warns at most once.
+func (a *App) checkViewRedefine(name string) {
 	if a.viewDiagOff {
 		return
 	}
@@ -302,21 +298,6 @@ func (a *App) checkViewRedefine(name string, tmpl *Template) {
 			"glyph: view %q registered twice — register each view once and use "+
 				"If().Then()/Switch().Case() + pointer state for what changes "+
 				"(UpdateView if you truly need to recompile).", name)
-		return // a redefinition under the same name; shape-collision check is moot
-	}
-	if a.viewShapeNames == nil {
-		a.viewShapeNames = make(map[uint64]string)
-	}
-	h := tmpl.structHash()
-	first, seen := a.viewShapeNames[h]
-	if seen && first != name {
-		a.viewDiagf("shape-"+first+"-"+name,
-			"glyph: views %q and %q are structurally identical — prefer one view "+
-				"with If().Then()/Switch().Case() + state over duplicate views.", first, name)
-		return
-	}
-	if !seen {
-		a.viewShapeNames[h] = name
 	}
 }
 
@@ -560,7 +541,7 @@ func (a *App) View(name string, view Component) *ViewBuilder {
 	tmpl.SetApp(a) // Link for jump mode support
 	router := riffkey.NewRouter()
 	a.wireBindings(tmpl, router)
-	a.checkViewRedefine(name, tmpl)
+	a.checkViewRedefine(name)
 	a.viewTemplates[name] = tmpl
 	a.viewRouters[name] = router
 
