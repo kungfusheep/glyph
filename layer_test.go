@@ -464,6 +464,48 @@ func TestLayerReRendersOnHeightChange(t *testing.T) {
 	}
 }
 
+// SetFeather exposes scroll-overflow feathering on a raw Layer (the common case is a
+// layer view, not only ScrollView): the setter drives the same blit fade, and the
+// off-path (0) is untouched. Getter mirrors the setter.
+func TestLayerSetFeather(t *testing.T) {
+	build := func(feather int) *Buffer {
+		l := NewLayer()
+		l.SetFeather(feather)
+		l.defaultStyle = Style{BG: RGB(0, 0, 0)} // a real bg to blend toward
+		if got := l.Feather(); got != feather {
+			t.Fatalf("Feather() = %d, want %d", got, feather)
+		}
+		src := NewBuffer(10, 100)
+		for y := 0; y < 100; y++ {
+			for x := 0; x < 10; x++ {
+				src.SetFast(x, y, Cell{Rune: 'x', Style: Style{FG: RGB(200, 200, 200)}})
+			}
+		}
+		l.SetBuffer(src)
+		l.SetViewport(10, 20)
+		l.ScrollTo(40) // mid-scroll: top overflows, so the top edge should fade
+		dst := NewBuffer(10, 20)
+		l.blit(dst, 0, 0, 10, 20)
+		return dst
+	}
+
+	plain := build(0)
+	feathered := build(3)
+
+	// off-path: feather 0 leaves the top row at full source intensity.
+	if r := plain.Get(0, 0).Style.FG.R; r != 200 {
+		t.Fatalf("feather 0 must not fade: top-row FG.R = %d, want 200", r)
+	}
+	// on-path: feather 3 fades the top row toward the (black) background.
+	if r := feathered.Get(0, 0).Style.FG.R; r >= 200 {
+		t.Fatalf("feather 3 must fade the overflowing top edge: top-row FG.R = %d, want < 200", r)
+	}
+	// the middle is untouched either way.
+	if feathered.Get(0, 10).Style.FG.R != 200 {
+		t.Fatalf("feather must not touch the middle band: FG.R = %d, want 200", feathered.Get(0, 10).Style.FG.R)
+	}
+}
+
 // Feather adds work only at the overflowing edges and only when enabled; the off-path
 // (feather 0) must match plain blit. These two benchmarks prove no per-frame regression
 // off-path and bounded edge cost on-path.

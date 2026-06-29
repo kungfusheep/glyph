@@ -336,7 +336,7 @@ func (sv *ScrollViewC) ScrollTo(y int) {
 }
 
 func (t *Template) compileScrollViewC(v *ScrollViewC, parent int16, depth int) int16 {
-	v.layer.feather = v.feather
+	v.layer.SetFeather(v.feather)
 	// Bind the scroll offset (ADR 38): a *int is instant; an Animate tween over an *int
 	// eases the displayed offset toward the target. Wrong-typed offsets are ignored
 	// (the legacy scrollY path stays), so this can't break an existing view.

@@ -155,6 +155,20 @@ func (l *Layer) SetViewport(width, height int) {
 	l.scrollMu.Unlock()
 }
 
+// SetFeather fades n rows toward the layer background at an overflowing edge: the top
+// when scrolled down from the top, the bottom when there is more below. The fade
+// appears only where content actually overflows, so it doubles as a scroll-position
+// cue. n == 0 (the default) leaves blit byte-for-byte unchanged — non-feathered
+// layers pay nothing. Blends toward the layer's background (inherited from the app's
+// default style); with a terminal-default background it is a no-op.
+func (l *Layer) SetFeather(n int) *Layer {
+	l.feather = n
+	return l
+}
+
+// Feather returns the current edge-fade depth (0 = off).
+func (l *Layer) Feather() int { return l.feather }
+
 // NeedsRender returns true if the layer needs to re-render before blitting.
 // Width changes always require re-render (text wrapping). Height changes
 // require re-render if this is the first render or content is height-dependent.
