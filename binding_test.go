@@ -1,6 +1,11 @@
 package glyph
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/kungfusheep/riffkey"
+)
 
 func TestListBindNavCollected(t *testing.T) {
 	items := []string{"a", "b", "c"}
@@ -336,5 +341,97 @@ func TestNoBindingsWhenNotUsed(t *testing.T) {
 	))
 	if len(tmpl.pendingBindings) != 0 {
 		t.Errorf("expected 0 bindings, got %d", len(tmpl.pendingBindings))
+	}
+}
+
+// --- #60: named bindings + live key-help ---
+
+// A Named() binding is wired through riffkey HandleNamed, so it surfaces in
+// ActiveBindings with its pattern — the live source for key-help.
+func TestNamedBindingInActiveBindings(t *testing.T) {
+	app := NewApp()
+	app.SetView(VBox(
+		On(Key("j", func() {}).Named("scroll-down")),
+		Text("hi"),
+	))
+	found := false
+	for _, b := range app.ActiveBindings() {
+		if b.Name == "scroll-down" {
+			found = true
+			if b.Pattern != "j" {
+				t.Errorf("pattern = %q, want \"j\"", b.Pattern)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("named binding \"scroll-down\" not present in ActiveBindings")
+	}
+}
+
+// An unnamed binding still wires (works) but stays off the introspection surface —
+// only Named() bindings appear in ActiveBindings.
+func TestUnnamedBindingNotIntrospectable(t *testing.T) {
+	app := NewApp()
+	app.SetView(VBox(
+		On(Key("q", func() {})),                       // unnamed
+		On(Key("j", func() {}).Named("scroll-down")),  // named
+	))
+	names := map[string]bool{}
+	for _, b := range app.ActiveBindings() {
+		names[b.Name] = true
+		if b.Pattern == "q" {
+			t.Errorf("unnamed binding leaked into ActiveBindings: %+v", b)
+		}
+	}
+	if !names["scroll-down"] {
+		t.Fatal("named binding missing from ActiveBindings")
+	}
+}
+
+func TestKeyHelpRendersActiveBindings(t *testing.T) {
+	src := func() []riffkey.Binding {
+		return []riffkey.Binding{
+			{Name: "scroll-down", Pattern: "j"},
+			{Name: "quit", Pattern: "q"},
+		}
+	}
+	help := KeyHelp(src)
+	_, h := help.MinSize()
+	if h != 2 {
+		t.Fatalf("MinSize height = %d, want 2", h)
+	}
+	buf := NewBuffer(30, 2)
+	help.Render(buf, 0, 0, 30, 2)
+	row0 := bindingRowString(buf, 0, 30)
+	if !strings.Contains(row0, "j") || !strings.Contains(row0, "Scroll down") {
+		t.Fatalf("row 0 = %q, want key \"j\" + humanized \"Scroll down\"", row0)
+	}
+}
+
+// bindingRowString reads row y of buf as a string (test helper).
+func bindingRowString(buf *Buffer, y, w int) string {
+	var b strings.Builder
+	for x := 0; x < w; x++ {
+		c := buf.Get(x, y)
+		if c.Rune == 0 {
+			b.WriteByte(' ')
+			continue
+		}
+		b.WriteRune(c.Rune)
+	}
+	return b.String()
+}
+
+func TestHumanizeBindingName(t *testing.T) {
+	cases := map[string]string{
+		"scroll-down": "Scroll down",
+		"scroll_up":   "Scroll up",
+		"quit":        "Quit",
+		"":            "",
+	}
+	for in, want := range cases {
+		if got := humanizeBindingName(in); got != want {
+			t.Errorf("humanizeBindingName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

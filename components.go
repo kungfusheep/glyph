@@ -21,6 +21,7 @@ func panicPercentWidthType(val any) {
 type binding struct {
 	pattern string
 	handler any
+	name    string // semantic name (optional); when set, wired via riffkey HandleNamed for introspection + rebinding
 }
 
 type onDecl interface {
@@ -38,6 +39,20 @@ func Key(pattern string, handler any) KeyC {
 }
 
 func (k KeyC) routeBindings() []binding { return k.declaredBindings }
+
+// Named gives the binding a semantic name (e.g. "scroll-down"). A named binding is
+// wired through riffkey's HandleNamed, so it shows up in the live key-help
+// (App.ActiveBindings) and can be rebound from a user config file
+// (App.LoadKeyBindings). The pattern passed to Key becomes the default. Unnamed
+// bindings are unaffected and keep working exactly as before.
+func (k KeyC) Named(name string) KeyC {
+	out := make([]binding, len(k.declaredBindings))
+	copy(out, k.declaredBindings)
+	for i := range out {
+		out[i].name = name
+	}
+	return KeyC{declaredBindings: out}
+}
 
 // OnC declares a zero-size event routing scope inside the view tree.
 type OnC struct {

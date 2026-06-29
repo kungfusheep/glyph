@@ -162,8 +162,8 @@ func (lv *LogC) OnUpdate(f func()) *LogC {
 // BindNav registers key bindings for scrolling down/up by one line.
 func (lv *LogC) BindNav(down, up string) *LogC {
 	lv.declaredBindings = append(lv.declaredBindings,
-		binding{down, func() { lv.layer.ScrollDown(1) }},
-		binding{up, func() { lv.following = false; lv.layer.ScrollUp(1) }},
+		binding{pattern: down, handler: func() { lv.layer.ScrollDown(1) }},
+		binding{pattern: up, handler: func() { lv.following = false; lv.layer.ScrollUp(1) }},
 	)
 	return lv
 }
@@ -171,8 +171,8 @@ func (lv *LogC) BindNav(down, up string) *LogC {
 // BindPageNav registers key bindings for half-page scrolling.
 func (lv *LogC) BindPageNav(down, up string) *LogC {
 	lv.declaredBindings = append(lv.declaredBindings,
-		binding{down, func() { lv.layer.HalfPageDown() }},
-		binding{up, func() { lv.following = false; lv.layer.HalfPageUp() }},
+		binding{pattern: down, handler: func() { lv.layer.HalfPageDown() }},
+		binding{pattern: up, handler: func() { lv.following = false; lv.layer.HalfPageUp() }},
 	)
 	return lv
 }
@@ -180,8 +180,8 @@ func (lv *LogC) BindPageNav(down, up string) *LogC {
 // BindFirstLast registers key bindings for jumping to top/bottom.
 func (lv *LogC) BindFirstLast(first, last string) *LogC {
 	lv.declaredBindings = append(lv.declaredBindings,
-		binding{first, func() { lv.following = false; lv.layer.ScrollToTop() }},
-		binding{last, func() { lv.resume() }},
+		binding{pattern: first, handler: func() { lv.following = false; lv.layer.ScrollToTop() }},
+		binding{pattern: last, handler: func() { lv.resume() }},
 	)
 	return lv
 }

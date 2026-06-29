@@ -464,17 +464,62 @@ func (a *App) wireBindingList(router *riffkey.Router, bindings []binding) {
 }
 
 func (a *App) wireBinding(router *riffkey.Router, b binding) {
-	switch h := b.handler.(type) {
+	var h func(riffkey.Match)
+	switch fn := b.handler.(type) {
 	case func(riffkey.Match):
-		pattern := b.pattern
-		router.Handle(pattern, func(m riffkey.Match) { h(m); a.RequestRender() })
+		h = func(m riffkey.Match) { fn(m); a.RequestRender() }
 	case func(any):
-		pattern := b.pattern
-		router.Handle(pattern, func(_ riffkey.Match) { h(nil); a.RequestRender() })
+		h = func(_ riffkey.Match) { fn(nil); a.RequestRender() }
 	case func():
-		pattern := b.pattern
-		router.Handle(pattern, func(_ riffkey.Match) { h(); a.RequestRender() })
+		h = func(_ riffkey.Match) { fn(); a.RequestRender() }
+	default:
+		return
 	}
+	// A named binding wires through HandleNamed so it appears in the live key-help
+	// and is rebindable from config; the pattern is its default. Unnamed bindings
+	// keep the plain Handle path unchanged.
+	if b.name != "" {
+		router.HandleNamed(b.name, b.pattern, h)
+	} else {
+		router.Handle(b.pattern, h)
+	}
+}
+
+// ActiveBindings returns the named key bindings currently in effect — the bindings
+// on the active (top-of-stack) router. It's the live source for a key-help component:
+// read it each frame and it always reflects what's bound right now (current view,
+// modal, or focused field). Only Named() bindings appear; unnamed ones are not
+// introspectable. Returns nil before the input loop is running.
+func (a *App) ActiveBindings() []riffkey.Binding {
+	if a.input == nil {
+		return nil
+	}
+	cur := a.input.Current()
+	if cur == nil {
+		return nil
+	}
+	return cur.Bindings()
+}
+
+// LoadKeyBindings applies user-defined key overrides from the standard config file
+// for appName (riffkey's LoadBindings) across the base and all view routers. Only
+// named bindings are affected; unknown names are ignored. Call once after views are
+// registered. Returns the first load error encountered.
+func (a *App) LoadKeyBindings(appName string) error {
+	var firstErr error
+	apply := func(r *riffkey.Router) {
+		if r == nil {
+			return
+		}
+		if err := r.LoadBindings(appName); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	apply(a.router)
+	for _, r := range a.viewRouters {
+		apply(r)
+	}
+	return firstErr
 }
 
 func (a *App) wireChildRouteScopes(tmpl *Template) {
