@@ -459,16 +459,15 @@ func (l *Layer) blitFeathered(dst *Buffer, dstX, dstY, width, height, sy, ms int
 	if midH := height - topN - botN; midH > 0 {
 		dst.Blit(l.buffer, 0, sy+topN, dstX, dstY+topN, width, midH)
 	}
+	// Only the active edge bands are visited (the middle is the bulk Blit above), and
+	// featherRowT is strictly > 0 across both bands — including the short-viewport
+	// overlap — so every visited row genuinely fades; there is no unfaded row needing a
+	// plain-copy fallback.
 	for r := 0; r < height; r++ {
 		if r >= topN && r < height-botN {
 			continue // covered by the bulk middle Blit
 		}
 		t := featherRowT(r, n, height, topActive, botActive)
-		if t <= 0 {
-			// not actually faded (e.g. a row only the inactive edge would reach) — plain copy.
-			dst.Blit(l.buffer, 0, sy+r, dstX, dstY+r, width, 1)
-			continue
-		}
 		y := dstY + r
 		for x := 0; x < width; x++ {
 			c := l.buffer.Get(x, sy+r)
