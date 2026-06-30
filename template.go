@@ -3399,7 +3399,17 @@ type opTextInput struct {
 	style          Style
 	placeholderSty Style
 	cursorStyle    Style
-	multiline      bool // wrap long text across lines instead of scrolling horizontally
+	multiline      bool          // wrap long text across lines instead of scrolling horizontally
+	styleRanges    *[]StyleRange // optional per-range styling over the value (ADR 70); nil = uniform style
+}
+
+// StyleRange styles a half-open run of runes [Start, End) of an editable Input's value.
+// The consumer rebuilds the bound []StyleRange on value-change (e.g. in Input's OnChange);
+// glyph reads it at render and applies each range's Style, leaving runes outside any range
+// in the Input's uniform style. See InputC.StyleRanges and ADR 70.
+type StyleRange struct {
+	Start, End int
+	Style      Style
 }
 
 // value resolves the input's current text from whichever API is in use.
@@ -4107,6 +4117,7 @@ func (t *Template) compileTextInput(v textInput, parent int16, depth int) int16 
 		placeholderSty: v.PlaceholderStyle,
 		cursorStyle:    v.CursorStyle,
 		multiline:      v.MultiLine,
+		styleRanges:    v.StyleRanges,
 	}
 
 	if ext.placeholderSty.Equal(Style{}) {
@@ -9489,6 +9500,20 @@ func (t *Template) richSpanJumpFunc(buf *Buffer) spanJumpFunc {
 	}
 }
 
+// styleRangeAt resolves the style for value-rune index i from a sorted StyleRange slice,
+// advancing *cur forward (call with ascending i for an O(n+ranges) walk). Returns base
+// when i is in no range. Degenerate or out-of-bounds ranges never match and never index
+// the value, so a malformed range mis-styles at worst, never crashes. See ADR 70.
+func styleRangeAt(ranges []StyleRange, i int, cur *int, base Style) Style {
+	for *cur < len(ranges) && ranges[*cur].End <= i {
+		*cur++
+	}
+	if *cur < len(ranges) && i >= ranges[*cur].Start && i < ranges[*cur].End {
+		return ranges[*cur].Style
+	}
+	return base
+}
+
 func (t *Template) renderTextInput(buf *Buffer, op *Op, geom *Geom, absX, absY int16) {
 	width := int(geom.W)
 	if width <= 0 {
@@ -9581,15 +9606,28 @@ func (t *Template) renderTextInput(buf *Buffer, op *Op, geom *Geom, absX, absY i
 		cursorRune = len(displayRunes)
 	}
 
+	// per-range styling (ADR 70): nil/empty keeps the uniform-style path untouched; only
+	// a non-empty range slice arms the per-rune merge-walk. styled is hoisted so the
+	// off-path is a single predicted branch and stays byte-identical in output.
+	var styleRanges []StyleRange
+	if ext.styleRanges != nil {
+		styleRanges = *ext.styleRanges
+	}
+	styled := len(styleRanges) > 0
+
 	// multiline: wrap the value across lines instead of scrolling one line horizontally.
 	if ext.multiline {
 		lines := inputWrapLines(displayRunes, width)
 		curLine, curCol := inputCursorPos(lines, cursorRune)
+		rcur := 0 // forward cursor into styleRanges (runes are visited in ascending order)
 		for li, ln := range lines {
 			y := int(absY) + li
 			x := int(absX)
 			for ri := ln.start; ri < ln.end; ri++ {
 				style := textStyle
+				if styled {
+					style = styleRangeAt(styleRanges, ri, &rcur, textStyle)
+				}
 				if showCursor && ri == cursorRune {
 					style = cursorStyle
 				}
@@ -9616,8 +9654,12 @@ func (t *Template) renderTextInput(buf *Buffer, op *Op, geom *Geom, absX, absY i
 	}
 
 	x := int(absX)
+	rcur := 0 // forward cursor into styleRanges; self-advances to scrollOffset on first use
 	for i := scrollOffset; i < visibleEnd; i++ {
 		style := textStyle
+		if styled {
+			style = styleRangeAt(styleRanges, i, &rcur, textStyle)
+		}
 		// Highlight cursor position if focused
 		if showCursor && i == cursorRune {
 			style = cursorStyle

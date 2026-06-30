@@ -3718,6 +3718,9 @@ type InputC struct {
 
 	// multiline wraps long text across lines instead of scrolling horizontally
 	multiline bool
+
+	// styleRanges, when set, styles sub-ranges of the value (ADR 70); nil = uniform style
+	styleRanges *[]StyleRange
 }
 
 // Input creates a text input with internal state.
@@ -3803,6 +3806,17 @@ func (i *InputC) PlaceholderStyle(s Style) *InputC {
 // CursorStyle sets the style used for the rendered cursor cell.
 func (i *InputC) CursorStyle(s Style) *InputC {
 	i.cursorStyle = s
+	return i
+}
+
+// StyleRanges styles sub-ranges of the live value (ADR 70). Bind a pointer to a
+// []StyleRange the consumer rebuilds when the value changes (e.g. in OnChange) — runes
+// inside a range render in its Style, runes outside it keep the Input's uniform style,
+// and the cursor cell still wins at the caret. Pass nil (the default) for plain uniform
+// styling — an Input that doesn't set this pays exactly nothing. Useful for highlighting
+// @mentions, search matches, or tokens as the user types.
+func (i *InputC) StyleRanges(ranges *[]StyleRange) *InputC {
+	i.styleRanges = ranges
 	return i
 }
 
@@ -3982,6 +3996,7 @@ func (i *InputC) toTextInput() textInput {
 		PlaceholderStyle: i.placeholderStyle,
 		CursorStyle:      i.cursorStyle,
 		MultiLine:        i.multiline,
+		StyleRanges:      i.styleRanges,
 	}
 	// if managed by focus manager, use focused state for cursor visibility
 	if i.manager != nil {

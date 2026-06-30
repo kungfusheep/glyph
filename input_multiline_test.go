@@ -86,3 +86,137 @@ func TestMultiLineInputRendersWrapped(t *testing.T) {
 		t.Fatalf("wrapped text lost content: %q", all)
 	}
 }
+
+// --- ADR 70: per-range styling on the editable Input ---
+
+// styleRangeAt is the merge-walk core: ascending i, forward cursor, first containing
+// range wins; degenerate/out-of-bounds ranges never match and never crash.
+func TestStyleRangeAt(t *testing.T) {
+	base := Style{FG: RGB(10, 10, 10)}
+	red := Style{FG: RGB(255, 0, 0)}
+	blue := Style{FG: RGB(0, 0, 255)}
+	ranges := []StyleRange{{Start: 2, End: 5, Style: red}, {Start: 7, End: 9, Style: blue}}
+
+	cur := 0
+	want := []Style{base, base, red, red, red, base, base, blue, blue, base}
+	for i, w := range want {
+		if got := styleRangeAt(ranges, i, &cur, base); got != w {
+			t.Errorf("i=%d: got %+v, want %+v", i, got.FG, w.FG)
+		}
+	}
+
+	// degenerate (End<=Start) never matches
+	cur = 0
+	if got := styleRangeAt([]StyleRange{{Start: 3, End: 3, Style: red}}, 3, &cur, base); got != base {
+		t.Error("degenerate range should not match")
+	}
+	// out-of-bounds Start never matches at valid indices; no panic
+	cur = 0
+	if got := styleRangeAt([]StyleRange{{Start: 100, End: 200, Style: red}}, 0, &cur, base); got != base {
+		t.Error("out-of-range range should not match index 0")
+	}
+	// empty/nil ranges → base
+	cur = 0
+	if got := styleRangeAt(nil, 5, &cur, base); got != base {
+		t.Error("nil ranges should return base")
+	}
+}
+
+// A bound StyleRange colours its sub-range of the live value; runes outside it keep the
+// uniform style. (Cursor sits at end, away from the styled span.)
+func TestInputStyleRangesRender(t *testing.T) {
+	val := "hello world"
+	red := Style{FG: RGB(255, 0, 0)}
+	ranges := []StyleRange{{Start: 6, End: 11, Style: red}} // "world"
+
+	tmpl := Build(Input(&val).StyleRanges(&ranges).Width(20))
+	buf := NewBuffer(20, 1)
+	tmpl.Execute(buf, 20, 1)
+
+	if r := buf.Get(6, 0).Rune; r != 'w' {
+		t.Fatalf("cell 6 rune = %q, want 'w' (alignment check)", r)
+	}
+	if fg := buf.Get(6, 0).Style.FG; fg != (RGB(255, 0, 0)) {
+		t.Errorf("styled 'w' FG = %+v, want red", fg)
+	}
+	if fg := buf.Get(0, 0).Style.FG; fg == (RGB(255, 0, 0)) {
+		t.Errorf("unstyled 'h' should not be red, got %+v", fg)
+	}
+}
+
+// No StyleRanges → uniform style, the existing path: text cells share one style.
+// (Compare mid-text cells, never the caret whether the cursor sits at 0 or end.)
+func TestInputStyleRangesNilUniform(t *testing.T) {
+	val := "abcdef"
+	tmpl := Build(Input(&val).Width(20))
+	buf := NewBuffer(20, 1)
+	tmpl.Execute(buf, 20, 1)
+	s := buf.Get(2, 0).Style
+	for x := 3; x < 5; x++ {
+		if buf.Get(x, 0).Style != s {
+			t.Fatalf("nil StyleRanges should render uniform style; cell %d differs from cell 2", x)
+		}
+	}
+}
+
+// Out-of-range entries never crash and never style a valid cell spuriously.
+func TestInputStyleRangesOutOfRangeSafe(t *testing.T) {
+	val := "short"
+	red := Style{FG: RGB(255, 0, 0)}
+	ranges := []StyleRange{{Start: 100, End: 200, Style: red}} // entirely past the value
+	tmpl := Build(Input(&val).StyleRanges(&ranges).Width(20))
+	buf := NewBuffer(20, 1)
+	tmpl.Execute(buf, 20, 1) // must not panic
+	for x := 0; x < 5; x++ {
+		if buf.Get(x, 0).Style.FG == (RGB(255, 0, 0)) {
+			t.Errorf("out-of-range range styled cell %d", x)
+		}
+	}
+}
+
+// The cursor cell wins over a styled range at the caret.
+func TestInputStyleRangesCursorWins(t *testing.T) {
+	state := InputState{Value: "hello", Cursor: 2}
+	group := &FocusGroup{Current: 0}
+	red := Style{FG: RGB(255, 0, 0)}
+	ranges := []StyleRange{{Start: 0, End: 5, Style: red}} // covers the whole word incl. the caret
+	cursorSty := Style{Attr: AttrInverse}
+
+	tmpl := Build(Input(&state.Value).Field(&state).FocusGroup(group, 0).CursorStyle(cursorSty).StyleRanges(&ranges).Width(20))
+	buf := NewBuffer(20, 1)
+	tmpl.Execute(buf, 20, 1)
+
+	// caret at index 2: cursor style wins over the range
+	if a := buf.Get(2, 0).Style.Attr; a&AttrInverse == 0 {
+		t.Errorf("caret cell should keep cursor style (inverse), got attr %v", a)
+	}
+	// a non-caret cell in the range keeps the range style
+	if fg := buf.Get(0, 0).Style.FG; fg != (RGB(255, 0, 0)) {
+		t.Errorf("non-caret range cell FG = %+v, want red", fg)
+	}
+}
+
+// Off-path guarantee (ADR 70): an Input with no StyleRanges allocates nothing per render.
+func BenchmarkInputRenderNilRanges(b *testing.B) {
+	val := "the quick brown fox jumps"
+	tmpl := Build(Input(&val).Width(25))
+	buf := NewBuffer(25, 1)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tmpl.Execute(buf, 25, 1)
+	}
+}
+
+// On-path: styled render is also zero-alloc per frame (the merge-walk allocates nothing).
+func BenchmarkInputRenderStyled(b *testing.B) {
+	val := "the quick brown fox jumps"
+	ranges := []StyleRange{{Start: 4, End: 9, Style: Style{FG: RGB(255, 0, 0)}}, {Start: 16, End: 19, Style: Style{FG: RGB(0, 0, 255)}}}
+	tmpl := Build(Input(&val).StyleRanges(&ranges).Width(25))
+	buf := NewBuffer(25, 1)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tmpl.Execute(buf, 25, 1)
+	}
+}
