@@ -228,13 +228,21 @@ func (f ScrollViewFn) AnchorBottom() ScrollViewFn {
 // ScrollState returns a managed scroll-offset cell. Pass it to ScrollOffset — directly
 // for an instant offset, or wrapped in Animate for a smooth eased scroll. Allocate it
 // ONCE at build (glyph builds the tree once, so this is a setup call, not per-frame).
+//
+// The cell is BIND-ONLY: hand it to ScrollOffset, then drive scroll position through the
+// ScrollView methods (ScrollTo / ScrollDown / HalfPageDown / ScrollToEnd / …), which move
+// it under the layer's scroll mutex. Do NOT write the cell directly (*cell = n) — the
+// render goroutine reads it under that mutex, so a direct write from an input handler is
+// an unsynchronized data race. ScrollTo(n) is the safe equivalent of a direct set.
 func ScrollState() *int { return new(int) }
 
 // ScrollOffset binds the scroll position to a managed offset (ADR 38). The ScrollView's
 // scroll methods — ScrollTo/ScrollDown/HalfPageDown/ScrollToEnd etc. — then drive that
 // offset and blit reads it, so there is ONE source of truth (no stale-pending vs manual
 // race). Pass a *int (e.g. ScrollState()) for an instant offset, or an Animate over it
-// for a smooth eased scroll. Headline form:
+// for a smooth eased scroll. Drive position only through those methods — the bound cell
+// is read under the layer's scroll mutex, so writing it directly off the input goroutine
+// races the render read; use ScrollTo for a programmatic jump. Headline form:
 //
 //	ScrollView.Grow(1).ScrollOffset(Animate(ScrollState()))(rows...)
 //	app.Handle("<C-d>", sv.HalfPageDown) // smooth — sets the target, the offset eases
