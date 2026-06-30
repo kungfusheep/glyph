@@ -23,6 +23,21 @@ type KeyHelpC struct {
 // KeyHelp builds a live key-help component from a binding source — typically
 // app.ActiveBindings. Each frame it lists the active named bindings as aligned
 // "<key>  <label>" rows.
+//
+// Modal vs non-modal — which source to pass:
+//   - NON-MODAL surface (an always-on key bar / HUD over the live view): pass
+//     app.ActiveBindings directly. It reads the active router every frame, so the help
+//     follows view/pane/focus changes live.
+//   - MODAL overlay (e.g. a "?" cheatsheet opened with On.Modal): the overlay's router
+//     becomes the active one while it's up, so a live app.ActiveBindings would show the
+//     OVERLAY's own keys, not the view beneath. Snapshot the bindings ONCE when the
+//     overlay opens (before the modal pushes) and pass a source returning that snapshot:
+//
+//	snap := app.ActiveBindings()        // capture the view's keys at open
+//	KeyHelp(func() []riffkey.Binding { return snap })
+//
+//     This is also better UX — the underlying view is frozen while you read, and
+//     re-snapshotting on each open keeps it current.
 func KeyHelp(source func() []riffkey.Binding) *KeyHelpC {
 	return &KeyHelpC{source: source, gap: 2, humanize: true}
 }
