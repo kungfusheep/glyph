@@ -36,6 +36,7 @@ func (f *FilterLogC) Build() Component       { return f }
 func (f *FormC) Build() Component            { return f }
 func (tr *TriggerC) Build() Component        { return tr }
 func (f *FilterListC[T]) Build() Component   { return f }
+func (c *CompletionC) Build() Component       { return c }
 func (f ForEachC[T]) Build() Component       { return f }
 func (l *ListC[T]) Build() Component         { return l }
 func (c *CheckListC[T]) Build() Component    { return c }
