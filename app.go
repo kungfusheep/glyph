@@ -149,15 +149,6 @@ type App struct {
 	viewDiagWarned map[string]bool // dedup set so each finding prints at most once
 	viewDiagOff    bool            // SetViewDiagnostic(false) silences it
 	diagOut        io.Writer       // nil -> os.Stderr (hook for tests)
-
-	// ActiveBindings cache (keeps KeyHelp zero-alloc per frame): the derived slice
-	// is rebuilt only when the active router changes or a rebind marks it dirty.
-	// The cache fields are touched only on the render goroutine (ActiveBindings runs
-	// during render); bindingCacheDirty is atomic because LoadKeyBindings may set it
-	// off that goroutine.
-	bindingCacheRouter *riffkey.Router
-	bindingCache       []riffkey.Binding
-	bindingCacheDirty  atomic.Bool
 }
 
 // NewApp creates a new TUI application (fullscreen, alternate buffer).
@@ -499,11 +490,6 @@ func (a *App) wireBinding(router *riffkey.Router, b binding) {
 // read it each frame and it always reflects what's bound right now (current view,
 // modal, or focused field). Only Named() bindings appear; unnamed ones are not
 // introspectable. Returns nil before the input loop is running.
-//
-// The result is cached and rebuilt only when the active router changes or a rebind
-// marks it dirty (LoadKeyBindings / InvalidateBindings), so calling it every frame —
-// the intended key-help usage — is zero-alloc in steady state. The returned slice is
-// read-only and valid until the next call; do not retain or mutate it.
 func (a *App) ActiveBindings() []riffkey.Binding {
 	if a.input == nil {
 		return nil
@@ -512,19 +498,8 @@ func (a *App) ActiveBindings() []riffkey.Binding {
 	if cur == nil {
 		return nil
 	}
-	if cur == a.bindingCacheRouter && !a.bindingCacheDirty.Load() {
-		return a.bindingCache
-	}
-	a.bindingCache = cur.Bindings()
-	a.bindingCacheRouter = cur
-	a.bindingCacheDirty.Store(false)
-	return a.bindingCache
+	return cur.Bindings()
 }
-
-// InvalidateBindings forces the next ActiveBindings call to re-derive. Call this if you
-// rebind keys directly on a router (riffkey Rebind/ApplyBindings) rather than through
-// LoadKeyBindings, so the key-help reflects the change.
-func (a *App) InvalidateBindings() { a.bindingCacheDirty.Store(true) }
 
 // LoadKeyBindings applies user-defined key overrides from the standard config file
 // for appName (riffkey's LoadBindings) across the base and all view routers. Only
@@ -544,7 +519,6 @@ func (a *App) LoadKeyBindings(appName string) error {
 	for _, r := range a.viewRouters {
 		apply(r)
 	}
-	a.bindingCacheDirty.Store(true) // patterns may have changed; force a re-derive
 	return firstErr
 }
 
