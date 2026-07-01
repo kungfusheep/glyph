@@ -625,43 +625,55 @@ func (s *selectionList) Down(m any) {
 	}
 }
 
-// PageUp moves selection up by page size (MaxVisible or 10).
-func (s *selectionList) PageUp(m any) {
-	if s.Selected != nil {
-		old := *s.Selected
-		pageSize := 10
-		if s.MaxVisible > 0 {
-			pageSize = s.MaxVisible
-		}
-		*s.Selected -= pageSize
-		if *s.Selected < 0 {
-			*s.Selected = 0
-		}
-		s.ensureVisible()
-		if *s.Selected != old && s.onMove != nil {
-			s.onMove()
-		}
+// pageSize is the step for a FULL page move: the visible window when known (MaxVisible), else a
+// sensible default. Half-page movement is half of this (min 1). Single source for all page steps.
+func (s *selectionList) pageSize() int {
+	if s.MaxVisible > 0 {
+		return s.MaxVisible
+	}
+	return 10
+}
+
+// moveByPage shifts the selection by delta (clamped), scrolls to keep it visible, and fires onMove
+// if the index actually changed — the shared body of the page/half-page movers.
+func (s *selectionList) moveByPage(delta int) {
+	if s.Selected == nil || s.len <= 0 {
+		return
+	}
+	old := *s.Selected
+	*s.Selected += delta
+	if *s.Selected < 0 {
+		*s.Selected = 0
+	}
+	if *s.Selected >= s.len {
+		*s.Selected = s.len - 1
+	}
+	s.ensureVisible()
+	if *s.Selected != old && s.onMove != nil {
+		s.onMove()
 	}
 }
 
-// PageDown moves selection down by page size (MaxVisible or 10).
-func (s *selectionList) PageDown(m any) {
-	if s.Selected != nil && s.len > 0 {
-		old := *s.Selected
-		pageSize := 10
-		if s.MaxVisible > 0 {
-			pageSize = s.MaxVisible
-		}
-		*s.Selected += pageSize
-		if *s.Selected >= s.len {
-			*s.Selected = s.len - 1
-		}
-		s.ensureVisible()
-		if *s.Selected != old && s.onMove != nil {
-			s.onMove()
-		}
+// PageUp moves selection up by a full page (MaxVisible or 10).
+func (s *selectionList) PageUp(m any) { s.moveByPage(-s.pageSize()) }
+
+// PageDown moves selection down by a full page (MaxVisible or 10).
+func (s *selectionList) PageDown(m any) { s.moveByPage(s.pageSize()) }
+
+// halfPageSize is the step for a half-page move — half a full page, never below 1 (so a tiny
+// viewport still advances). This is true-vim ^d/^u (half), distinct from ^f/^b (full).
+func (s *selectionList) halfPageSize() int {
+	if h := s.pageSize() / 2; h > 0 {
+		return h
 	}
+	return 1
 }
+
+// HalfPageUp moves selection up by half a page.
+func (s *selectionList) HalfPageUp(m any) { s.moveByPage(-s.halfPageSize()) }
+
+// HalfPageDown moves selection down by half a page.
+func (s *selectionList) HalfPageDown(m any) { s.moveByPage(s.halfPageSize()) }
 
 // First moves selection to the first item.
 func (s *selectionList) First(m any) {

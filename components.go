@@ -2772,6 +2772,12 @@ func (l *ListC[T]) PageUp(m any) { l.toSelectionList().PageUp(m) }
 // PageDown moves selection down by page size.
 func (l *ListC[T]) PageDown(m any) { l.toSelectionList().PageDown(m) }
 
+// HalfPageUp moves selection up by half a page (true-vim ^u).
+func (l *ListC[T]) HalfPageUp(m any) { l.toSelectionList().HalfPageUp(m) }
+
+// HalfPageDown moves selection down by half a page (true-vim ^d).
+func (l *ListC[T]) HalfPageDown(m any) { l.toSelectionList().HalfPageDown(m) }
+
 // First moves selection to first item.
 func (l *ListC[T]) First(m any) { l.toSelectionList().First(m) }
 
@@ -2792,6 +2798,16 @@ func (l *ListC[T]) BindPageNav(pageDown, pageUp string) *ListC[T] {
 	l.declaredBindings = append(l.declaredBindings,
 		binding{pattern: pageDown, handler: l.PageDown},
 		binding{pattern: pageUp, handler: l.PageUp},
+	)
+	return l
+}
+
+// BindHalfPageNav registers key bindings for HALF-page movement (true-vim ^d/^u), distinct from the
+// full-page BindPageNav (^f/^b). Half a viewport per press, clamped.
+func (l *ListC[T]) BindHalfPageNav(halfDown, halfUp string) *ListC[T] {
+	l.declaredBindings = append(l.declaredBindings,
+		binding{pattern: halfDown, handler: l.HalfPageDown},
+		binding{pattern: halfUp, handler: l.HalfPageUp},
 	)
 	return l
 }
