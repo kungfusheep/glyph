@@ -167,13 +167,12 @@ func (c *CompletionC) moveSel(delta int) {
 // toTemplate expands to the field (wrapped so the dropdown can anchor to its rect)
 // plus, when open, an anchored dropdown of matches.
 func (c *CompletionC) toTemplate() Component {
-	field := HBox.NodeRef(&c.ref)(c.input)
-	dropdown := If(&c.open).Then(
-		Overlay.Below(&c.ref)(
-			c.renderDropdown(),
+	return VBox(
+		HBox.NodeRef(&c.ref)(c.input),
+		If(&c.open).Then(
+			Overlay.Below(&c.ref)(c.renderDropdown()),
 		),
 	)
-	return VBox(field, dropdown)
 }
 
 // renderDropdown is one Custom that draws the visible matches each frame, highlighting
