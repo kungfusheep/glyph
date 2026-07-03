@@ -659,3 +659,43 @@ func BenchmarkLayerBoundOffsetRead(b *testing.B) {
 		_ = boundRead(l)
 	}
 }
+
+// Feather fades content toward the background it actually sits on (the destination
+// cell's BG), not the layer's default style. Regression: with content on a grey panel
+// but a blue default style, the edge was fading toward blue (the wrong colour).
+func TestLayerFeatherFadesTowardDstBackground(t *testing.T) {
+	l := NewLayer()
+	l.SetFeather(3)
+	l.defaultStyle = Style{BG: RGB(0, 0, 255)} // deliberately WRONG (blue) — must not be the fade target
+
+	src := NewBuffer(10, 100)
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 10; x++ {
+			src.SetFast(x, y, Cell{Rune: 'x', Style: Style{FG: RGB(255, 255, 255)}}) // white text, default BG
+		}
+	}
+	l.SetBuffer(src)
+	l.SetViewport(10, 20)
+	l.ScrollTo(40) // top overflows → top edge fades
+
+	// dst pre-filled with the GREY panel the content sits on.
+	dst := NewBuffer(10, 20)
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 10; x++ {
+			dst.SetFast(x, y, Cell{Rune: ' ', Style: Style{BG: RGB(128, 128, 128)}})
+		}
+	}
+	l.blit(dst, 0, 0, 10, 20)
+
+	fg := dst.Get(0, 0).Style.FG // top edge: white faded toward its background
+	// toward grey keeps R==G==B (both endpoints are neutral); toward blue would leave B high, R/G low.
+	if !(fg.R == fg.G && fg.G == fg.B) {
+		t.Errorf("edge FG %+v is not neutral — faded toward a coloured default, not the grey background", fg)
+	}
+	if fg.B >= 255 {
+		t.Errorf("edge FG faded toward the blue default (B=%d); expected fade toward the grey dst background", fg.B)
+	}
+	if !(fg.R > 128 && fg.R < 255) {
+		t.Errorf("edge FG.R=%d, expected between grey(128) and white(255)", fg.R)
+	}
+}

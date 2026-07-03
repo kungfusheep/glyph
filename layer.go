@@ -471,9 +471,17 @@ func (l *Layer) blitFeathered(dst *Buffer, dstX, dstY, width, height, sy, ms int
 		y := dstY + r
 		for x := 0; x < width; x++ {
 			c := l.buffer.Get(x, sy+r)
-			c.Style.FG = lerpIfRGB(c.Style.FG, target, t)
+			// Fade toward the background actually BEHIND this cell — the destination
+			// cell holds the panel/fill drawn before the layer blits — so content
+			// dissolves into whatever it sits on. Fall back to the layer default only
+			// when the destination has no explicit background.
+			bg := dst.Get(dstX+x, y).Style.BG
+			if bg.Mode == ColorDefault {
+				bg = target
+			}
+			c.Style.FG = lerpIfRGB(c.Style.FG, bg, t)
 			if c.Style.BG.Mode != ColorDefault {
-				c.Style.BG = lerpIfRGB(c.Style.BG, target, t)
+				c.Style.BG = lerpIfRGB(c.Style.BG, bg, t)
 			}
 			dst.SetFast(dstX+x, y, c)
 		}
