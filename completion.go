@@ -164,14 +164,29 @@ func (c *CompletionC) moveSel(delta int) {
 	c.sel = (c.sel + delta + len(c.matches)) % len(c.matches)
 }
 
+// close dismisses the dropdown.
+func (c *CompletionC) close() {
+	c.open = false
+	c.matches = c.matches[:0]
+	c.sel = 0
+}
+
 // toTemplate expands to the field (wrapped so the dropdown can anchor to its rect)
-// plus, when open, an anchored dropdown of matches.
+// plus, when open, an anchored dropdown of matches. The dropdown-nav keys live in the
+// If(open) block so they're bound ONLY while the dropdown is up — when it's closed,
+// Up/Down/Esc aren't bound and fall through to the parent (e.g. a composer's
+// Esc-to-cancel) instead of being consumed. Enter stays always-bound (see bindings).
 func (c *CompletionC) toTemplate() Component {
 	return VBox(
 		HBox.NodeRef(&c.ref)(c.input),
-		If(&c.open).Then(
+		If(&c.open).Then(VBox(
+			On(
+				Key("<Up>", func() { c.moveSel(-1) }),
+				Key("<Down>", func() { c.moveSel(1) }),
+				Key("<Esc>", func() { c.close() }),
+			),
 			Overlay.Below(&c.ref)(c.renderDropdown()),
-		),
+		)),
 	)
 }
 
@@ -206,21 +221,19 @@ func (c *CompletionC) renderDropdown() Component {
 // bindings declares the nav keys on the field's router (explicit → they beat the text
 // HandleUnmatched while open; every other key keeps editing). Handlers switch on
 // open-state so the field behaves normally when the dropdown is closed.
+// bindings holds only the ALWAYS-active keys. Enter stays here because its
+// closed-dropdown job (OnSubmit) is real, so it must be bound whether or not the
+// dropdown is open. The dropdown-nav keys (Up/Down/Esc) are NOT here — they're mounted
+// in toTemplate's If(open) block so they only exist while the dropdown is up and,
+// crucially, fall through to the parent when it's closed (so a containing composer's
+// Esc-to-cancel isn't swallowed). See toTemplate.
 func (c *CompletionC) bindings() []binding {
 	return []binding{
-		{pattern: "<Up>", handler: func() { c.moveSel(-1) }},
-		{pattern: "<Down>", handler: func() { c.moveSel(1) }},
 		{pattern: "<Enter>", handler: func() {
 			if c.open {
 				c.pick()
 			} else if c.onSubmit != nil {
 				c.onSubmit()
-			}
-		}},
-		{pattern: "<Esc>", handler: func() {
-			if c.open {
-				c.open = false
-				c.matches = c.matches[:0]
 			}
 		}},
 	}
