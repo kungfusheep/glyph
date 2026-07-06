@@ -1,6 +1,8 @@
 package glyph
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -330,5 +332,71 @@ func BenchmarkV2ExecuteForEachPerItemFlex(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		buf.Clear()
 		tmpl.Execute(buf, 40, int16(n)+10)
+	}
+}
+
+// BenchmarkBigViewFrame is the whole-frame guardrail: a realistic heavy 3-pane view
+// (60 styled list rows + 40 long grapheme-heavy paragraphs, 220x60). Frame cost here
+// times 60fps is the engine's idle animation burn — keep it in low single-digit
+// milliseconds at worst. See also BenchmarkUnboundedListFrame for the pathological case.
+func BenchmarkBigViewFrame(b *testing.B) {
+	type row struct{ Title, Meta, Body string }
+	rows := make([]row, 60)
+	for i := range rows {
+		rows[i] = row{
+			Title: fmt.Sprintf("item %03d — some longish title text here", i),
+			Meta:  "2026-07-06 12:34 · pending · repo/name",
+			Body:  strings.Repeat("the quick brown fox jumps over the lazy dog. ", 4),
+		}
+	}
+	long := strings.Repeat("body text with wide 世界 runes and emoji 🚀 mixed in for grapheme cost. ", 3)
+	para := make([]string, 40)
+	for i := range para {
+		para[i] = long
+	}
+	status := "ready"
+
+	tmpl := Build(VBox(
+		HBox.Gap(1)(
+			VBox.Border(BorderRounded).Grow(1)(
+				ForEach(&rows, func(r *row) Component {
+					return VBox(
+						Text(&r.Title).Bold(),
+						HBox.Gap(1)(Text(&r.Meta).FG(RGB(150, 150, 150)), Text(&r.Body)),
+					)
+				}),
+			),
+			VBox.Border(BorderRounded).Grow(2)(
+				ForEach(&para, func(s *string) Component { return Text(s) }),
+			),
+		),
+		Text(&status),
+	))
+	buf := NewBuffer(220, 60)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tmpl.Execute(buf, 220, 60)
+	}
+}
+
+// BenchmarkUnboundedListFrame is the pathological case: a ForEach bound to a large
+// backlog (2000 grapheme-heavy rows) with only ~60 visible. Layout measures every row
+// in the tree per frame, so this is where measure-all-rows cost shows — the target of
+// text-measurement memoisation.
+func BenchmarkUnboundedListFrame(b *testing.B) {
+	long := strings.Repeat("wide 世界 and 🚀 emoji text in every row to stress measurement. ", 2)
+	items := make([]string, 2000)
+	for i := range items {
+		items[i] = fmt.Sprintf("%04d %s", i, long)
+	}
+	tmpl := Build(VBox(
+		ForEach(&items, func(s *string) Component { return Text(s) }),
+	))
+	buf := NewBuffer(220, 60)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tmpl.Execute(buf, 220, 60)
 	}
 }
