@@ -3001,6 +3001,32 @@ type opText struct {
 	stylePtr   *Style        // dynamic style override (nil = use static)
 	styleCond  conditionNode // conditional style for ForEach (nil = not conditional)
 	charWrap   bool          // true = character-wrap, false = word-wrap (TextBlock only)
+
+	// width memo: grapheme measurement is the layout hot spot (and ForEach items
+	// re-lay-out inside the render pass every frame), yet a text's string rarely
+	// changes between frames. Cache the measured width per unchanged string —
+	// Go string compare short-circuits on pointer+len, so an unchanged bound
+	// string costs a comparison, not a grapheme walk. Per-item texts memoise per
+	// element (bounded by perItemCache's orphan eviction).
+	widthMemo     textWidthMemo
+	itemWidthMemo perItemCache[textWidthMemo]
+}
+
+// textWidthMemo caches one string→display-width measurement.
+type textWidthMemo struct {
+	s     string
+	w     int16
+	valid bool
+}
+
+// width returns the memoised display width of s, re-measuring only when the string
+// actually changed.
+func (m *textWidthMemo) width(s string) int16 {
+	if m.valid && m.s == s {
+		return m.w
+	}
+	m.s, m.w, m.valid = s, int16(StringWidth(s)), true
+	return m.w
 }
 
 func (tx *opText) resolve(elemBase unsafe.Pointer) string {
@@ -3030,16 +3056,18 @@ func (tx *opText) textWidth(elemBase unsafe.Pointer) int16 {
 	// underestimates by 1 for each wide rune, which cascades into row overflow.
 	switch tx.mode {
 	case textPtr:
-		return int16(StringWidth(*tx.ptr))
+		return tx.widthMemo.width(*tx.ptr)
 	case textOff:
 		if elemBase != nil {
-			return int16(StringWidth(*(*string)(unsafe.Pointer(uintptr(elemBase) + tx.off))))
+			s := *(*string)(unsafe.Pointer(uintptr(elemBase) + tx.off))
+			m := tx.itemWidthMemo.getOrCreate(elemBase, func() *textWidthMemo { return &textWidthMemo{} })
+			return m.width(s)
 		}
 		return 10
 	case textFn:
 		if tx.fn != nil {
 			tx.fnCached = tx.fn()
-			return int16(StringWidth(tx.fnCached))
+			return tx.widthMemo.width(tx.fnCached)
 		}
 		return 0
 	case textIntPtr:
@@ -3057,7 +3085,7 @@ func (tx *opText) textWidth(elemBase unsafe.Pointer) int16 {
 		}
 		return 1
 	default:
-		return int16(StringWidth(tx.static))
+		return tx.widthMemo.width(tx.static)
 	}
 }
 
@@ -3132,11 +3160,21 @@ type perItemCache[T any] struct {
 // keeps live items fresh so they survive eviction; a read of an orphaned key returns nil.
 func (c *perItemCache[T]) get(key unsafe.Pointer) *T {
 	c.seq++
+	c.sweepPeriodically()
 	if e := c.m[key]; e != nil {
 		e.seq = c.seq
 		return e.val
 	}
 	return nil
+}
+
+// sweepPeriodically gives orphans a bounded lifetime even when no misses occur (set
+// is the other sweep trigger, but a stable live set after a realloc storm never
+// misses again). Amortised O(1): at most one sweep per cap accesses.
+func (c *perItemCache[T]) sweepPeriodically() {
+	if len(c.m) > perItemCacheCap && c.seq%perItemCacheCap == 0 {
+		c.evict()
+	}
 }
 
 // peek reads the stored value for key WITHOUT stamping the access seq — for a secondary
@@ -3164,6 +3202,7 @@ func (c *perItemCache[T]) set(key unsafe.Pointer, v *T) {
 // One access per call: the steady-state hit is a map lookup + seq write, alloc-free.
 func (c *perItemCache[T]) getOrCreate(key unsafe.Pointer, newFn func() *T) *T {
 	c.seq++
+	c.sweepPeriodically()
 	if e := c.m[key]; e != nil {
 		e.seq = c.seq
 		return e.val
@@ -3181,8 +3220,18 @@ func (c *perItemCache[T]) getOrCreate(key unsafe.Pointer, newFn func() *T) *T {
 // map has overgrown the cap — orphaned elemBases from a reallocated ForEach slice.
 func (c *perItemCache[T]) evict() {
 	if len(c.m) > perItemCacheCap {
+		// age out against the CURRENT map size, not the fixed cap: a list with more
+		// than perItemCacheCap live items touches each entry once per round, so a
+		// cap-relative horizon would falsely evict live entries every frame (churn:
+		// evict → miss → realloc → sweep, every frame, for every item). A horizon of
+		// one full round (plus a cap of grace — under a perfectly regular access
+		// cycle an entry's age reaches exactly len at the moment of its re-touch, and
+		// the sweep must not clip it first) keeps live entries and still sweeps
+		// realloc-orphaned keys, which stop being touched entirely. The cap remains
+		// the sweep trigger.
+		horizon := uint64(len(c.m)) + perItemCacheCap
 		for k, e := range c.m {
-			if c.seq-e.seq >= perItemCacheCap {
+			if c.seq-e.seq >= horizon {
 				delete(c.m, k)
 			}
 		}

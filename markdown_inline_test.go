@@ -157,16 +157,23 @@ func BenchmarkMarkdownSteadyState(b *testing.B) {
 }
 
 // the per-item ForEach cache must stay bounded: a slice that grows by append
-// reallocates, orphaning every elemBase key. Simulate heavy key churn and assert the
-// map doesn't grow without bound.
+// reallocates, orphaning every elemBase key. Eviction is round-relative (eventual):
+// after the churn, re-touching the live generation for a few rounds sweeps the
+// orphans while keeping every live key.
 func TestMarkdownCacheEvictsOrphanedKeys(t *testing.T) {
 	rt := &opRichText{markdown: true}
 	keys := make([]int, perItemCacheCap*3) // distinct real addresses as fake elemBases
 	for i := range keys {
 		rt.mdSpansFor(unsafe.Pointer(&keys[i]), "**x**")
 	}
-	if len(rt.mdCacheMap.m) > perItemCacheCap {
-		t.Fatalf("mdCacheMap unbounded: %d entries (cap %d) — orphaned keys not evicted", len(rt.mdCacheMap.m), perItemCacheCap)
+	live := keys[perItemCacheCap*2:]
+	for round := 0; round < 8; round++ {
+		for i := range live {
+			rt.mdSpansFor(unsafe.Pointer(&live[i]), "**x**")
+		}
+	}
+	if len(rt.mdCacheMap.m) > perItemCacheCap*2 {
+		t.Fatalf("mdCacheMap unbounded: %d entries (live %d) — orphaned keys not evicted within bounded rounds", len(rt.mdCacheMap.m), len(live))
 	}
 }
 

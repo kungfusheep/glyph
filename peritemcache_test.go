@@ -5,7 +5,11 @@ import (
 	"unsafe"
 )
 
-// orphaned keys (from a reallocated ForEach slice) must be swept so the map stays bounded.
+// orphaned keys (from a reallocated ForEach slice) must be swept so the map stays
+// bounded. Eviction is round-relative (age >= one full round of accesses), so it is
+// EVENTUAL, not instant: a fresh burst survives its own round, then dies once the
+// live set is re-touched for a few rounds. (Cap-relative age was the old contract; it
+// falsely evicted live entries every frame on lists larger than the cap — churn.)
 func TestPerItemCacheEvictsOrphans(t *testing.T) {
 	var c perItemCache[int]
 	keys := make([]int, perItemCacheCap*3) // distinct real addresses as fake elemBases
@@ -13,8 +17,46 @@ func TestPerItemCacheEvictsOrphans(t *testing.T) {
 		v := i
 		c.getOrCreate(unsafe.Pointer(&keys[i]), func() *int { return &v })
 	}
-	if len(c.m) > perItemCacheCap {
-		t.Fatalf("unbounded: %d entries (cap %d) — orphaned keys not evicted", len(c.m), perItemCacheCap)
+	// the last generation is the live set now; earlier generations are orphans.
+	live := keys[perItemCacheCap*2:]
+	for round := 0; round < 8; round++ {
+		for i := range live {
+			c.getOrCreate(unsafe.Pointer(&live[i]), func() *int { return new(int) })
+		}
+	}
+	if len(c.m) > perItemCacheCap*2 {
+		t.Fatalf("unbounded: %d entries (live %d) — orphaned keys not evicted within bounded rounds", len(c.m), len(live))
+	}
+	// and the live set survived the sweeps
+	for i := range live {
+		if c.peek(unsafe.Pointer(&live[i])) == nil {
+			t.Fatalf("live key %d evicted by the orphan sweep", i)
+		}
+	}
+}
+
+// a live set LARGER than the cap, touched every round, must not churn: entries stay
+// stable (no re-creation) across frames. This was the defect the round-relative
+// horizon fixes — cap-relative age evicted every entry of a >cap list every frame.
+func TestPerItemCacheNoChurnOnLargeLiveSet(t *testing.T) {
+	var c perItemCache[int]
+	live := make([]int, perItemCacheCap*2) // 2x the cap, all live
+	// warm-up: initial population plus a couple of rounds while sweep boundaries
+	// settle (a handful of just-created entries can be clipped at the first sweeps)
+	for round := 0; round < 3; round++ {
+		for i := range live {
+			c.getOrCreate(unsafe.Pointer(&live[i]), func() *int { return new(int) })
+		}
+	}
+	// steady state: every access must hit — zero re-creation, every round.
+	creates := 0
+	for round := 0; round < 5; round++ {
+		for i := range live {
+			c.getOrCreate(unsafe.Pointer(&live[i]), func() *int { creates++; return new(int) })
+		}
+	}
+	if creates != 0 {
+		t.Fatalf("large live set churned in steady state: %d creates for %d live keys over 5 rounds", creates, len(live))
 	}
 }
 
