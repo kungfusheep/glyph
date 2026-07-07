@@ -81,6 +81,7 @@ type App struct {
 	// effect's animation, skip Execute and re-run effects over the cached render.
 	appDirty          atomic.Bool // a RequestRender happened since the last full render — forces a full Execute. Set outside renderMu (any goroutine), cleared in render(); atomic to order those.
 	effectFramePending atomic.Bool // this frame was requested by an effect's animation (the only case we skip Execute). Set outside renderMu; atomic.
+	animFramePending   atomic.Bool // this frame was requested by a template animation's tick — eligible for the paint-only skip (ExecutePaint). Set outside renderMu; atomic.
 	cleanValid        bool    // cleanBuf holds a valid pristine (pre-effects) render
 	cleanBuf          *Buffer // persistent snapshot of the last full render, before effects
 	lastAnimating     bool    // last Execute reported a template animation — don't skip while animating
@@ -1036,6 +1037,19 @@ func (a *App) requestEffectFrame() {
 	}
 }
 
+// requestAnimFrame schedules a frame for a template animation WITHOUT marking app
+// data dirty. Such a frame may skip the geometry passes when the template can prove
+// nothing geometric moved (Template.ExecutePaint) — the paint-only fast path for
+// opacity/colour oscillators over big, otherwise-static views.
+func (a *App) requestAnimFrame() {
+	a.animFramePending.Store(true)
+	a.reqGen.Add(1)
+	select {
+	case a.renderChan <- struct{}{}:
+	default:
+	}
+}
+
 // RenderNow performs a render immediately without channel coordination.
 // Use this from dedicated update goroutines to avoid scheduler overhead.
 // The render is mutex-protected so it's safe to call concurrently.
@@ -1087,6 +1101,9 @@ func (a *App) render() {
 	// for (via requestEffectFrame) is eligible to skip Execute. A direct render()
 	// or a RequestRender-driven frame always does a full Execute.
 	effectFrame := a.effectFramePending.Swap(false)
+	// consume the anim-frame request: a frame driven only by a template animation's
+	// tick may skip the geometry passes if the template proves nothing moved.
+	animFrame := a.animFramePending.Swap(false)
 
 	var t0, t1 time.Time
 	if DebugTiming {
@@ -1174,7 +1191,17 @@ func (a *App) render() {
 	if jumpActive {
 		a.jumpMode.ClearTargets() // reset the build scratch for a fresh frame
 	}
-	activeTmpl.Execute(buf, int16(size.Width), renderHeight)
+	// paint-only fast path: a frame whose only driver is a template animation's tick
+	// (no dirty data, no full-redraw forcing, no jump rebuild) skips the geometry
+	// passes when the template proves nothing geometric moved. ExecutePaint paints
+	// nothing when it can't prove that, and the full Execute below runs as normal.
+	paintDone := false
+	if animFrame && !a.appDirty.Load() && !a.forceFullFlush && !DebugFullRedraw && !jumpActive && !a.inline {
+		paintDone = activeTmpl.ExecutePaint(buf, int16(size.Width), renderHeight)
+	}
+	if !paintDone {
+		activeTmpl.Execute(buf, int16(size.Width), renderHeight)
+	}
 	if jumpActive {
 		a.jumpMode.AssignLabels() // swap built→Targets + label, atomically
 	}

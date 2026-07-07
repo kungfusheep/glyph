@@ -230,6 +230,22 @@ type Template struct {
 	// animation ticker — runs at ~60fps only while animations are active
 	animTicker    *time.Ticker
 	requestRender func()
+	// requestAnimFrame, when wired, is the ticker's frame request: it does not mark
+	// app data dirty, making the frame eligible for the paint-only skip (ExecutePaint).
+	requestAnimFrame func()
+
+	// paint-only frame gate state (see ExecutePaint): op index lists collected once,
+	// plus the geometry-input snapshot the last full layout recorded.
+	paintOpsCollected bool
+	paintStaticUnsafe bool
+	geomDynOps        []int16
+	geomDynSnap       []geomSnap
+	condOps           []int16
+	forEachOps        []int16
+
+	// opacityArena backs opacity-composite snapshots for the frame (root template
+	// only; reset each frame) so animated-opacity frames are steady-state zero-alloc.
+	opacityArena []Cell
 
 	// root points to the outermost template so sub-templates (If branches,
 	// Overlays, ForEach) register evaluators where Execute actually runs them.
@@ -740,6 +756,7 @@ func (t *Template) SetApp(a *App) {
 	// here — so wiring it in SetApp keeps every template's animations alive.
 	if a != nil {
 		t.requestRender = a.RequestRender
+		t.requestAnimFrame = a.requestAnimFrame
 	}
 }
 
@@ -5565,6 +5582,19 @@ func (t *Template) Execute(buf *Buffer, screenW, screenH int16) {
 	// Phase 2b: Flex distribution (top → down) - expand flex children
 	t.distributeFlexGrow(screenH)
 
+	// record the geometry inputs this layout used, so a later paint-only frame can
+	// verify nothing geometric moved before skipping the passes above (ExecutePaint)
+	t.snapshotGeomInputs()
+
+	t.paintAndFinish(buf, screenW, screenH)
+}
+
+// paintAndFinish is the frame tail shared by Execute and ExecutePaint: NodeRef
+// zeroing, the two paint passes, tween completions, and ticker management.
+func (t *Template) paintAndFinish(buf *Buffer, screenW, screenH int16) {
+	// fresh opacity-snapshot arena for this frame's composites (see snapshotRect)
+	t.opacityArena = t.opacityArena[:0]
+
 	// Zero every NodeRef before rendering: the render walk below repopulates the
 	// ones it actually draws (including retained Out-animating branches, which still
 	// render), so any node NOT rendered this frame keeps zero bounds instead of a
@@ -5597,18 +5627,281 @@ func (t *Template) Execute(buf *Buffer, screenW, screenH int16) {
 		}
 	}
 
-	// manage animation ticker — start at ~60fps when animating, stop when settled
-	if t.animating && t.animTicker == nil && t.requestRender != nil {
+	// manage animation ticker — start at ~60fps when animating, stop when settled.
+	// The tick prefers requestAnimFrame (a frame request that does NOT mark app
+	// data dirty, so it is eligible for the paint-only skip) and falls back to
+	// requestRender for callers that never wired the hook.
+	if t.animating && t.animTicker == nil && (t.requestAnimFrame != nil || t.requestRender != nil) {
+		tick := t.requestAnimFrame
+		if tick == nil {
+			tick = t.requestRender
+		}
 		t.animTicker = time.NewTicker(16 * time.Millisecond)
 		go func() {
 			for range t.animTicker.C {
-				t.requestRender()
+				tick()
 			}
 		}()
 	} else if !t.animating && t.animTicker != nil {
 		t.animTicker.Stop()
 		t.animTicker = nil
 	}
+}
+
+// ExecutePaint runs a paint-only frame: reactive bindings advance (phase 0) and the
+// two paint passes run over the geometry computed by the last full Execute — the two
+// geometry passes are skipped entirely. It returns false, painting nothing, when it
+// cannot PROVE geometry is unchanged; the caller must then run a full Execute.
+// (Phase 0 having run twice is harmless: tween evals are time-based, not step-based.)
+//
+// Rather than classifying every tween, the gate VERIFIES the geometry inputs
+// directly: dynamic width/height/flex/percent/gap values are compared against the
+// snapshot the last full layout recorded, If/Switch branches are checked for flips
+// or running exit animations, and ForEach lengths are compared to their laid-out
+// item counts — recursively through the active branches. Anything moved, anything
+// per-item animated, or anything not yet provably stable ⇒ full frame.
+func (t *Template) ExecutePaint(buf *Buffer, screenW, screenH int16) bool {
+	t.pendingOverlays = t.pendingOverlays[:0]
+	t.pendingScreenEffects = t.pendingScreenEffects[:0]
+
+	if t.nowFn != nil {
+		t.frameTime = t.nowFn()
+	} else {
+		t.frameTime = time.Now()
+	}
+	if t.oscEpoch.IsZero() {
+		t.oscEpoch = t.frameTime
+	}
+	t.animating = false
+	for _, eval := range t.evals {
+		eval()
+	}
+
+	if !t.paintSafe() {
+		return false
+	}
+
+	t.paintAndFinish(buf, screenW, screenH)
+	return true
+}
+
+// geomSnap is one op's recorded geometry inputs from the last full layout.
+type geomSnap struct {
+	w, h   int16
+	gap    int8
+	flex   float32
+	pct    float32
+}
+
+// collectPaintOps gathers, once, the op indices the paint-only gate must inspect:
+// ops with dynamic geometry inputs, If/Switch branch points, and ForEach loops. It
+// also decides paintStaticUnsafe — conditions under which this template can never
+// prove a frame paint-safe: per-item evals (they advance inside the passes), a
+// ForEach whose item template is itself unsafe or contains branch points/geometry
+// dyns (per-item state can't be snapshotted cheaply), or a branch sub-template
+// carrying dynamic geometry (rare enough to take the full frame).
+func (t *Template) collectPaintOps() {
+	if t.paintOpsCollected {
+		return
+	}
+	t.paintOpsCollected = true
+	if len(t.itemEvals) > 0 {
+		t.paintStaticUnsafe = true
+	}
+	for i := range t.ops {
+		op := &t.ops[i]
+		if op.Dyn != nil && (op.Dyn.Width != nil || op.Dyn.Height != nil ||
+			op.Dyn.FlexGrow != nil || op.Dyn.PercentWidth != nil || op.Dyn.Gap != nil) {
+			t.geomDynOps = append(t.geomDynOps, int16(i))
+		}
+		switch op.Kind {
+		case OpIf, OpSwitch:
+			t.condOps = append(t.condOps, int16(i))
+		case OpForEach:
+			t.forEachOps = append(t.forEachOps, int16(i))
+			fe := op.Ext.(*opForEach)
+			if fe.iterTmpl != nil && subtreePaintUnsafe(fe.iterTmpl) {
+				t.paintStaticUnsafe = true
+			}
+		}
+	}
+	t.geomDynSnap = make([]geomSnap, len(t.geomDynOps))
+}
+
+// subtreePaintUnsafe reports whether a ForEach item template (or anything below it)
+// rules out paint-only frames: item evals, branch points, geometry dyns, or nested
+// loops whose own item templates are unsafe. Per-item state has no cheap snapshot,
+// so any of these inside a loop takes the conservative full frame.
+func subtreePaintUnsafe(tmpl *Template) bool {
+	if tmpl == nil {
+		return false
+	}
+	if len(tmpl.itemEvals) > 0 || len(tmpl.evals) > 0 {
+		return true
+	}
+	for i := range tmpl.ops {
+		op := &tmpl.ops[i]
+		if op.Dyn != nil && (op.Dyn.Width != nil || op.Dyn.Height != nil ||
+			op.Dyn.FlexGrow != nil || op.Dyn.PercentWidth != nil || op.Dyn.Gap != nil) {
+			return true
+		}
+		switch op.Kind {
+		case OpIf, OpSwitch, OpForEach:
+			return true
+		}
+	}
+	return false
+}
+
+// snapshotGeomInputs records the current dynamic geometry values after a full
+// layout, giving the paint-only gate its baseline. Root-level ops only; branch
+// sub-templates with geometry dyns are handled by the static-unsafe rule instead.
+func (t *Template) snapshotGeomInputs() {
+	t.collectPaintOps()
+	for si, oi := range t.geomDynOps {
+		d := t.ops[oi].Dyn
+		var s geomSnap
+		if d.Width != nil {
+			s.w = *d.Width
+		}
+		if d.Height != nil {
+			s.h = *d.Height
+		}
+		if d.Gap != nil {
+			s.gap = *d.Gap
+		}
+		if d.FlexGrow != nil {
+			s.flex = *d.FlexGrow
+		}
+		if d.PercentWidth != nil {
+			s.pct = *d.PercentWidth
+		}
+		t.geomDynSnap[si] = s
+	}
+}
+
+// paintSafe verifies, after phase 0, that geometry cannot have moved since the last
+// full layout: no dynamic geometry input changed, no If/Switch wants a different
+// branch (or is exit-animating), every ForEach length matches its laid-out count,
+// and the same holds recursively through the currently-active branch sub-templates.
+func (t *Template) paintSafe() bool {
+	t.collectPaintOps()
+	if t.paintStaticUnsafe {
+		return false
+	}
+	for si, oi := range t.geomDynOps {
+		d := t.ops[oi].Dyn
+		prev := t.geomDynSnap[si]
+		if d.Width != nil && *d.Width != prev.w {
+			return false
+		}
+		if d.Height != nil && *d.Height != prev.h {
+			return false
+		}
+		if d.Gap != nil && *d.Gap != prev.gap {
+			return false
+		}
+		if d.FlexGrow != nil && *d.FlexGrow != prev.flex {
+			return false
+		}
+		if d.PercentWidth != nil && *d.PercentWidth != prev.pct {
+			return false
+		}
+	}
+	for _, oi := range t.condOps {
+		op := &t.ops[oi]
+		switch op.Kind {
+		case OpIf:
+			ifExt := op.Ext.(*opIf)
+			branches, requested := ifBranches(ifExt, nil)
+			sel := ifExt.selector(nil)
+			if !sel.initialized || sel.exiting || sel.selected != requested {
+				return false
+			}
+			if sub := branchAt(branches, sel.selected); sub != nil {
+				if sub.paintStaticUnsafeCheck() || !sub.branchPaintSafe() {
+					return false
+				}
+			}
+		case OpSwitch:
+			swExt := op.Ext.(*opSwitch)
+			branches, requested := switchBranches(swExt, nil)
+			sel := &swExt.branch
+			if !sel.initialized || sel.exiting || sel.selected != requested {
+				return false
+			}
+			if sub := branchAt(branches, sel.selected); sub != nil {
+				if sub.paintStaticUnsafeCheck() || !sub.branchPaintSafe() {
+					return false
+				}
+			}
+		}
+	}
+	for _, oi := range t.forEachOps {
+		fe := t.ops[oi].Ext.(*opForEach)
+		hdr, ok := fe.sliceHeaderFor(nil)
+		if !ok {
+			return false
+		}
+		if fe.visibleLen(nil, hdr.Len) != len(fe.geoms) {
+			return false
+		}
+	}
+	return true
+}
+
+// paintStaticUnsafeCheck collects (once) and reports whether a branch sub-template
+// statically rules out paint frames: per-item evals or dynamic geometry of its own.
+// Branch geometry dyns are not snapshotted (they may not have been laid out when the
+// root snapshot ran), so their presence takes the full frame.
+func (t *Template) paintStaticUnsafeCheck() bool {
+	t.collectPaintOps()
+	return t.paintStaticUnsafe || len(t.geomDynOps) > 0
+}
+
+// branchPaintSafe is paintSafe for an active branch sub-template: branch flips,
+// exits, and ForEach lengths — geometry dyns are excluded by paintStaticUnsafeCheck.
+func (t *Template) branchPaintSafe() bool {
+	for _, oi := range t.condOps {
+		op := &t.ops[oi]
+		switch op.Kind {
+		case OpIf:
+			ifExt := op.Ext.(*opIf)
+			branches, requested := ifBranches(ifExt, nil)
+			sel := ifExt.selector(nil)
+			if !sel.initialized || sel.exiting || sel.selected != requested {
+				return false
+			}
+			if sub := branchAt(branches, sel.selected); sub != nil {
+				if sub.paintStaticUnsafeCheck() || !sub.branchPaintSafe() {
+					return false
+				}
+			}
+		case OpSwitch:
+			swExt := op.Ext.(*opSwitch)
+			branches, requested := switchBranches(swExt, nil)
+			sel := &swExt.branch
+			if !sel.initialized || sel.exiting || sel.selected != requested {
+				return false
+			}
+			if sub := branchAt(branches, sel.selected); sub != nil {
+				if sub.paintStaticUnsafeCheck() || !sub.branchPaintSafe() {
+					return false
+				}
+			}
+		}
+	}
+	for _, oi := range t.forEachOps {
+		fe := t.ops[oi].Ext.(*opForEach)
+		hdr, ok := fe.sliceHeaderFor(nil)
+		if !ok {
+			return false
+		}
+		if fe.visibleLen(nil, hdr.Len) != len(fe.geoms) {
+			return false
+		}
+	}
+	return true
 }
 
 // distributeWidths assigns W to all ops, top-down.
@@ -7766,11 +8059,28 @@ func (t *Template) opacityForOp(op *Op) (float64, bool) {
 	return clampOpacity(*op.Dyn.Opacity), true
 }
 
+// snapshotRect captures the cells behind an opacity-composited region. Backings are
+// carved from a per-frame arena on the root template (reset each frame in
+// paintAndFinish) so steady-state animated-opacity frames allocate nothing. Growth
+// mid-frame is safe: earlier backings keep referencing the old array, whose contents
+// are intact — compose only ever reads them.
 func (t *Template) snapshotRect(buf *Buffer, x, y, w, h int) []Cell {
 	if w <= 0 || h <= 0 {
 		return nil
 	}
-	cells := make([]Cell, w*h)
+	r := t.evalRoot()
+	start := len(r.opacityArena)
+	need := w * h
+	if cap(r.opacityArena) < start+need {
+		// grow the arena; earlier backings keep referencing the old array, which is
+		// exactly what their composes will read
+		grown := make([]Cell, start+need, (start+need)*2)
+		copy(grown, r.opacityArena)
+		r.opacityArena = grown
+	} else {
+		r.opacityArena = r.opacityArena[:start+need]
+	}
+	cells := r.opacityArena[start : start+need]
 	for cy := 0; cy < h; cy++ {
 		for cx := 0; cx < w; cx++ {
 			cells[cy*w+cx] = buf.Get(x+cx, y+cy)

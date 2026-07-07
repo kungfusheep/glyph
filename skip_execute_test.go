@@ -2,6 +2,7 @@ package glyph
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -319,5 +320,137 @@ func TestDodgeReleasesAfterOverlayCloseThroughAppPath(t *testing.T) {
 	}
 	if ref.W != 0 || ref.H != 0 {
 		t.Errorf("ref resurrected on effect-only frames: W%d H%d (phantom dodge persists)", ref.W, ref.H)
+	}
+}
+
+// --- paint-only frames (frame-cost ADR, slice 1) ---
+
+// paintProbe counts geometry-pass entries (measure) vs paint-pass entries (render),
+// letting tests assert a frame skipped layout without any engine hooks.
+func paintProbe(measures, renders *int) Component {
+	return Custom(
+		func(availW int16) (int16, int16) { *measures++; return 5, 1 },
+		func(buf *Buffer, x, y, w, h int16) { *renders++ },
+	)
+}
+
+// An opacity-oscillator frame with stable geometry skips the geometry passes and
+// re-runs only paint; the skip must also keep output correct (opacity advances).
+func TestExecutePaintSkipsGeometryPasses(t *testing.T) {
+	var measures, renders int
+	tmpl := Build(VBox(
+		paintProbe(&measures, &renders),
+		Text("breathing").Opacity(Osc(1)),
+	))
+	clock := time.Unix(1000, 0)
+	tmpl.nowFn = func() time.Time { return clock }
+	buf := NewBuffer(40, 5)
+
+	tmpl.Execute(buf, 40, 5) // full frame lays out + snapshots
+	mAfterFull, rAfterFull := measures, renders
+	if mAfterFull == 0 || rAfterFull == 0 {
+		t.Fatalf("full frame should measure and render (m=%d r=%d)", mAfterFull, rAfterFull)
+	}
+
+	clock = clock.Add(100 * time.Millisecond)
+	if !tmpl.ExecutePaint(buf, 40, 5) {
+		t.Fatal("stable-geometry opacity animation should be paint-safe")
+	}
+	if measures != mAfterFull {
+		t.Errorf("paint frame ran the geometry passes: measures %d -> %d", mAfterFull, measures)
+	}
+	if renders <= rAfterFull {
+		t.Errorf("paint frame did not repaint: renders %d -> %d", rAfterFull, renders)
+	}
+}
+
+// A geometry tween (animated Height) must refuse the paint-only path.
+func TestExecutePaintRefusesGeometryTween(t *testing.T) {
+	target := 3
+	tmpl := Build(VBox(
+		VBox.Height(Animate.Duration(200*time.Millisecond)(&target))(Text("sized")),
+	))
+	clock := time.Unix(1000, 0)
+	tmpl.nowFn = func() time.Time { return clock }
+	buf := NewBuffer(40, 10)
+
+	tmpl.Execute(buf, 40, 10)
+	target = 8 // retarget: the dyn height value starts moving
+	// the retarget frame itself may legitimately paint-skip (the tween starts at the
+	// old value, so geometry is unchanged THAT frame); the gate must refuse as soon
+	// as the value actually moves — within a few ticks of the 200ms tween.
+	refused := false
+	for i := 0; i < 5; i++ {
+		clock = clock.Add(50 * time.Millisecond)
+		if !tmpl.ExecutePaint(buf, 40, 10) {
+			refused = true
+			break
+		}
+	}
+	if !refused {
+		t.Fatal("a moving height tween must force a full frame once the value moves")
+	}
+}
+
+// An If flip between frames must refuse the paint-only path (structure changed).
+func TestExecutePaintRefusesIfFlip(t *testing.T) {
+	show := false
+	tmpl := Build(VBox(
+		Text("always"),
+		If(&show).Then(Text("sometimes")),
+	))
+	buf := NewBuffer(40, 5)
+	tmpl.Execute(buf, 40, 5)
+
+	show = true
+	if tmpl.ExecutePaint(buf, 40, 5) {
+		t.Fatal("a flipped If must force the full frame")
+	}
+	// after a full frame with the new branch, stable again — but with no animation
+	// running the caller wouldn't be on the paint path anyway; verify safety only.
+	tmpl.Execute(buf, 40, 5)
+	if !tmpl.paintSafe() {
+		t.Fatal("stable If should verify paint-safe after the full frame")
+	}
+}
+
+// A ForEach length change must refuse the paint-only path.
+func TestExecutePaintRefusesForEachGrowth(t *testing.T) {
+	items := []string{"a", "b", "c"}
+	tmpl := Build(VBox(
+		ForEach(&items, func(s *string) Component { return Text(s) }),
+	))
+	buf := NewBuffer(40, 10)
+	tmpl.Execute(buf, 40, 10)
+
+	if !tmpl.paintSafe() {
+		t.Fatal("unchanged ForEach should be paint-safe")
+	}
+	items = append(items, "d")
+	if tmpl.ExecutePaint(buf, 40, 10) {
+		t.Fatal("a grown ForEach must force the full frame")
+	}
+}
+
+// The headline: an opacity oscillator over the pathological unbounded list renders
+// paint-only frames at render cost, not layout cost.
+func BenchmarkPaintOnlyFrameUnboundedList(b *testing.B) {
+	long := strings.Repeat("wide 世界 and 🚀 emoji text in every row to stress measurement. ", 2)
+	items := make([]string, 2000)
+	for i := range items {
+		items[i] = fmt.Sprintf("%04d %s", i, long)
+	}
+	tmpl := Build(VBox(
+		Text("status dot").Opacity(Osc(1)),
+		ForEach(&items, func(s *string) Component { return Text(s) }),
+	))
+	buf := NewBuffer(220, 60)
+	tmpl.Execute(buf, 220, 60) // one full frame to lay out + snapshot
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !tmpl.ExecutePaint(buf, 220, 60) {
+			b.Fatal("expected paint-safe frame")
+		}
 	}
 }
