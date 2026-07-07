@@ -494,3 +494,53 @@ func TestDirectRenderNeverPaintSkips(t *testing.T) {
 		t.Fatal("paced anim frame did not repaint")
 	}
 }
+
+// Paced (anim-tick) frames must be pixel-identical to full frames through a modal's
+// whole In-fade lifecycle — the composition is a help-overlay shape: If → screen
+// effect (dodged vignette) → centred Overlay → VBox.Opacity(In/Out). Regression for
+// the live report of a modal fade freezing when driven by paced frames.
+func TestModalFadePacedMatchesFullFrames(t *testing.T) {
+	var ref NodeRef
+	run := func(paced bool) string {
+		show := false
+		tmpl := Build(VBox(
+			Text("background row asdf asdf asdf"),
+			If(&show).Then(VBox(
+				ScreenEffect(SEVignette().Dodge(&ref).Strength(0.8)),
+				Overlay.Centered()(
+					VBox.Width(20).Fill(RGB(80, 80, 80)).NodeRef(&ref).
+						Opacity(In(Animate(1.0)).Out(Animate(0)))(
+						Text("modal content").FG(RGB(255, 255, 255)),
+					),
+				),
+			)),
+		))
+		clock := time.Unix(1000, 0)
+		tmpl.nowFn = func() time.Time { return clock }
+		app := newEffectTestApp(tmpl, 40, 9)
+		app.render() // closed
+		show = true
+		app.RequestRender()
+		app.render() // open: overlay appears, In-tween arms
+		out := ""
+		for i := 0; i < 12; i++ {
+			clock = clock.Add(40 * time.Millisecond)
+			if paced {
+				app.requestAnimFrame()
+				app.renderPaced()
+			} else {
+				app.RequestRender()
+				app.render()
+			}
+			s1 := app.screen.back.Get(2, 0).Style  // background text under the vignette
+			s2 := app.screen.back.Get(20, 4).Style // modal content cell
+			out += fmt.Sprintf("%v|%v|%v;", s1, s2, tmpl.Animating())
+		}
+		return out
+	}
+	full := run(false)
+	pacedRun := run(true)
+	if full != pacedRun {
+		t.Fatalf("paced fade diverges from full frames:\nfull:  %s\npaced: %s", full, pacedRun)
+	}
+}
