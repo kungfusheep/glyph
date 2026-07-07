@@ -469,6 +469,7 @@ func TestDirectRenderNeverPaintSkips(t *testing.T) {
 		ForEach(&items, func(s *string) Component { return Text(s) }),
 	))
 	app := newEffectTestApp(tmpl, 40, 10)
+	app.EnablePaintFrames()
 
 	app.render() // first full frame lays out + snapshots
 	mAfterFull := measures
@@ -518,6 +519,7 @@ func TestModalFadePacedMatchesFullFrames(t *testing.T) {
 		clock := time.Unix(1000, 0)
 		tmpl.nowFn = func() time.Time { return clock }
 		app := newEffectTestApp(tmpl, 40, 9)
+		app.EnablePaintFrames()
 		app.render() // closed
 		show = true
 		app.RequestRender()

@@ -82,6 +82,7 @@ type App struct {
 	appDirty          atomic.Bool // a RequestRender happened since the last full render — forces a full Execute. Set outside renderMu (any goroutine), cleared in render(); atomic to order those.
 	effectFramePending atomic.Bool // this frame was requested by an effect's animation (the only case we skip Execute). Set outside renderMu; atomic.
 	animFramePending   atomic.Bool // this frame was requested by a template animation's tick — eligible for the paint-only skip (ExecutePaint). Set outside renderMu; atomic.
+	paintFramesOn      bool        // opt-in (EnablePaintFrames): allow anim ticks to take the paint-only skip. Default off while the skip hardens against real-world compositions.
 	cleanValid        bool    // cleanBuf holds a valid pristine (pre-effects) render
 	cleanBuf          *Buffer // persistent snapshot of the last full render, before effects
 	lastAnimating     bool    // last Execute reported a template animation — don't skip while animating
@@ -1037,6 +1038,15 @@ func (a *App) requestEffectFrame() {
 	}
 }
 
+// EnablePaintFrames opts in to the paint-only animation fast path: frames driven
+// purely by a template animation's tick skip the geometry passes when the template
+// proves nothing geometric moved. Off by default while the skip hardens against
+// real-world compositions — a full frame is always correct; the skip is only faster.
+func (a *App) EnablePaintFrames() *App {
+	a.paintFramesOn = true
+	return a
+}
+
 // requestAnimFrame schedules a frame for a template animation WITHOUT marking app
 // data dirty. Such a frame may skip the geometry passes when the template can prove
 // nothing geometric moved (Template.ExecutePaint) — the paint-only fast path for
@@ -1208,7 +1218,7 @@ func (a *App) renderFrom(animFrame bool) {
 	// passes when the template proves nothing geometric moved. ExecutePaint paints
 	// nothing when it can't prove that, and the full Execute below runs as normal.
 	paintDone := false
-	if animFrame && !a.appDirty.Load() && !a.forceFullFlush && !DebugFullRedraw && !jumpActive && !a.inline {
+	if a.paintFramesOn && animFrame && !a.appDirty.Load() && !a.forceFullFlush && !DebugFullRedraw && !jumpActive && !a.inline {
 		paintDone = activeTmpl.ExecutePaint(buf, int16(size.Width), renderHeight)
 	}
 	if !paintDone {
