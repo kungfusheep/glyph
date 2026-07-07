@@ -454,3 +454,43 @@ func BenchmarkPaintOnlyFrameUnboundedList(b *testing.B) {
 		}
 	}
 }
+
+// A DIRECT render() call (the input path renders synchronously; RenderNow; resize)
+// must never take the paint-only skip, even when an animation tick has flagged a
+// pending anim frame — direct frames can carry state changed without RequestRender,
+// and painting them over stale geometry is exactly the live-bug this regressed as.
+// Only the debounce goroutine's renderPaced may consume the anim flag.
+func TestDirectRenderNeverPaintSkips(t *testing.T) {
+	var measures, renders int
+	items := []string{"a", "b"}
+	tmpl := Build(VBox(
+		paintProbe(&measures, &renders),
+		Text("dot").Opacity(Osc(1)),
+		ForEach(&items, func(s *string) Component { return Text(s) }),
+	))
+	app := newEffectTestApp(tmpl, 40, 10)
+
+	app.render() // first full frame lays out + snapshots
+	mAfterFull := measures
+
+	// an animation tick raced in, then input mutated state and rendered DIRECTLY
+	// (no RequestRender — the input callback's synchronous path)
+	app.requestAnimFrame()
+	items = append(items, "c")
+	app.render()
+	if measures <= mAfterFull {
+		t.Fatal("direct render() with a pending anim flag skipped layout — stale geometry for the grown list")
+	}
+
+	// the paced path still gets the skip when geometry is genuinely stable
+	mAfterFull = measures
+	rBefore := renders
+	app.requestAnimFrame()
+	app.renderPaced()
+	if measures != mAfterFull {
+		t.Fatalf("paced anim frame with stable geometry should skip layout (measures %d -> %d)", mAfterFull, measures)
+	}
+	if renders <= rBefore {
+		t.Fatal("paced anim frame did not repaint")
+	}
+}

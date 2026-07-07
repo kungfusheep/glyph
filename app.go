@@ -1080,8 +1080,19 @@ func (a *App) Resume() {
 	a.ForceRedraw()
 }
 
-// render performs the actual render if needed.
-func (a *App) render() {
+// render performs the actual render if needed. Direct callers (the input callback,
+// RenderNow, resize) never take the paint-only skip — their frames may carry state
+// changes made without RequestRender, so only the debounce goroutine (renderPaced),
+// whose frames can be pure animation ticks, passes anim-frame eligibility through.
+func (a *App) render() { a.renderFrom(false) }
+
+// renderPaced is the debounce goroutine's render: the one entry point allowed to
+// consume a pending anim-tick and attempt the paint-only skip.
+func (a *App) renderPaced() {
+	a.renderFrom(a.animFramePending.Swap(false))
+}
+
+func (a *App) renderFrom(animFrame bool) {
 	if a.suspended.Load() {
 		return // terminal handed to an external program — draw nothing
 	}
@@ -1101,9 +1112,10 @@ func (a *App) render() {
 	// for (via requestEffectFrame) is eligible to skip Execute. A direct render()
 	// or a RequestRender-driven frame always does a full Execute.
 	effectFrame := a.effectFramePending.Swap(false)
-	// consume the anim-frame request: a frame driven only by a template animation's
-	// tick may skip the geometry passes if the template proves nothing moved.
-	animFrame := a.animFramePending.Swap(false)
+	// animFrame (parameter) is set only by renderPaced: a frame driven purely by a
+	// template animation's tick may skip the geometry passes if the template proves
+	// nothing moved. Direct render() calls never set it — their frames may carry
+	// state changed without RequestRender (the input path renders synchronously).
 
 	var t0, t1 time.Time
 	if DebugTiming {
@@ -1613,7 +1625,7 @@ func (a *App) handleRenderRequests() {
 			case <-a.renderChan:
 			default:
 			}
-			a.render()
+			a.renderPaced()
 		}
 	}
 }
