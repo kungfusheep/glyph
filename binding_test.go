@@ -408,6 +408,32 @@ func TestKeyHelpRendersActiveBindings(t *testing.T) {
 	}
 }
 
+func TestKeyHelpPreservesUnderlyingBG(t *testing.T) {
+	src := func() []riffkey.Binding {
+		return []riffkey.Binding{{Name: "quit", Pattern: "q"}}
+	}
+	help := KeyHelp(src)
+	buf := NewBuffer(20, 1)
+	floatBG := RGB(40, 40, 60)
+	fill := Style{BG: floatBG}
+	for x := 0; x < 20; x++ {
+		buf.Set(x, 0, NewCell(' ', fill))
+	}
+	help.Render(buf, 0, 0, 20, 1)
+	for x := 0; x < 6; x++ { // "q  Quit" span
+		c := buf.Get(x, 0)
+		if c.Rune == 0 || c.Rune == ' ' {
+			continue
+		}
+		if c.Style.BG != floatBG {
+			t.Fatalf("cell %d rune %q BG = %+v, want underlying fill BG %+v", x, c.Rune, c.Style.BG, floatBG)
+		}
+		if c.Style.Attr.Has(AttrPreserveBG) {
+			t.Fatalf("cell %d leaked AttrPreserveBG into the buffer", x)
+		}
+	}
+}
+
 // bindingRowString reads row y of buf as a string (test helper).
 func bindingRowString(buf *Buffer, y, w int) string {
 	var b strings.Builder

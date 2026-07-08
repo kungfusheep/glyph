@@ -101,14 +101,24 @@ func (h *KeyHelpC) Render(buf *Buffer, x, y, w, height int) {
 	rows := h.rows()
 	keyW := h.keyColWidth(rows)
 	labelX := keyW + h.gap
+	// no BG API on KeyHelp: composite over whatever fill is beneath instead of
+	// stamping default-BG chips over it
+	keyStyle := h.keyStyle
+	if keyStyle.BG.Mode == ColorDefault {
+		keyStyle.Attr = keyStyle.Attr.With(AttrPreserveBG)
+	}
+	descStyle := h.descStyle
+	if descStyle.BG.Mode == ColorDefault {
+		descStyle.Attr = descStyle.Attr.With(AttrPreserveBG)
+	}
 	for i, b := range rows {
 		if i >= height {
 			break // viewport-bounded: never paint past the allocated rows
 		}
 		row := y + i
-		buf.WriteStringClipped(x, row, b.Pattern, h.keyStyle, w)
+		buf.WriteStringClipped(x, row, b.Pattern, keyStyle, w)
 		if rem := w - labelX; rem > 0 {
-			buf.WriteStringClipped(x+labelX, row, h.label(b.Name), h.descStyle, rem)
+			buf.WriteStringClipped(x+labelX, row, h.label(b.Name), descStyle, rem)
 		}
 	}
 }
