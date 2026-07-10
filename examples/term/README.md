@@ -11,3 +11,11 @@ Scope, deliberately small:
 - a status line naming the panes
 
 Not scope: sessions, detach/reattach persistence, copy mode, configuration.
+
+Full-screen programs (vim, htop, less) do not render yet: they drive the
+alternate screen buffer, which is a later slice of the terminal component. A
+plain shell and line-oriented tools (ls, cat, git, pipelines) render correctly.
+
+Keys: `Ctrl-B` then `%` split side by side, `"` split stacked, `o` cycle focus,
+`x` close the pane. Every other key goes to the focused shell. The app exits
+when the last shell does.
