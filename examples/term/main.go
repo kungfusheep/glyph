@@ -41,6 +41,12 @@ const maxPanes = 16
 // under mu from the input and pty-reader goroutines; the layout function reads
 // the tree under the same lock on the render goroutine.
 type ui struct {
+	// apply marshals a mutation onto the render goroutine, to run at frame top
+	// before Execute reads anything. Every write to bound state goes through it:
+	// the template iterates `chips` with no host lock, and pane exits arrive on a
+	// pty reader goroutine, so a plain mutex on the write side cannot make that
+	// read safe. App.Apply is the seam glyph provides for exactly this.
+	apply  func(func())
 	render func() // repaint request
 	stop   func() // last shell exited
 
@@ -74,8 +80,8 @@ type chip struct {
 // newUI builds the pane pool and the initial single-pane tree. tune, when set,
 // configures every terminal in the pool; tests use it to pin a deterministic
 // shell.
-func newUI(render, stop func(), tune func(*termpkg.TermC)) *ui {
-	u := &ui{render: render, stop: stop}
+func newUI(apply func(func()), render, stop func(), tune func(*termpkg.TermC)) *ui {
+	u := &ui{apply: apply, render: render, stop: stop}
 	for i := maxPanes - 1; i >= 0; i-- {
 		slot := i
 		t := termpkg.New().
@@ -95,10 +101,11 @@ func newUI(render, stop func(), tune func(*termpkg.TermC)) *ui {
 
 // resize records the screen box the layout works from.
 func (u *ui) resize(w, h int) {
-	u.mu.Lock()
-	u.w, u.h = w, h
-	u.mu.Unlock()
-	u.render()
+	u.apply(func() {
+		u.mu.Lock()
+		u.w, u.h = w, h
+		u.mu.Unlock()
+	})
 }
 
 // view is the whole screen, compiled once. Splits, focus changes and pane deaths
@@ -125,7 +132,7 @@ func (u *ui) view() Component {
 
 func main() {
 	app := NewApp()
-	u := newUI(app.RequestRender, app.Stop, nil)
+	u := newUI(app.Apply, app.RequestRender, app.Stop, nil)
 
 	app.SetView(u.view())
 
@@ -258,21 +265,23 @@ func (u *ui) sync() {
 }
 
 func (u *ui) split(horizontal bool) {
-	u.mu.Lock()
-	if p := u.newPane(); p != nil {
-		u.tree.splitFocused(horizontal, p)
-	}
-	u.sync()
-	u.mu.Unlock()
-	u.render()
+	u.apply(func() {
+		u.mu.Lock()
+		defer u.mu.Unlock()
+		if p := u.newPane(); p != nil {
+			u.tree.splitFocused(horizontal, p)
+		}
+		u.sync()
+	})
 }
 
 func (u *ui) focusNext() {
-	u.mu.Lock()
-	u.tree.focusNext()
-	u.sync()
-	u.mu.Unlock()
-	u.render()
+	u.apply(func() {
+		u.mu.Lock()
+		defer u.mu.Unlock()
+		u.tree.focusNext()
+		u.sync()
+	})
 }
 
 func (u *ui) closeFocused() {
@@ -286,23 +295,27 @@ func (u *ui) closeFocused() {
 }
 
 // onSlotExit prunes the pane whose shell exited and releases its slot back to
-// the pool. It runs on that pane's pty-reader goroutine.
+// the pool.
+//
+// It is called on that pane's pty-reader goroutine, so it does NOT mutate here:
+// it marshals the whole change onto the render goroutine. Rewriting `chips`
+// from this goroutine races the template iterating it.
 func (u *ui) onSlotExit(slot int) {
-	u.mu.Lock()
-	for _, p := range u.tree.leaves() {
-		if p.slot == slot {
-			p.dead = true
+	u.apply(func() {
+		u.mu.Lock()
+		for _, p := range u.tree.leaves() {
+			if p.slot == slot {
+				p.dead = true
+			}
 		}
-	}
-	u.tree.prune()
-	u.free = append(u.free, slot)
-	empty := len(u.tree.leaves()) == 0
-	u.sync()
-	u.mu.Unlock()
+		u.tree.prune()
+		u.free = append(u.free, slot)
+		empty := len(u.tree.leaves()) == 0
+		u.sync()
+		u.mu.Unlock()
 
-	if empty {
-		u.stop()
-		return
-	}
-	u.render()
+		if empty {
+			u.stop()
+		}
+	})
 }

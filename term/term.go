@@ -76,14 +76,22 @@ func (t *TermC) Env(env ...string) *TermC { t.env = env; return t }
 func (t *TermC) Grow(g float32) *TermC { t.grow = g; return t }
 
 // OnExit registers a callback fired when the shell process exits.
+//
+// It fires on the pty reader goroutine, NOT the render goroutine. Do not touch
+// bound state from it: the template reads bound state during Execute with no
+// host lock, so a mutex on the write side cannot make that read safe. Marshal
+// the change with App.Apply, which runs it at frame top before Execute.
+// RequestRender is safe to call directly.
 func (t *TermC) OnExit(fn func(error)) *TermC { t.onExit = fn; return t }
 
 // OnTitle registers a callback fired when the shell sets the window title
-// (OSC 0/2).
+// (OSC 0/2). It fires on the pty reader goroutine; see OnExit for the rule on
+// touching bound state.
 func (t *TermC) OnTitle(fn func(string)) *TermC { t.onTitle = fn; return t }
 
 // OnUpdate wires the repaint request. Pass app.RequestRender so shell output
-// triggers a frame.
+// triggers a frame. It fires on the pty reader goroutine; see OnExit for the
+// rule on touching bound state.
 func (t *TermC) OnUpdate(fn func()) *TermC { t.onUpdate = fn; return t }
 
 // Focus controls whether this terminal draws the cursor. The host sets it on

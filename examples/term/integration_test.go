@@ -14,7 +14,9 @@ import (
 // re-executes it, which is the property the example is meant to demonstrate.
 func testUI(t *testing.T, w, h int) (*ui, func() *Buffer) {
 	t.Helper()
-	u := newUI(func() {}, func() {}, func(tc *termpkg.TermC) {
+	// synchronous apply: these tests render on the test goroutine, so a mutation
+	// can run in place. The concurrent case is covered in race_test.go.
+	u := newUI(func(fn func()) { fn() }, func() {}, func() {}, func(tc *termpkg.TermC) {
 		tc.Shell("/bin/sh").Env("PS1=", "TERM=dumb")
 	})
 	u.resize(w, h)
