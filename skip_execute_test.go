@@ -587,3 +587,32 @@ func TestAnimTickerGoroutineDoesNotLeak(t *testing.T) {
 			"goroutine parks on a channel Stop() never closes", leaked)
 	}
 }
+
+// TestSwitchingAwayFromAnimatingViewStopsItsTicker drives the real routing path.
+// The ticker is started and stopped inside paintAndFinish, which only runs when a
+// template executes — so a view switched away from never reaches the frame that
+// would settle it, and used to tick at 60fps for the life of the process,
+// requesting renders for a view nobody is showing.
+func TestSwitchingAwayFromAnimatingViewStopsItsTicker(t *testing.T) {
+	app := NewApp()
+	app.View("home", VBox(Spinner())) // a spinner animates, so home wants a ticker
+	app.View("other", VBox(Text("static")))
+
+	home := app.viewTemplates["home"]
+	buf := NewBuffer(20, 5)
+
+	// render home: the spinner marks it animating and starts its ticker
+	app.currentView = "home"
+	home.Execute(buf, 20, 5)
+	if home.animTicker == nil {
+		t.Fatal("an animating view did not start a ticker")
+	}
+
+	// route away. home stops executing from here on.
+	app.Go("other")
+
+	if home.animTicker != nil || home.animDone != nil {
+		t.Fatal("switching away from an animating view left its ticker running — it will " +
+			"drive render requests at 60fps for a view nobody is showing, forever")
+	}
+}

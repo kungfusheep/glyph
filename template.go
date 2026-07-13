@@ -5715,10 +5715,23 @@ func (t *Template) paintAndFinish(buf *Buffer, screenW, screenH int16) {
 			}
 		}()
 	} else if !t.animating && t.animTicker != nil {
-		t.animTicker.Stop()
-		close(t.animDone)
-		t.animTicker, t.animDone = nil, nil
+		t.stopAnimTicker()
 	}
+}
+
+// stopAnimTicker retires the ticker and the goroutine driving it.
+//
+// The ticker is started and stopped from paintAndFinish, which only runs when
+// the template EXECUTES. A view that stops being rendered therefore never gets
+// the frame that would settle it, so whoever takes a template out of the render
+// path has to stop it here or it ticks for the life of the process.
+func (t *Template) stopAnimTicker() {
+	if t.animTicker == nil {
+		return
+	}
+	t.animTicker.Stop()
+	close(t.animDone)
+	t.animTicker, t.animDone = nil, nil
 }
 
 // ExecutePaint runs a paint-only frame: reactive bindings advance (phase 0) and the

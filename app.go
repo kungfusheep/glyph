@@ -758,7 +758,13 @@ func (a *App) deactivateView(name string) {
 	if a.viewTemplates == nil {
 		return
 	}
-	a.deactivateTemplateFM(a.viewTemplates[name])
+	tmpl := a.viewTemplates[name]
+	a.deactivateTemplateFM(tmpl)
+	// a view leaving the render path stops executing, so it can never reach the
+	// frame that would settle its own animation ticker.
+	if tmpl != nil {
+		tmpl.stopAnimTicker()
+	}
 }
 
 // Back returns to the previous view.
