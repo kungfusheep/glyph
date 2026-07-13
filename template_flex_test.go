@@ -1432,3 +1432,47 @@ func findPercentColWidth(t *Template) int16 {
 	}
 	return -1
 }
+
+// TestForEachItemHeightIsIntrinsic pins the sizing contract for list items.
+//
+// Width is distributed per item, so a Space() inside an item spreads
+// horizontally. Height is not: an item is as tall as its content, and a Grow on
+// a container inside an item has nothing to grow into. Anyone who changes this
+// is changing how lists size, which is a different decision from how boxes size.
+func TestForEachItemHeightIsIntrinsic(t *testing.T) {
+	type row struct{ Name, Val string }
+	rows := []row{{"a", "1"}, {"b", "2"}}
+
+	// horizontal: Space() inside an item pushes Val to the right edge
+	tmpl := Build(VBox(
+		ForEach(&rows, func(r *row) Component {
+			return HBox(Text(&r.Name), Space(), Text(&r.Val))
+		}),
+	))
+	buf := NewBuffer(20, 4)
+	tmpl.Execute(buf, 20, 4)
+	if got := buf.Get(19, 0).Rune; got != '1' {
+		t.Errorf("width is distributed per item, so Space() should push Val to column 19; got %q", got)
+	}
+
+	// vertical: a Grow inside an item does NOT expand into the taller box
+	tmpl2 := Build(VBox.Height(int16(10))(
+		ForEach(&rows, func(r *row) Component {
+			return VBox.Grow(1)(Text(&r.Name))
+		}),
+	))
+	tmpl2.Execute(NewBuffer(20, 10), 20, 10)
+
+	for _, op := range tmpl2.ops {
+		if op.Kind != OpForEach {
+			continue
+		}
+		for i, g := range op.Ext.(*opForEach).geoms {
+			if g.H != 1 {
+				t.Errorf("item %d has height %d, want 1 — a ForEach item is intrinsic-height, so a "+
+					"Grow inside it must not expand it. If this changed deliberately, it is a "+
+					"list-sizing decision and needs its own design", i, g.H)
+			}
+		}
+	}
+}

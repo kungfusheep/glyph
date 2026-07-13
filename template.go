@@ -7893,6 +7893,14 @@ func (t *Template) layoutCustom(idx int16, op *Op, geom *Geom) {
 
 // layoutForEach iterates items, lays each item out vertically, and returns
 // total height plus max width.
+//
+// An item's height is INTRINSIC: it comes from the item's content
+// (iterTmpl.Height()), never from a budget handed down by the parent. Width is
+// distributed per item, so a Space() or a Grow inside an item spreads
+// horizontally as expected; there is no vertical equivalent, because an item
+// has no height to share out. A Grow on a container inside an item is therefore
+// a no-op, and a box that tried to grow would need the item's height to compute
+// its own while the item's height is computed from it.
 func (t *Template) layoutForEach(_ int16, op *Op, availW int16) (totalH, maxW int16) {
 	feExt := op.Ext.(*opForEach)
 	if feExt.iterTmpl == nil {
