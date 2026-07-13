@@ -258,3 +258,52 @@ func TestOverwritingWideRuneBlanksItsOtherHalf(t *testing.T) {
 		t.Fatalf("cell(1,0) = %q, want x", got)
 	}
 }
+
+// TestDSRCursorPositionReport pins the query neovim makes at startup. Without a
+// reply it reports "did not detect DSR response from terminal" and degrades.
+func TestDSRCursorPositionReport(t *testing.T) {
+	s := newScreen(24, 80)
+	var got []byte
+	s.onReply = func(b []byte) { got = append(got, b...) }
+
+	feed(s, "\x1b[3;5H") // move the cursor to row 3, col 5 (1-based)
+	feed(s, "\x1b[6n")   // "where is the cursor?"
+
+	if want := "\x1b[3;5R"; string(got) != want {
+		t.Fatalf("DSR reply = %q, want %q", got, want)
+	}
+}
+
+func TestDSRStatusAndDeviceAttributes(t *testing.T) {
+	s := newScreen(24, 80)
+	var got []byte
+	s.onReply = func(b []byte) { got = append(got, b...) }
+
+	feed(s, "\x1b[5n") // "are you ok?"
+	feed(s, "\x1b[c")  // "what are you?"
+
+	if want := "\x1b[0n\x1b[?1;2c"; string(got) != want {
+		t.Fatalf("status+DA reply = %q, want %q", got, want)
+	}
+}
+
+// TestReplyNotSentUnderScreenLock guards the same lock order onTitle needed: the
+// reply goes back through the pty on the reader goroutine, and a host that takes
+// its own lock there would deadlock against the renderer waiting on s.mu.
+func TestReplyNotSentUnderScreenLock(t *testing.T) {
+	s := newScreen(24, 80)
+	var held bool
+	s.onReply = func([]byte) {
+		if s.mu.TryLock() {
+			s.mu.Unlock()
+		} else {
+			held = true
+		}
+	}
+
+	feed(s, "\x1b[6n")
+
+	if held {
+		t.Fatal("onReply fired while write() held the screen lock")
+	}
+}

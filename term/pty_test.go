@@ -152,3 +152,55 @@ func dumpGrid(s *screen) string {
 	}
 	return b.String()
 }
+
+// TestPTYDSRRoundTripThroughRealShell proves the reply reaches the child: a real
+// shell asks for the cursor position, our screen answers, and the bytes arrive on
+// the shell's stdin where it can read them back. Programs like neovim BLOCK on
+// this answer — without it they report "did not detect DSR response".
+func TestPTYDSRRoundTripThroughRealShell(t *testing.T) {
+	p, err := startPTY("/bin/sh", []string{"PS1=", "TERM=xterm"}, 24, 80)
+	if err != nil {
+		t.Fatalf("startPTY: %v", err)
+	}
+	defer p.close()
+
+	s := newScreen(24, 80)
+	s.onReply = func(b []byte) { p.master.Write(b) } // exactly what TermC wires
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := p.master.Read(buf)
+			if n > 0 {
+				s.write(buf[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// ask for the cursor position, read the 6-byte answer off stdin, print it
+	io.WriteString(p.master, "printf '\\033[6n'; R=$(dd bs=1 count=6 2>/dev/null | cat -v); printf 'DSR_GOT[%s]\\n' \"$R\"\n")
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		var b strings.Builder
+		for y := 0; y < s.rows; y++ {
+			for x := 0; x < s.cols; x++ {
+				b.WriteRune(s.cellAt(x, y).Rune)
+			}
+		}
+		out := b.String()
+		s.mu.Unlock()
+		if i := strings.Index(out, "DSR_GOT["); i >= 0 {
+			got := out[i:]
+			if strings.Contains(got, "R") && strings.Contains(got, "^[[") {
+				return // the shell read our reply off its stdin
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("shell never received a DSR reply on its stdin")
+}

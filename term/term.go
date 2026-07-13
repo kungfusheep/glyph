@@ -154,6 +154,8 @@ func (t *TermC) syncFrame() {
 func (t *TermC) startAt(w, h int) {
 	t.scr = newScreen(h, w)
 	t.scr.onTitle = t.onTitle
+	// terminal queries are answered as pty input: programs block on the reply
+	t.scr.onReply = func(b []byte) { t.Write(b) }
 
 	p, err := startPTY(t.shell, t.env, uint16(h), uint16(w))
 	if err != nil {

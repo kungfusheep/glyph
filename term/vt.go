@@ -1,6 +1,7 @@
 package term
 
 import (
+	"strconv"
 	"sync"
 	"unicode/utf8"
 
@@ -44,9 +45,17 @@ type screen struct {
 
 	onTitle func(string)
 
-	// staged here by finishOSC and delivered by write() once it drops the lock
+	// onReply sends bytes back to the pty as terminal input. Programs query the
+	// terminal (cursor position, device attributes) and BLOCK waiting for the
+	// answer — neovim reports "did not detect DSR response" and degrades when it
+	// never arrives.
+	onReply func([]byte)
+
+	// staged here and delivered by write() once it drops the lock: a callback that
+	// ran under s.mu would invert the lock order (see write).
 	pendingTitle string
 	titleChanged bool
+	pendingReply []byte
 }
 
 type parseState uint8
@@ -128,11 +137,21 @@ func (s *screen) write(p []byte) {
 	}
 	title, changed := s.pendingTitle, s.titleChanged
 	s.titleChanged = false
-	fn := s.onTitle
+	titleFn := s.onTitle
+
+	var reply []byte
+	if len(s.pendingReply) > 0 {
+		reply = append(reply, s.pendingReply...)
+		s.pendingReply = s.pendingReply[:0]
+	}
+	replyFn := s.onReply
 	s.mu.Unlock()
 
-	if changed && fn != nil {
-		fn(title)
+	if changed && titleFn != nil {
+		titleFn(title)
+	}
+	if len(reply) > 0 && replyFn != nil {
+		replyFn(reply)
 	}
 }
 
@@ -309,6 +328,18 @@ func (s *screen) dispatchCSI(final byte) {
 		s.scrollUp(s.scrollTop, s.scrollBot, s.param(0, 1))
 	case 'T': // scroll down
 		s.scrollDown(s.scrollTop, s.scrollBot, s.param(0, 1))
+	case 'n': // DSR — device status report
+		switch s.param(0, 0) {
+		case 5: // "are you ok?"
+			s.reply("\x1b[0n")
+		case 6: // report cursor position, 1-based
+			s.reply("\x1b[" + strconv.Itoa(s.cy+1) + ";" + strconv.Itoa(s.cx+1) + "R")
+		}
+	case 'c': // DA — primary device attributes. Answer as a VT100 with AVO, which
+		// is what xterm reports and what TERM=xterm promises.
+		if s.param(0, 0) == 0 {
+			s.reply("\x1b[?1;2c")
+		}
 	case 's': // save cursor (ANSI.SYS)
 		s.savedCx, s.savedCy = s.cx, s.cy
 	case 'u': // restore cursor (ANSI.SYS)
@@ -460,6 +491,11 @@ func (s *screen) breakWideAt(x int) {
 			right.Rune = ' '
 		}
 	}
+}
+
+// reply stages bytes for the pty. write() flushes them after releasing the lock.
+func (s *screen) reply(seq string) {
+	s.pendingReply = append(s.pendingReply, seq...)
 }
 
 func (s *screen) tab() {
