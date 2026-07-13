@@ -50,6 +50,15 @@ type ui struct {
 	render func() // repaint request
 	stop   func() // last shell exited
 
+	// mu guards the tree and the pool against the INPUT goroutine, which is the
+	// only reader that is not already on the render goroutine: HandleUnmatched
+	// reads tree.focused there to route a key to the focused pane.
+	//
+	// The invariant that makes this safe, in full: every write lands on the render
+	// goroutine (via apply) under mu; the input goroutine reads under mu; and the
+	// template's Execute reads bound state on the render goroutine, after the
+	// applies have already run, so it needs no lock at all. Every reader is either
+	// on the mutating goroutine or holding mu.
 	mu   sync.Mutex
 	tree *tree
 
