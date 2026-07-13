@@ -3,8 +3,6 @@ package term
 import (
 	"bytes"
 	"testing"
-
-	glyph "github.com/kungfusheep/glyph"
 )
 
 // BenchmarkScreenWrite measures interpreter throughput on the yes-spam path: a
@@ -35,19 +33,26 @@ func BenchmarkScreenWriteSGR(b *testing.B) {
 // BenchmarkRenderBlit measures the grid→Buffer copy done every frame. Under
 // yes-spam this runs once per painted frame regardless of how much arrived, so
 // it bounds the per-frame render cost.
+//
+// It drives the real blitToLayer rather than an inline copy: a hand-rolled loop
+// over a hoisted buffer cannot observe an allocation made inside the production
+// path, which is exactly the bug that hid here.
 func BenchmarkRenderBlit(b *testing.B) {
 	const w, h = 80, 24
-	s := newScreen(h, w)
-	s.write(bytes.Repeat([]byte("the quick brown fox jumps\r\n"), h))
-	buf := glyph.NewBuffer(w, h)
+	t := blitFixture(w, h)
+	t.blitToLayer(w, h) // first frame allocates the buffer; measure the steady state
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		s.mu.Lock()
-		for row := 0; row < h; row++ {
-			for col := 0; col < w; col++ {
-				buf.Set(col, row, *s.cellAt(col, row))
-			}
-		}
-		s.mu.Unlock()
+		t.blitToLayer(w, h)
 	}
+}
+
+// blitFixture builds a TermC with a populated grid and no pty — enough to drive
+// the render path on its own.
+func blitFixture(w, h int) *TermC {
+	t := New()
+	t.scr = newScreen(h, w)
+	t.scr.write(bytes.Repeat([]byte("the quick brown fox jumps\r\n"), h))
+	return t
 }

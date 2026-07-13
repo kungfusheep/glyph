@@ -91,3 +91,56 @@ func TestTermCursorFollowsFocus(t *testing.T) {
 		t.Fatal("unfocused terminal should hide its cursor")
 	}
 }
+
+// TestBlitDoesNotAllocatePerFrame pins the steady-state render path to zero
+// allocations. A fresh Buffer per painted frame is garbage at pty output rate,
+// which breaks glyph's zero-alloc-per-render contract.
+func TestBlitDoesNotAllocatePerFrame(t *testing.T) {
+	const w, h = 80, 24
+	tc := blitFixture(w, h)
+	tc.blitToLayer(w, h) // first frame legitimately allocates the buffer
+
+	if got := testing.AllocsPerRun(50, func() { tc.blitToLayer(w, h) }); got != 0 {
+		t.Fatalf("blitToLayer allocates %v times per frame, want 0", got)
+	}
+}
+
+// TestBlitReallocatesOnResize proves the reuse is size-aware: a resized viewport
+// must get a correctly sized buffer, not a stale one.
+func TestBlitReallocatesOnResize(t *testing.T) {
+	tc := blitFixture(80, 24)
+	tc.blitToLayer(80, 24)
+	tc.scr.resize(10, 40)
+	tc.blitToLayer(40, 10)
+
+	if tc.buf.Width() != 40 || tc.buf.Height() != 10 {
+		t.Fatalf("buffer is %dx%d after resize, want 40x10", tc.buf.Width(), tc.buf.Height())
+	}
+}
+
+// TestOnTitleNotCalledUnderScreenLock guards the lock order. The host's title
+// callback runs on the pty goroutine; if it fires while write() holds the screen
+// lock, a host that takes its own mutex there deadlocks against the render
+// goroutine, which takes the locks the other way round in blitToLayer.
+func TestOnTitleNotCalledUnderScreenLock(t *testing.T) {
+	s := newScreen(24, 80)
+	var held bool
+	var got string
+	s.onTitle = func(title string) {
+		got = title
+		if s.mu.TryLock() {
+			s.mu.Unlock() // free to take it: the callback is outside the lock
+		} else {
+			held = true
+		}
+	}
+
+	s.write([]byte("\x1b]0;my-title\x07"))
+
+	if held {
+		t.Fatal("onTitle fired while write() held the screen lock — a host mutex here deadlocks the renderer")
+	}
+	if got != "my-title" {
+		t.Fatalf("onTitle got %q, want my-title", got)
+	}
+}

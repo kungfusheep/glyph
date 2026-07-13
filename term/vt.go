@@ -43,6 +43,10 @@ type screen struct {
 	g0Graphics bool // G0 holds the DEC special graphics set (ESC ( 0)
 
 	onTitle func(string)
+
+	// staged here by finishOSC and delivered by write() once it drops the lock
+	pendingTitle string
+	titleChanged bool
 }
 
 type parseState uint8
@@ -112,11 +116,23 @@ func (s *screen) resize(rows, cols int) {
 }
 
 // write feeds pty bytes through the parser, mutating the grid under the lock.
+//
+// Host callbacks fire AFTER the lock is released. Calling out while holding
+// s.mu inverts the lock order: the host's own state mutex would be taken on the
+// pty goroutine beneath the screen lock, while the render goroutine takes them
+// the other way round in blitToLayer.
 func (s *screen) write(p []byte) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, b := range p {
 		s.step(b)
+	}
+	title, changed := s.pendingTitle, s.titleChanged
+	s.titleChanged = false
+	fn := s.onTitle
+	s.mu.Unlock()
+
+	if changed && fn != nil {
+		fn(title)
 	}
 }
 
@@ -339,8 +355,8 @@ func (s *screen) finishOSC() {
 	}
 	code := string(buf[:i])
 	title := string(buf[i+1:])
-	if (code == "0" || code == "2") && s.onTitle != nil {
-		s.onTitle(title)
+	if code == "0" || code == "2" {
+		s.pendingTitle, s.titleChanged = title, true
 	}
 }
 

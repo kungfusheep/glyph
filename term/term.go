@@ -29,11 +29,14 @@ type TermC struct {
 	scr     *screen
 	started sync.Once
 
+	// the blit target, reused across frames — a fresh buffer per painted frame
+	// is garbage at pty output rate. Reallocated only when the viewport resizes.
+	buf *glyph.Buffer
+
 	mu         sync.Mutex
 	pty        *pty
 	curW, curH int
 	focused    bool
-	exited     bool
 }
 
 // New creates a terminal component running $SHELL (or /bin/sh). The pty starts
@@ -146,7 +149,6 @@ func (t *TermC) startAt(w, h int) {
 
 	p, err := startPTY(t.shell, t.env, uint16(h), uint16(w))
 	if err != nil {
-		t.exited = true
 		if t.onExit != nil {
 			t.onExit(err)
 		}
@@ -176,12 +178,18 @@ func (t *TermC) resizeIfNeeded(w, h int) {
 	p.resize(uint16(h), uint16(w))
 }
 
-// blitToLayer copies the grid into a fresh viewport-sized buffer and swaps it
-// into the layer, then mirrors the pty cursor when focused.
+// blitToLayer copies the grid into the layer's buffer, then mirrors the pty
+// cursor when focused.
 func (t *TermC) blitToLayer(w, h int) {
-	buf := glyph.NewBuffer(w, h)
+	if t.buf == nil || t.buf.Width() != w || t.buf.Height() != h {
+		t.buf = glyph.NewBuffer(w, h)
+	}
+	buf := t.buf
 	t.scr.mu.Lock()
 	rows, cols := t.scr.rows, t.scr.cols
+	if rows < h || cols < w {
+		buf.Clear() // the grid does not cover the box; stale cells must not show
+	}
 	for y := 0; y < h && y < rows; y++ {
 		for x := 0; x < w && x < cols; x++ {
 			buf.Set(x, y, *t.scr.cellAt(x, y))
@@ -217,9 +225,6 @@ func (t *TermC) readLoop(p *pty) {
 			}
 		}
 		if err != nil {
-			t.mu.Lock()
-			t.exited = true
-			t.mu.Unlock()
 			if t.onExit != nil {
 				t.onExit(err)
 			}
