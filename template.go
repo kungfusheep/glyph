@@ -237,8 +237,11 @@ type Template struct {
 	// is iterating — for the NEXT frame
 	completions []func()
 
-	// animation ticker — runs at ~60fps only while animations are active
+	// animation ticker — runs at ~60fps only while animations are active.
+	// animDone stops the ticker goroutine: Stop() does not close the tick
+	// channel, so a ranging goroutine would park on it forever.
 	animTicker    *time.Ticker
+	animDone      chan struct{}
 	requestRender func()
 	// requestAnimFrame, when wired, is the ticker's frame request: it does not mark
 	// app data dirty, making the frame eligible for the paint-only skip (ExecutePaint).
@@ -5695,15 +5698,26 @@ func (t *Template) paintAndFinish(buf *Buffer, screenW, screenH int16) {
 		if tick == nil {
 			tick = t.requestRender
 		}
-		t.animTicker = time.NewTicker(16 * time.Millisecond)
+		// the goroutine closes over locals, never over t: the render goroutine
+		// clears these fields when the animation settles, and reading them from
+		// the ticker goroutine would race with that.
+		ticker := time.NewTicker(16 * time.Millisecond)
+		done := make(chan struct{})
+		t.animTicker, t.animDone = ticker, done
 		go func() {
-			for range t.animTicker.C {
-				tick()
+			for {
+				select {
+				case <-ticker.C:
+					tick()
+				case <-done:
+					return
+				}
 			}
 		}()
 	} else if !t.animating && t.animTicker != nil {
 		t.animTicker.Stop()
-		t.animTicker = nil
+		close(t.animDone)
+		t.animTicker, t.animDone = nil, nil
 	}
 }
 

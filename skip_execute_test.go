@@ -3,6 +3,7 @@ package glyph
 import (
 	"bytes"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -544,5 +545,45 @@ func TestModalFadePacedMatchesFullFrames(t *testing.T) {
 	pacedRun := run(true)
 	if full != pacedRun {
 		t.Fatalf("paced fade diverges from full frames:\nfull:  %s\npaced: %s", full, pacedRun)
+	}
+}
+
+// TestAnimTickerGoroutineDoesNotLeak pins the ticker goroutine's lifetime.
+// time.Ticker.Stop() does not close the tick channel, so a goroutine ranging
+// over it parks forever: every animation that starts and settles used to strand
+// one. Settling the animation must retire the goroutine that drove it.
+func TestAnimTickerGoroutineDoesNotLeak(t *testing.T) {
+	before := runtime.NumGoroutine()
+
+	for i := 0; i < 20; i++ {
+		animating := true
+		tmpl := Build(VBox(Text("x")))
+		tmpl.requestRender = func() {}
+		buf := NewBuffer(20, 5)
+
+		// a frame that animates starts the ticker
+		tmpl.animating = animating
+		tmpl.paintAndFinish(buf, 20, 5)
+		if tmpl.animTicker == nil {
+			t.Fatal("an animating frame did not start the ticker")
+		}
+
+		// the animation settles: the ticker stops and its goroutine must exit
+		tmpl.animating = false
+		tmpl.paintAndFinish(buf, 20, 5)
+		if tmpl.animTicker != nil || tmpl.animDone != nil {
+			t.Fatal("settling did not clear the ticker")
+		}
+	}
+
+	// give the retired goroutines a moment to unwind
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before+2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if leaked := runtime.NumGoroutine() - before; leaked > 2 {
+		t.Errorf("%d goroutines leaked after 20 animation start/stop cycles — the ticker "+
+			"goroutine parks on a channel Stop() never closes", leaked)
 	}
 }
