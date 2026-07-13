@@ -181,3 +181,17 @@ func TestTemplateSurvivesStructuralChange(t *testing.T) {
 		}
 	}
 }
+
+// TestLayoutDoesNotAllocatePerFrame keeps the layout callback off the allocator.
+// It runs on the render path every frame, so a fresh rect slice per call is
+// garbage at frame rate — the same defect the terminal's blit had.
+func TestLayoutDoesNotAllocatePerFrame(t *testing.T) {
+	const W, H = 60, 16
+	u, _ := testUI(t, W, H)
+	u.split(true)
+	u.layout(nil, W, 0) // warm
+
+	if got := testing.AllocsPerRun(50, func() { u.layout(nil, W, 0) }); got != 0 {
+		t.Fatalf("layout allocates %v times per frame, want 0", got)
+	}
+}

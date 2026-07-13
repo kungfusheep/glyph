@@ -56,6 +56,9 @@ type ui struct {
 	// come from here rather than from the layout call.
 	w, h int
 
+	// the layout's scratch rects, reused every frame (see layout)
+	rects [maxPanes]Rect
+
 	// chips is the status line's bound model, rewritten whenever the pane set or
 	// the focus changes. The template reads it every frame.
 	chips []chip
@@ -169,9 +172,13 @@ func (u *ui) paneComponents() []Component {
 // tracked screen box, less the status row. The rects it returns are what give the
 // container its height, so returning them IS how the pane area gets sized.
 func (u *ui) layout(_ []ChildSize, availW, _ int) []Rect {
-	rects := make([]Rect, maxPanes)
 	u.mu.Lock()
 	defer u.mu.Unlock()
+
+	// reused across frames: this runs on the render path, and the caller copies
+	// the rects into child geometry before returning, so it never retains them.
+	rects := u.rects[:]
+	clear(rects)
 
 	w, h := u.w, u.h
 	if availW > 0 {
