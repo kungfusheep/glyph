@@ -121,6 +121,14 @@ func (u *ui) resize(w, h int) {
 // rather than from the box it is given.
 func (u *ui) view() Component {
 	return VBox(
+		// bindings live in the tree: the framework wires and retires them with the
+		// branch they sit in, instead of the host managing a global router by hand
+		On(
+			Key("<C-b>%", func() { u.split(true) }).Named("split-vertical"),
+			Key("<C-b>\"", func() { u.split(false) }).Named("split-horizontal"),
+			Key("<C-b>o", func() { u.focusNext() }).Named("focus-next"),
+			Key("<C-b>x", func() { u.closeFocused() }).Named("close-pane"),
+		),
 		Arrange(u.layout)(u.paneComponents()...),
 		HBox(
 			Text(" glyph-term ").Bold(),
@@ -144,13 +152,13 @@ func main() {
 	u.resize(int(sz.Width), int(sz.Height))
 	app.OnResize(u.resize)
 
-	app.Handle("<C-b>%", func() { u.split(true) })
-	app.Handle("<C-b>\"", func() { u.split(false) })
-	app.Handle("<C-b>o", func() { u.focusNext() })
-	app.Handle("<C-b>x", func() { u.closeFocused() })
-
 	// Every unbound key goes to the focused shell. Ctrl-B is held by riffkey as
 	// a sequence prefix, so it never leaks here.
+	//
+	// This is the router directly, not On: there is no Unmatched in the On
+	// vocabulary, because a branch-scoped sink is ambiguous once two branches
+	// declare one. The eventual answer is a focused component claiming unmatched
+	// keys, which needs focus machinery a subpackage cannot reach.
 	app.Router().HandleUnmatched(func(k riffkey.Key) bool {
 		if t := u.focused.Load(); t != nil {
 			return t.HandleKey(k)

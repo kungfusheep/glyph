@@ -218,3 +218,40 @@ func TestLayoutDoesNotAllocatePerFrame(t *testing.T) {
 		t.Fatalf("layout allocates %v times per frame, want 0", got)
 	}
 }
+
+// TestKeyBindingsAreDeclaredInTheTree proves the prefix keys are wired by the
+// framework from the view tree (On/Key), not registered on a global router by
+// hand. Naming them also puts them in the live key-help, which app.Handle
+// bindings never reach.
+func TestKeyBindingsAreDeclaredInTheTree(t *testing.T) {
+	u := newUI(func(fn func()) { fn() }, func() {}, func() {}, func(tc *termpkg.TermC) {
+		tc.Shell("/bin/sh").Env("PS1=", "TERM=dumb")
+	})
+	t.Cleanup(func() {
+		for _, p := range u.tree.leaves() {
+			u.slots[p.slot].Close()
+		}
+	})
+
+	app := NewApp()
+	app.SetView(u.view())
+
+	want := map[string]string{
+		"split-vertical":   "<C-b>%",
+		"split-horizontal": `<C-b>"`,
+		"focus-next":       "<C-b>o",
+		"close-pane":       "<C-b>x",
+	}
+	got := map[string]string{}
+	for _, b := range app.ActiveBindings() {
+		if _, ok := want[b.Name]; ok {
+			got[b.Name] = b.Pattern
+		}
+	}
+	for name, pattern := range want {
+		if got[name] != pattern {
+			t.Fatalf("binding %q = %q, want %q — not wired from the tree; active: %+v",
+				name, got[name], pattern, app.ActiveBindings())
+		}
+	}
+}
