@@ -156,11 +156,16 @@ func (t *TermC) startAt(w, h int) {
 	t.scr.onTitle = t.onTitle
 	// Terminal queries are answered as pty input: programs block on the reply.
 	//
-	// This write happens on the reader goroutine. It can only block if the slave's
-	// input buffer fills (~4KB), which needs a child that emits queries and never
-	// reads its stdin — and such a child is already broken, since it would hang on
-	// its own reply. If that ever becomes real, hand the reply to a writer
-	// goroutine so the reader's only job stays reading.
+	// This write happens on the reader goroutine, so a blocking write would stop
+	// the reader draining the child. Measured, not assumed: a shell flooding DSR
+	// in a loop and never reading its stdin moved 2MB with zero reader stalls, so
+	// the query path does not wedge. But a master write CAN block — filling the
+	// slave's input queue with bytes the child never consumes blocks at ~34KB.
+	//
+	// The safety here rests on replies being small and reactive, one per query,
+	// not on master writes being unblockable. If replies ever grow large or
+	// unsolicited (mouse reporting, bracketed paste), re-measure: the fix is a
+	// writer goroutine so the reader's only job stays reading.
 	t.scr.onReply = func(b []byte) { t.Write(b) }
 
 	p, err := startPTY(t.shell, t.env, uint16(h), uint16(w))
