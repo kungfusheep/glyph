@@ -23,8 +23,10 @@ import (
 
 // Layout constants
 const (
-	headerRows   = 0  // Content starts at row 0 now
-	footerRows   = 2  // Status bar + message line
+	headerRows = 0 // Content starts at row 0 now
+	// the message line sits below the window tree. each window's own status bar
+	// is charged per-leaf in recalculateViewports, not here.
+	messageRows  = 1
 	renderBuffer = 30 // Lines to render above/below viewport for smooth scrolling
 )
 
@@ -1634,23 +1636,17 @@ func main() {
 
 	// Initialize viewport and layer
 	size := app.Size()
-	ed.win().viewportHeight = max(1, size.Height-headerRows-footerRows)
-	ed.initLayer(size.Width)
+	ed.resize(size.Width, size.Height)
 
 	ed.updateDisplay()
 
 	app.SetView(buildView(ed))
 
-	// Handle terminal resize
+	// Handle terminal resize. The view sizes itself from the box each frame, so
+	// this only refreshes the scroll arithmetic the editor keeps on the side.
 	app.OnResize(func(width, height int) {
-		// Recalculate viewport for main editor area (excluding status line)
-		contentHeight := max(1, height-headerRows-footerRows)
-		// Recalculate all window viewports in the split tree
-		ed.recalculateViewports(ed.root, width, contentHeight)
-		// Rebuild the view with new dimensions
-		app.SetView(buildView(ed))
-		// Update all windows
-		ed.updateAllWindows()
+		ed.resize(width, height)
+		app.RequestRender()
 	})
 
 	// Register fuzzy finder as a pushable overlay view (V2 for SelectionList support)
@@ -2370,9 +2366,8 @@ func (ed *Editor) ensureHorizontalCursorVisible() {
 func (ed *Editor) ensureCursorVisible() {
 	// Scroll viewport if cursor is outside visible area
 	if ed.win().viewportHeight == 0 {
-		// Get viewport height from screen (minus footer for status bar + message line)
 		size := ed.app.Size()
-		ed.win().viewportHeight = max(1, size.Height-headerRows-footerRows)
+		ed.resize(size.Width, size.Height)
 	}
 
 	// Scroll up if cursor above viewport
@@ -2841,10 +2836,17 @@ func (ed *Editor) initLayer(width int) {
 	ed.initWindowLayer(ed.win(), width)
 }
 
-// initWindowLayer sets up a layer for a specific window
+// initWindowLayer sizes the layer backing a window, creating it on first use.
+//
+// The layer is reused across resizes rather than replaced: the compiled
+// template holds this pointer, so swapping in a fresh Layer would strand the
+// template on the old one and the window would render stale content until the
+// next recompile.
 func (ed *Editor) initWindowLayer(w *Window, width int) {
 	w.viewportWidth = width
-	w.contentLayer = glyph.NewLayer()
+	if w.contentLayer == nil {
+		w.contentLayer = glyph.NewLayer()
+	}
 	// Layer holds ALL lines plus some buffer for scrolling
 	w.contentLayer.EnsureSize(width, len(w.buffer.Lines)+w.viewportHeight)
 	// Set viewport dimensions BEFORE rendering so ScrollTo works correctly
@@ -2852,6 +2854,34 @@ func (ed *Editor) initWindowLayer(w *Window, width int) {
 	w.renderedMin = -1
 	w.renderedMax = -1
 	ed.ensureWindowRendered(w)
+}
+
+// resize refreshes the scroll arithmetic the editor keeps beside the layout.
+//
+// The layout engine owns the real geometry now, so this has to derive the same
+// numbers it will: the message line takes one row off the bottom, and each
+// window spends one more on its own status bar (subtracted per leaf in
+// recalculateViewports). Getting this wrong does not misdraw anything, it
+// desynchronises paging and cursor clamping from what is on screen.
+func (ed *Editor) resize(width, height int) {
+	contentHeight := max(1, height-headerRows-messageRows)
+	ed.recalculateViewports(ed.root, width, contentHeight)
+	ed.updateAllWindows()
+}
+
+// rebuildView recompiles the template after the split tree changes SHAPE — a
+// window opening or closing adds or removes nodes, and the tree is a recursive
+// structure a compiled template cannot express dynamically.
+//
+// This is the only reason minivim recompiles. Everything else (cursor, text,
+// status line, window size) is bound by pointer and picked up on the next
+// frame. Reach for this only when the set of windows changes; calling it for
+// content or size changes throws away the compile for nothing.
+func (ed *Editor) rebuildView() {
+	if ed.app == nil {
+		return
+	}
+	ed.app.SetView(buildView(ed))
 }
 
 // splitHorizontal creates a horizontal split (windows stacked vertically like :sp)
@@ -2897,7 +2927,7 @@ func (ed *Editor) splitHorizontal() {
 	newWindowNode.Parent = currentNode
 
 	// Refresh display
-	ed.app.SetView(buildView(ed))
+	ed.rebuildView()
 	ed.updateAllWindows()
 	ed.StatusLine = ""
 }
@@ -2945,7 +2975,7 @@ func (ed *Editor) splitVertical() {
 	newWindowNode.Parent = currentNode
 
 	// Refresh display
-	ed.app.SetView(buildView(ed))
+	ed.rebuildView()
 	ed.updateAllWindows()
 	ed.StatusLine = ""
 }
@@ -2986,7 +3016,7 @@ func (ed *Editor) splitHorizontalWithBuffer(buf *Buffer) {
 	// Focus the new window
 	ed.focusedWindow = newWin
 
-	ed.app.SetView(buildView(ed))
+	ed.rebuildView()
 	ed.updateAllWindows()
 	ed.StatusLine = ""
 }
@@ -3028,7 +3058,7 @@ func (ed *Editor) splitVerticalWithBuffer(buf *Buffer) {
 	// Focus the new window
 	ed.focusedWindow = newWin
 
-	ed.app.SetView(buildView(ed))
+	ed.rebuildView()
 	ed.updateAllWindows()
 	ed.StatusLine = ""
 }
@@ -3076,10 +3106,9 @@ func (ed *Editor) closeWindow() {
 
 	// Recalculate viewport sizes based on available space
 	size := ed.app.Size()
-	ed.recalculateViewports(ed.root, size.Width, size.Height-headerRows-footerRows)
+	ed.resize(size.Width, size.Height)
 
-	ed.app.SetView(buildView(ed))
-	ed.updateAllWindows()
+	ed.rebuildView()
 	ed.updateCursor()
 }
 
@@ -3095,11 +3124,9 @@ func (ed *Editor) closeOtherWindows() {
 
 	// Reclaim full viewport
 	size := ed.app.Size()
-	ed.focusedWindow.viewportHeight = max(1, size.Height-headerRows-footerRows)
-	ed.focusedWindow.viewportWidth = size.Width
-	ed.initWindowLayer(ed.focusedWindow, size.Width)
+	ed.resize(size.Width, size.Height)
 
-	ed.app.SetView(buildView(ed))
+	ed.rebuildView()
 	ed.updateAllWindows()
 	ed.updateCursor()
 }
@@ -3482,10 +3509,12 @@ func (ed *Editor) buildBlockSelectionSpans(line string, startCol, endCol int, no
 
 // buildWindowView builds the view for a single window
 func buildWindowView(w *Window, focused bool) glyph.Component {
-	return glyph.VBox(
-		// Content area - imperative layer, efficiently updated
-		// Width is set for vertical splits to constrain each window's area
-		glyph.LayerView(w.contentLayer).Height(int16(w.viewportHeight)).Width(int16(w.viewportWidth)),
+	// the window fills the box the split tree gives it; the status bar takes one
+	// row and the layer grows into the rest. sizing comes from the layout pass,
+	// so a resize never needs a recompile. baking viewportWidth/Height in here
+	// would freeze them at compile time.
+	return glyph.VBox.Grow(1)(
+		glyph.LayerView(w.contentLayer).Grow(1),
 		// Vim-style status bar (inverse video, shows filename and position)
 		glyph.Rich(&w.StatusBar),
 	)
@@ -3501,16 +3530,19 @@ func buildNodeView(node *SplitNode, focusedWindow *Window) glyph.Component {
 	child0 := buildNodeView(node.Children[0], focusedWindow)
 	child1 := buildNodeView(node.Children[1], focusedWindow)
 
+	// each half grows equally, so the engine splits the box rather than the
+	// editor pre-computing pixel sizes for it.
 	if node.Direction == SplitHorizontal {
 		// Stack vertically (Col)
-		return glyph.VBox(child0, child1)
+		return glyph.VBox.Grow(1)(child0, child1)
 	}
 	// Side by side (Row)
-	return glyph.HBox(child0, child1)
+	return glyph.HBox.Grow(1)(child0, child1)
 }
 
 func buildView(ed *Editor) glyph.Component {
-	// Build the window tree
+	// Build the window tree. It grows into everything the wildmenu and status
+	// line leave behind.
 	windowTree := buildNodeView(ed.root, ed.focusedWindow)
 
 	// Wrap in Col to add wildmenu and status line at bottom

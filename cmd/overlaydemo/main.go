@@ -77,6 +77,11 @@ func main() {
 			// overlay owns its vignette — no separate If() needed
 			If(&showModal).Then(Overlay.Centered()(
 				VBox.Gap(1).Width(52).Fill(rpSurface).NodeRef(&popupRef)(
+					// escape belongs to the modal, so it is declared inside it: the
+					// binding is pushed when the branch opens and popped when it
+					// closes. a global handler would need to ask whether the modal
+					// is up before acting.
+					On(Key("<Escape>", func() { showModal = false }).Named("dismiss")),
 					Space(),
 					Text("  Confirm Action").Style(Style{FG: rpIris, Attr: AttrBold}),
 					Text(&modalMessage).Style(Style{FG: rpText}),
@@ -105,18 +110,13 @@ func main() {
 		),
 	)
 
+	// m and q act anywhere, so they belong on the app router. Escape does not:
+	// it is declared in the modal branch above.
 	app.Handle("m", func(_ riffkey.Match) {
 		showModal = !showModal
 	})
 	app.Handle("q", func(_ riffkey.Match) {
 		app.Stop()
-	})
-	app.Handle("<Escape>", func(_ riffkey.Match) {
-		if showModal {
-			showModal = false
-		} else {
-			app.Stop()
-		}
 	})
 
 	if err := app.Run(); err != nil {

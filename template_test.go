@@ -7288,3 +7288,57 @@ func TestForEachMissingRenderPanics(t *testing.T) {
 	}()
 	Build(VBox(ForEach(&items)))
 }
+
+// TestCustomLayoutDoesNotAllocatePerFrame guards the zero-allocation contract on
+// the Arrange path. layoutCustom builds a ChildSize slice for every frame; a
+// fresh one per frame is garbage proportional to the frame rate. The LayoutFunc
+// here reuses its rects, so anything left is the engine's.
+func TestCustomLayoutDoesNotAllocatePerFrame(t *testing.T) {
+	rects := make([]Rect, 6)
+	layout := func(children []ChildSize, availW, availH int) []Rect {
+		r := rects[:len(children)]
+		for i := range children {
+			r[i] = Rect{X: (i % 3) * 10, Y: i / 3, W: 10, H: 1}
+		}
+		return r
+	}
+
+	tmpl := Build(Arrange(layout)(
+		Text("A"), Text("B"), Text("C"),
+		Text("D"), Text("E"), Text("F"),
+	))
+	buf := NewBuffer(40, 10)
+	tmpl.Execute(buf, 40, 10) // first frame grows the scratch
+
+	allocs := testing.AllocsPerRun(100, func() {
+		tmpl.Execute(buf, 40, 10)
+	})
+	if allocs != 0 {
+		t.Errorf("Arrange allocates %.0f times per frame, want 0 — the custom-layout path "+
+			"must reuse its scratch buffers", allocs)
+	}
+}
+
+// BenchmarkCustomLayoutFrame measures a steady-state Arrange frame.
+func BenchmarkCustomLayoutFrame(b *testing.B) {
+	rects := make([]Rect, 6)
+	layout := func(children []ChildSize, availW, availH int) []Rect {
+		r := rects[:len(children)]
+		for i := range children {
+			r[i] = Rect{X: (i % 3) * 10, Y: i / 3, W: 10, H: 1}
+		}
+		return r
+	}
+	tmpl := Build(Arrange(layout)(
+		Text("A"), Text("B"), Text("C"),
+		Text("D"), Text("E"), Text("F"),
+	))
+	buf := NewBuffer(40, 10)
+	tmpl.Execute(buf, 40, 10)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tmpl.Execute(buf, 40, 10)
+	}
+}

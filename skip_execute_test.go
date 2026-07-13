@@ -3,6 +3,7 @@ package glyph
 import (
 	"bytes"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -544,5 +545,74 @@ func TestModalFadePacedMatchesFullFrames(t *testing.T) {
 	pacedRun := run(true)
 	if full != pacedRun {
 		t.Fatalf("paced fade diverges from full frames:\nfull:  %s\npaced: %s", full, pacedRun)
+	}
+}
+
+// TestAnimTickerGoroutineDoesNotLeak pins the ticker goroutine's lifetime.
+// time.Ticker.Stop() does not close the tick channel, so a goroutine ranging
+// over it parks forever: every animation that starts and settles used to strand
+// one. Settling the animation must retire the goroutine that drove it.
+func TestAnimTickerGoroutineDoesNotLeak(t *testing.T) {
+	before := runtime.NumGoroutine()
+
+	for i := 0; i < 20; i++ {
+		animating := true
+		tmpl := Build(VBox(Text("x")))
+		tmpl.requestRender = func() {}
+		buf := NewBuffer(20, 5)
+
+		// a frame that animates starts the ticker
+		tmpl.animating = animating
+		tmpl.paintAndFinish(buf, 20, 5)
+		if tmpl.animTicker == nil {
+			t.Fatal("an animating frame did not start the ticker")
+		}
+
+		// the animation settles: the ticker stops and its goroutine must exit
+		tmpl.animating = false
+		tmpl.paintAndFinish(buf, 20, 5)
+		if tmpl.animTicker != nil || tmpl.animDone != nil {
+			t.Fatal("settling did not clear the ticker")
+		}
+	}
+
+	// give the retired goroutines a moment to unwind
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before+2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if leaked := runtime.NumGoroutine() - before; leaked > 2 {
+		t.Errorf("%d goroutines leaked after 20 animation start/stop cycles — the ticker "+
+			"goroutine parks on a channel Stop() never closes", leaked)
+	}
+}
+
+// TestSwitchingAwayFromAnimatingViewStopsItsTicker drives the real routing path.
+// The ticker is started and stopped inside paintAndFinish, which only runs when a
+// template executes — so a view switched away from never reaches the frame that
+// would settle it, and used to tick at 60fps for the life of the process,
+// requesting renders for a view nobody is showing.
+func TestSwitchingAwayFromAnimatingViewStopsItsTicker(t *testing.T) {
+	app := NewApp()
+	app.View("home", VBox(Spinner())) // a spinner animates, so home wants a ticker
+	app.View("other", VBox(Text("static")))
+
+	home := app.viewTemplates["home"]
+	buf := NewBuffer(20, 5)
+
+	// render home: the spinner marks it animating and starts its ticker
+	app.currentView = "home"
+	home.Execute(buf, 20, 5)
+	if home.animTicker == nil {
+		t.Fatal("an animating view did not start a ticker")
+	}
+
+	// route away. home stops executing from here on.
+	app.Go("other")
+
+	if home.animTicker != nil || home.animDone != nil {
+		t.Fatal("switching away from an animating view left its ticker running — it will " +
+			"drive render requests at 60fps for a view nobody is showing, forever")
 	}
 }

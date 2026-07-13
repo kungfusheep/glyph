@@ -461,3 +461,43 @@ func TestHumanizeBindingName(t *testing.T) {
 		}
 	}
 }
+
+// TestOnBindingIsScopedToItsBranch pins the guarantee the docs now teach: a
+// binding declared with On inside a branch belongs to that branch, not the app.
+// glyph attaches the branch's router when the branch becomes visible and
+// disables it when it goes away, so the key simply does not exist while the
+// branch is closed. A global handler would have to ask whether the branch is
+// showing before acting, and that hand-managed lifetime is the bug On removes.
+func TestOnBindingIsScopedToItsBranch(t *testing.T) {
+	showModal := false
+	tmpl := Build(VBox(
+		On(Key("j", func() {}).Named("next")),
+		If(&showModal).Eq(true).Then(
+			VBox(
+				On(Key("<Escape>", func() { showModal = false }).Named("dismiss")),
+				Text("modal"),
+			),
+		),
+	))
+
+	for _, b := range tmpl.pendingRouteBindings {
+		if b.pattern == "<Escape>" {
+			t.Fatal("Escape leaked onto the root router — it belongs to the modal branch")
+		}
+	}
+	if len(tmpl.pendingRouteBindings) != 1 || tmpl.pendingRouteBindings[0].pattern != "j" {
+		t.Fatalf("root should carry only the always-on binding, got %+v", tmpl.pendingRouteBindings)
+	}
+
+	found := false
+	for _, child := range routeChildTemplates(tmpl) {
+		for _, b := range child.pendingRouteBindings {
+			if b.pattern == "<Escape>" && b.name == "dismiss" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the branch does not carry its own Escape binding — On is not branch-scoped")
+	}
+}

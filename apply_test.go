@@ -105,3 +105,39 @@ func TestApplyConcurrentProducersExactlyOnce(t *testing.T) {
 		}
 	}
 }
+
+// TestStopFromApplyClosureDoesNotRaceRunLoop pins the threading contract around
+// Stop. Stop is public and an Apply closure runs on the RENDER goroutine, so a
+// closure that stops the app writes `running` while the Run loop is reading it.
+// That is the exact shape glyph tells consumers to use: marshal work through
+// Apply, and stop from there when the last pane's process exits.
+//
+// The race detector is the oracle here — this test exists to be run under
+// -race, where a plain bool field fails and an atomic one does not.
+func TestStopFromApplyClosureDoesNotRaceRunLoop(t *testing.T) {
+	app := &App{
+		renderChan:     make(chan struct{}, 1),
+		nonInteractive: true, // Stop must not close os.Stdin under test
+	}
+	app.running.Store(true)
+
+	// the render goroutine drains applies at frame top; one of them stops the app
+	app.Apply(func() { app.Stop() })
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		app.drainApplies()
+	}()
+
+	// the Run loop's read of the same field, concurrently
+	spins := 0
+	for app.running.Load() && spins < 1_000_000 {
+		spins++
+	}
+	<-done
+
+	if app.running.Load() {
+		t.Fatal("Stop() from an Apply closure did not stop the run loop")
+	}
+}
