@@ -9,14 +9,26 @@ import (
 	termpkg "github.com/kungfusheep/glyph/term"
 )
 
-func shellPane(name string) *pane {
-	p := &pane{name: name}
-	p.term = termpkg.New().
-		Shell("/bin/sh").
-		Env("PS1=", "TERM=dumb").
-		Grow(1).
-		OnUpdate(func() {})
-	return p
+// testUI builds the app with deterministic shells and a compiled-once template,
+// returning the ui and a render func. The template is built ONCE — every render
+// re-executes it, which is the property the example is meant to demonstrate.
+func testUI(t *testing.T, w, h int) (*ui, func() *Buffer) {
+	t.Helper()
+	u := newUI(func() {}, func() {}, func(tc *termpkg.TermC) {
+		tc.Shell("/bin/sh").Env("PS1=", "TERM=dumb")
+	})
+	u.resize(w, h)
+	tmpl := Build(u.view())
+	t.Cleanup(func() {
+		for _, p := range u.tree.leaves() {
+			u.slots[p.slot].Close()
+		}
+	})
+	return u, func() *Buffer {
+		buf := NewBuffer(w, h)
+		tmpl.Execute(buf, int16(w), int16(h))
+		return buf
+	}
 }
 
 // rowIndexOf returns the column where sub first appears in any row, or -1.
@@ -29,39 +41,29 @@ func rowIndexOf(buf *Buffer, h int, sub string) int {
 	return -1
 }
 
-// TestViewRendersAndRoutesAcrossSplit drives the real usage path: build the
-// pane tree into a view, render it to a buffer, run a command in the focused
-// shell, split, and confirm both shells render — the second one in the right
-// half, proving a real side-by-side layout rather than overlap.
+// TestViewRendersAndRoutesAcrossSplit drives the real usage path: compile the
+// view once, render it, run a command in the focused shell, split, and confirm
+// both shells render — the second in the right half, proving a real side-by-side
+// layout rather than overlap. The split mutates state only; the template is
+// never rebuilt.
 func TestViewRendersAndRoutesAcrossSplit(t *testing.T) {
 	const W, H = 60, 16
 
-	p0 := shellPane("0")
-	tr := newTree(p0)
-	defer func() {
-		for _, p := range tr.leaves() {
-			p.term.Close()
-		}
-	}()
-
-	render := func() *Buffer {
-		buf := NewBuffer(W, H)
-		Build(buildView(tr)).Execute(buf, W, H)
-		return buf
-	}
+	u, render := testUI(t, W, H)
 	render() // first render lazily starts pane 0's pty
 
-	p0.term.Write([]byte("echo PANE_ZERO\n"))
+	p0 := u.tree.leaves()[0]
+	u.slots[p0.slot].Write([]byte("echo PANE_ZERO\n"))
 	if !waitFor(t, render, H, "PANE_ZERO", 3*time.Second) {
 		t.Fatal("pane 0 output never rendered")
 	}
 
 	// split side by side — focus moves to the new pane (tmux %)
-	p1 := shellPane("1")
-	tr.splitFocused(true, p1)
+	u.split(true)
 	render() // lazily starts pane 1 at its new (narrower) geometry
 
-	p1.term.Write([]byte("echo PANE_ONE\n"))
+	p1 := u.tree.focused
+	u.slots[p1.slot].Write([]byte("echo PANE_ONE\n"))
 	if !waitFor(t, render, H, "PANE_ONE", 3*time.Second) {
 		t.Fatal("pane 1 output never rendered after split")
 	}
@@ -76,24 +78,54 @@ func TestViewRendersAndRoutesAcrossSplit(t *testing.T) {
 	}
 }
 
-// TestStatusLineNamesFocusedPane checks the status line lists panes and the
-// focused pane's name is present (the naming requirement in the scope doc).
-func TestStatusLineNamesFocusedPane(t *testing.T) {
-	const W, H = 50, 8
-	p0 := shellPane("0")
-	tr := newTree(p0)
-	defer p0.term.Close()
+// TestUnusedSlotsNeverStartShells pins the pool's central claim: a slot with no
+// pane gets a zero rect, so it never opens a pty. If it were otherwise, merely
+// launching the app would spawn maxPanes shells.
+func TestUnusedSlotsNeverStartShells(t *testing.T) {
+	const W, H = 60, 16
+	u, render := testUI(t, W, H)
+	render()
 
-	buf := NewBuffer(W, H)
-	Build(buildView(tr)).Execute(buf, W, H)
+	live := u.tree.leaves()
+	if len(live) != 1 {
+		t.Fatalf("expected 1 pane at startup, got %d", len(live))
+	}
+	used := live[0].slot
+	for slot, tc := range u.slots {
+		if slot == used {
+			continue
+		}
+		if _, err := tc.Write([]byte("x")); err == nil {
+			t.Fatalf("slot %d has a live pty — unused slots must not start shells", slot)
+		}
+	}
+}
 
-	// status line is the last row
-	last := buf.GetLine(H - 1)
+// TestStatusLineTracksFocusAcrossSplit proves the status line is bound state,
+// not a rebuilt tree: after a split the new pane's name appears in the SAME
+// compiled template, and focus has moved to it.
+func TestStatusLineTracksFocusAcrossSplit(t *testing.T) {
+	const W, H = 60, 8
+	u, render := testUI(t, W, H)
+
+	last := render().GetLine(H - 1)
 	if !strings.Contains(last, "glyph-term") {
 		t.Fatalf("status line missing title: %q", last)
 	}
 	if !strings.Contains(last, "0") {
 		t.Fatalf("status line missing pane name: %q", last)
+	}
+
+	u.split(true)
+	last = render().GetLine(H - 1)
+	if !strings.Contains(last, "1") {
+		t.Fatalf("status line missing the new pane after split: %q", last)
+	}
+	if u.chips[1].Label != " 1 " || !u.chips[1].Focused {
+		t.Fatalf("focus did not move to the new pane: chips = %+v", u.chips)
+	}
+	if u.chips[0].Focused {
+		t.Fatalf("old pane still focused: chips = %+v", u.chips)
 	}
 }
 
@@ -107,4 +139,45 @@ func waitFor(t *testing.T, render func() *Buffer, h int, sub string, d time.Dura
 		time.Sleep(30 * time.Millisecond)
 	}
 	return false
+}
+
+// TestTemplateSurvivesStructuralChange is the regression guard for the property
+// this example exists to demonstrate: one compiled template, executed many times
+// across splits, focus moves and pane deaths. If a change reintroduces a rebuild,
+// the tree here would have to be recompiled to show the new panes — so a stale
+// template that still renders every pane proves the bindings, not a rebuild, are
+// carrying the state.
+func TestTemplateSurvivesStructuralChange(t *testing.T) {
+	const W, H = 60, 16
+	u, render := testUI(t, W, H)
+	render()
+
+	u.split(true)  // 2 panes
+	u.split(false) // 3 panes
+	u.focusNext()
+
+	if got := len(u.tree.leaves()); got != 3 {
+		t.Fatalf("expected 3 panes, got %d", got)
+	}
+
+	// the SAME template, never rebuilt, must now place three distinct panes
+	rects := u.layout(nil, W, 0)
+	seen := map[Rect]bool{}
+	for _, p := range u.tree.leaves() {
+		r := rects[p.slot]
+		if r.W == 0 || r.H == 0 {
+			t.Fatalf("pane in slot %d has an empty rect %+v — not placed", p.slot, r)
+		}
+		if seen[r] {
+			t.Fatalf("two panes share rect %+v — panes are overlapping, not tiled", r)
+		}
+		seen[r] = true
+	}
+
+	last := render().GetLine(H - 1)
+	for _, name := range []string{"0", "1", "2"} {
+		if !strings.Contains(last, name) {
+			t.Fatalf("status line %q missing pane %s after splits", last, name)
+		}
+	}
 }

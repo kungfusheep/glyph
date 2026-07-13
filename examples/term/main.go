@@ -1,7 +1,7 @@
 // Command term is a basic tmux clone built on the glyph terminal component: it
 // tiles panes, each running a shell on its own pty, with a tmux-style prefix
 // key (Ctrl-B) for splits and focus. It proves the term component embeds like
-// any other glyph Renderer.
+// any other glyph component.
 //
 // Keys: Ctrl-B then
 //
@@ -12,9 +12,6 @@
 //
 // Every other key goes to the focused shell. The app exits when the last shell
 // does.
-//
-// Not full-screen apps yet: vim/htop need the alt-screen buffer, which is a
-// later slice of the component. A plain shell (ls, cat, pipelines) renders.
 package main
 
 import (
@@ -27,22 +24,111 @@ import (
 	"github.com/kungfusheep/riffkey"
 )
 
-// ui owns the pane tree and serialises every structural change. All mutations
-// and the SetView rebuild happen under mu, so a shell exiting on its reader
-// goroutine never races a split fired from the input goroutine.
+// maxPanes bounds the pane pool. The view is compiled once, so every pane a
+// session can ever hold must exist as a child of the Arrange at compile time.
+//
+// A pool is needed because a Layer-backed component cannot be driven from a
+// ForEach: the compiled op holds the layer pointer captured at compile time, so
+// every item would render the same pane's buffer. Panes therefore get a slot
+// each, and the layout hands unused slots a zero rect.
+//
+// An unused slot costs nothing: a zero-size box makes the component skip its
+// frame, so it never opens a pty. Shells start only when a slot is given a real
+// box.
+const maxPanes = 16
+
+// ui owns the pane tree and serialises every structural change. Mutations run
+// under mu from the input and pty-reader goroutines; the layout function reads
+// the tree under the same lock on the render goroutine.
 type ui struct {
-	app      *App
-	mu       sync.Mutex
-	tree     *tree
+	render func() // repaint request
+	stop   func() // last shell exited
+
+	mu   sync.Mutex
+	tree *tree
+
+	slots    [maxPanes]*termpkg.TermC
+	free     []int
 	nextName int
+
+	// the screen box, tracked from resize events. The custom-layout callback is
+	// handed availH == 0 by the framework, so the height it lays out with has to
+	// come from here rather than from the layout call.
+	w, h int
+
+	// chips is the status line's bound model, rewritten whenever the pane set or
+	// the focus changes. The template reads it every frame.
+	chips []chip
+}
+
+// chip is one pane's entry in the status line. Label is derived at the point the
+// pane set changes, so the template only ever reads it.
+type chip struct {
+	Label   string
+	Focused bool
+}
+
+// newUI builds the pane pool and the initial single-pane tree. tune, when set,
+// configures every terminal in the pool; tests use it to pin a deterministic
+// shell.
+func newUI(render, stop func(), tune func(*termpkg.TermC)) *ui {
+	u := &ui{render: render, stop: stop}
+	for i := maxPanes - 1; i >= 0; i-- {
+		slot := i
+		t := termpkg.New().
+			Grow(0). // the Arrange sizes each pane; flex-grow would fight it
+			OnUpdate(render).
+			OnExit(func(error) { u.onSlotExit(slot) })
+		if tune != nil {
+			tune(t)
+		}
+		u.slots[i] = t
+		u.free = append(u.free, i)
+	}
+	u.tree = newTree(u.newPane())
+	u.sync()
+	return u
+}
+
+// resize records the screen box the layout works from.
+func (u *ui) resize(w, h int) {
+	u.mu.Lock()
+	u.w, u.h = w, h
+	u.mu.Unlock()
+	u.render()
+}
+
+// view is the whole screen, compiled once. Splits, focus changes and pane deaths
+// mutate the tree and the chip slice; the layout function and the template
+// re-read them every frame. Nothing here is ever rebuilt.
+//
+// The pane area is an Arrange. It cannot flex-grow (a custom-layout container
+// gets no grow factor), so it takes its height from the rects the layout returns
+// rather than from the box it is given.
+func (u *ui) view() Component {
+	return VBox(
+		Arrange(u.layout)(u.paneComponents()...),
+		HBox(
+			Text(" glyph-term ").Bold(),
+			ForEach(&u.chips, func(c *chip) Component {
+				return If(&c.Focused).
+					Then(Text(&c.Label).FG(Black).BG(Green)).
+					Else(Text(&c.Label).Dim())
+			}),
+			Text(`   C-b:  % vsplit   " hsplit   o next   x close`),
+		),
+	)
 }
 
 func main() {
 	app := NewApp()
-	u := &ui{app: app}
-	u.tree = newTree(u.newPane())
+	u := newUI(app.RequestRender, app.Stop, nil)
 
-	app.SetView(buildView(u.tree))
+	app.SetView(u.view())
+
+	sz := app.Size()
+	u.resize(int(sz.Width), int(sz.Height))
+	app.OnResize(u.resize)
 
 	app.Handle("<C-b>%", func() { u.split(true) })
 	app.Handle("<C-b>\"", func() { u.split(false) })
@@ -55,8 +141,8 @@ func main() {
 		u.mu.Lock()
 		f := u.tree.focused
 		u.mu.Unlock()
-		if f != nil && !f.dead && f.term != nil {
-			return f.term.HandleKey(k)
+		if f != nil && !f.dead {
+			return u.slots[f.slot].HandleKey(k)
 		}
 		return false
 	})
@@ -66,31 +152,120 @@ func main() {
 	}
 }
 
-// newPane creates a shell pane wired to repaint on output and to prune itself
-// when its shell exits.
+// paneComponents returns the pool in slot order. The Arrange addresses its
+// children by index, so this order is the contract the layout function relies on.
+func (u *ui) paneComponents() []Component {
+	out := make([]Component, maxPanes)
+	for i, t := range u.slots {
+		out[i] = t
+	}
+	return out
+}
+
+// layout places each live pane's slot and hands every unused slot a zero rect,
+// which parks it. It runs on the render goroutine every frame.
+//
+// availH arrives as 0 from the framework, so the pane height comes from the
+// tracked screen box, less the status row. The rects it returns are what give the
+// container its height, so returning them IS how the pane area gets sized.
+func (u *ui) layout(_ []ChildSize, availW, _ int) []Rect {
+	rects := make([]Rect, maxPanes)
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	w, h := u.w, u.h
+	if availW > 0 {
+		w = availW
+	}
+	if w <= 0 || h <= 1 {
+		return rects // no geometry yet
+	}
+
+	placeNode(u.tree.root, Rect{X: 0, Y: 0, W: w, H: h - 1}, rects)
+	return rects
+}
+
+// placeNode divides a box down the split tree, writing each leaf's rect into its
+// pane's slot. Children share their parent's box equally; the last one absorbs
+// the rounding remainder so no column is ever dropped.
+func placeNode(n *node, box Rect, rects []Rect) {
+	if n == nil {
+		return
+	}
+	if n.leaf != nil {
+		rects[n.leaf.slot] = box
+		return
+	}
+	kids := n.split.children
+	if len(kids) == 0 {
+		return
+	}
+	if n.split.horizontal {
+		w := box.W / len(kids)
+		for i, c := range kids {
+			cw := w
+			if i == len(kids)-1 {
+				cw = box.W - w*(len(kids)-1)
+			}
+			placeNode(c, Rect{X: box.X + w*i, Y: box.Y, W: cw, H: box.H}, rects)
+		}
+		return
+	}
+	h := box.H / len(kids)
+	for i, c := range kids {
+		ch := h
+		if i == len(kids)-1 {
+			ch = box.H - h*(len(kids)-1)
+		}
+		placeNode(c, Rect{X: box.X, Y: box.Y + h*i, W: box.W, H: ch}, rects)
+	}
+}
+
+// newPane claims a slot for a new shell. Caller holds u.mu (or is in setup).
+// It returns nil when the pool is exhausted.
 func (u *ui) newPane() *pane {
+	if len(u.free) == 0 {
+		return nil
+	}
+	slot := u.free[len(u.free)-1]
+	u.free = u.free[:len(u.free)-1]
+
 	name := strconv.Itoa(u.nextName)
 	u.nextName++
-	p := &pane{name: name}
-	p.term = termpkg.New().
-		Grow(1).
-		OnUpdate(u.app.RequestRender).
-		OnExit(func(error) { u.onPaneExit(p) })
-	return p
+	return &pane{slot: slot, name: name}
+}
+
+// sync pushes tree state into the parts of the world that are not the tree: the
+// focus flag on each terminal, and the status line's chip model. It runs at every
+// mutation, never during render. Caller holds u.mu (or is in setup).
+func (u *ui) sync() {
+	leaves := u.tree.leaves()
+	u.chips = u.chips[:0]
+	for _, p := range leaves {
+		u.slots[p.slot].Focus(p == u.tree.focused)
+		u.chips = append(u.chips, chip{
+			Label:   " " + p.name + " ",
+			Focused: p == u.tree.focused,
+		})
+	}
 }
 
 func (u *ui) split(horizontal bool) {
 	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.tree.splitFocused(horizontal, u.newPane())
-	u.rebuild()
+	if p := u.newPane(); p != nil {
+		u.tree.splitFocused(horizontal, p)
+	}
+	u.sync()
+	u.mu.Unlock()
+	u.render()
 }
 
 func (u *ui) focusNext() {
 	u.mu.Lock()
-	defer u.mu.Unlock()
 	u.tree.focusNext()
-	u.rebuild()
+	u.sync()
+	u.mu.Unlock()
+	u.render()
 }
 
 func (u *ui) closeFocused() {
@@ -98,65 +273,29 @@ func (u *ui) closeFocused() {
 	f := u.tree.focused
 	u.mu.Unlock()
 	if f != nil {
-		f.dead = true
-		f.term.Close() // reader hits EOF → onPaneExit prunes and rebuilds
+		// the reader hits EOF and onSlotExit prunes the pane
+		u.slots[f.slot].Close()
 	}
 }
 
-func (u *ui) onPaneExit(p *pane) {
+// onSlotExit prunes the pane whose shell exited and releases its slot back to
+// the pool. It runs on that pane's pty-reader goroutine.
+func (u *ui) onSlotExit(slot int) {
 	u.mu.Lock()
-	defer u.mu.Unlock()
-	p.dead = true
+	for _, p := range u.tree.leaves() {
+		if p.slot == slot {
+			p.dead = true
+		}
+	}
 	u.tree.prune()
-	if len(u.tree.leaves()) == 0 {
-		u.app.Stop()
+	u.free = append(u.free, slot)
+	empty := len(u.tree.leaves()) == 0
+	u.sync()
+	u.mu.Unlock()
+
+	if empty {
+		u.stop()
 		return
 	}
-	u.rebuild()
-}
-
-// rebuild reflects the current tree into the view. Caller holds u.mu.
-func (u *ui) rebuild() {
-	u.app.SetView(buildView(u.tree))
-	u.app.RequestRender()
-}
-
-// buildView renders the pane tree above a status line.
-func buildView(t *tree) Component {
-	return VBox(
-		buildNode(t.root, t.focused),
-		statusLine(t),
-	)
-}
-
-// buildNode recurses the split tree into nested boxes. Each pane and each split
-// grows to share its parent's space equally.
-func buildNode(n *node, focused *pane) Component {
-	if n.leaf != nil {
-		n.leaf.term.Focus(n.leaf == focused)
-		return n.leaf.term
-	}
-	kids := make([]Component, len(n.split.children))
-	for i, c := range n.split.children {
-		kids[i] = buildNode(c, focused)
-	}
-	if n.split.horizontal {
-		return HBox.Grow(1)(kids...)
-	}
-	return VBox.Grow(1)(kids...)
-}
-
-// statusLine names the panes, highlighting the focused one, and shows the key
-// hints.
-func statusLine(t *tree) Component {
-	kids := []Component{Text(" glyph-term ").Bold()}
-	for _, p := range t.leaves() {
-		chip := Text(" " + p.name + " ")
-		if p == t.focused {
-			chip = chip.FG(Black).BG(Green)
-		}
-		kids = append(kids, chip)
-	}
-	kids = append(kids, Text(`   C-b:  % vsplit   " hsplit   o next   x close`))
-	return HBox(kids...)
+	u.render()
 }

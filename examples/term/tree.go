@@ -1,11 +1,10 @@
 package main
 
-import termpkg "github.com/kungfusheep/glyph/term"
-
-// pane is one terminal in the layout: a hosted shell plus a display name. dead
-// is set when the shell exits, so the next prune removes it.
+// pane is one terminal in the layout. slot indexes the compiled pane pool, which
+// is how a pane reaches its terminal component and its rect. dead is set when the
+// shell exits, so the next prune removes it.
 type pane struct {
-	term *termpkg.TermC
+	slot int
 	name string
 	dead bool
 }
