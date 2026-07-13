@@ -3,6 +3,7 @@ package term
 import (
 	"bytes"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -87,4 +88,67 @@ func readUntil(t *testing.T, r io.Reader, sentinel []byte, d time.Duration) []by
 	case <-time.After(time.Until(deadline)):
 		return acc
 	}
+}
+
+// TestPTYUnicodeThroughRealShell is the end-to-end check for the rendering
+// defect: a real shell emits box-drawing UTF-8 and the DEC special graphics
+// set, and the grid must hold the glyphs a user expects to see. Decoding
+// byte-at-a-time (the original bug) leaves latin-1 mojibake here.
+func TestPTYUnicodeThroughRealShell(t *testing.T) {
+	p, err := startPTY("/bin/sh", []string{"PS1=", "TERM=xterm"}, 24, 80)
+	if err != nil {
+		t.Fatalf("startPTY: %v", err)
+	}
+	defer p.close()
+
+	s := newScreen(24, 80)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		buf := make([]byte, 4096)
+		for {
+			n, err := p.master.Read(buf)
+			if n > 0 {
+				s.write(buf[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	// printf writes the box line as raw UTF-8; the second uses ESC ( 0 so the
+	// shell drives the graphics charset the way ncurses does.
+	io.WriteString(p.master, "printf '\\342\\224\\214\\342\\224\\200\\342\\224\\220 caf\\303\\251\\n'\n")
+	io.WriteString(p.master, "printf '\\033(0lqk\\033(B done\\n'\n")
+	io.WriteString(p.master, "exit\n")
+	<-done
+
+	var found, foundDEC bool
+	for y := 0; y < 24; y++ {
+		row := rowText(s, y)
+		if strings.Contains(row, "┌─┐ café") {
+			found = true
+		}
+		if strings.Contains(row, "┌─┐ done") {
+			foundDEC = true
+		}
+	}
+	if !found {
+		t.Fatalf("no row holds the UTF-8 box line + café; grid:\n%s", dumpGrid(s))
+	}
+	if !foundDEC {
+		t.Fatalf("no row holds the DEC-graphics box line; grid:\n%s", dumpGrid(s))
+	}
+}
+
+func dumpGrid(s *screen) string {
+	var b strings.Builder
+	for y := 0; y < s.rows; y++ {
+		if r := rowText(s, y); r != "" {
+			b.WriteString(r)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
 }

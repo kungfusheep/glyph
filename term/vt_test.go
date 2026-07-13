@@ -174,3 +174,87 @@ func TestBackspaceAndTab(t *testing.T) {
 		t.Fatalf("row0 = %q, want 8 spaces then X", got)
 	}
 }
+
+func TestUTF8Printable(t *testing.T) {
+	s := newScreen(2, 20)
+	feed(s, "héllo → ✓")
+	if got := rowText(s, 0); got != "héllo → ✓" {
+		t.Fatalf("row0 = %q, want %q", got, "héllo → ✓")
+	}
+	if s.cx != 9 {
+		t.Fatalf("cx = %d, want 9 (one column per rune)", s.cx)
+	}
+}
+
+func TestUTF8SplitAcrossWrites(t *testing.T) {
+	s := newScreen(2, 20)
+	box := []byte("─") // e2 94 80
+	for _, b := range box {
+		s.write([]byte{b}) // one byte per pty read
+	}
+	if got := s.cellAt(0, 0).Rune; got != '─' {
+		t.Fatalf("cell(0,0) = %q (U+%04X), want ─", got, got)
+	}
+	if s.cx != 1 {
+		t.Fatalf("cx = %d, want 1", s.cx)
+	}
+}
+
+func TestUTF8InvalidByteIsReplacementChar(t *testing.T) {
+	s := newScreen(2, 20)
+	feed(s, "a\xffb")
+	if got := s.cellAt(1, 0).Rune; got != '�' {
+		t.Fatalf("cell(1,0) = U+%04X, want U+FFFD", got)
+	}
+	if got := s.cellAt(2, 0).Rune; got != 'b' {
+		t.Fatalf("cell(2,0) = %q, want b — parser must resync", got)
+	}
+}
+
+func TestDECSpecialGraphicsCharset(t *testing.T) {
+	s := newScreen(2, 20)
+	feed(s, "\x1b(0lqqk\x1b(Bqx")
+	if got := rowText(s, 0); got != "┌──┐qx" {
+		t.Fatalf("row0 = %q, want %q (graphics on, then ASCII again)", got, "┌──┐qx")
+	}
+}
+
+func TestWideRuneOccupiesTwoColumns(t *testing.T) {
+	s := newScreen(2, 20)
+	feed(s, "a世b")
+	if got := s.cellAt(1, 0).Rune; got != '世' {
+		t.Fatalf("cell(1,0) = %q, want 世", got)
+	}
+	if got := s.cellAt(2, 0).Rune; got != 0 {
+		t.Fatalf("cell(2,0) = U+%04X, want 0 (placeholder)", got)
+	}
+	if got := s.cellAt(3, 0).Rune; got != 'b' {
+		t.Fatalf("cell(3,0) = %q, want b", got)
+	}
+	if s.cx != 4 {
+		t.Fatalf("cx = %d, want 4", s.cx)
+	}
+}
+
+func TestWideRuneWrapsWholeAtRightMargin(t *testing.T) {
+	s := newScreen(2, 4)
+	feed(s, "abc世")
+	if got := s.cellAt(3, 0).Rune; got != ' ' {
+		t.Fatalf("cell(3,0) = %q, want blank — a wide rune must not straddle the margin", got)
+	}
+	if got := s.cellAt(0, 1).Rune; got != '世' {
+		t.Fatalf("cell(0,1) = %q, want 世 on the next row", got)
+	}
+}
+
+func TestOverwritingWideRuneBlanksItsOtherHalf(t *testing.T) {
+	s := newScreen(2, 20)
+	feed(s, "世\r")      // wide pair at cols 0..1
+	feed(s, "\x1b[2Gx") // land on col 1, the placeholder
+	if got := s.cellAt(0, 0).Rune; got != ' ' {
+		t.Fatalf("cell(0,0) = %q, want blank — the orphaned left half must clear", got)
+	}
+	if got := s.cellAt(1, 0).Rune; got != 'x' {
+		t.Fatalf("cell(1,0) = %q, want x", got)
+	}
+}

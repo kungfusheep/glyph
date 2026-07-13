@@ -2,6 +2,7 @@ package term
 
 import (
 	"sync"
+	"unicode/utf8"
 
 	glyph "github.com/kungfusheep/glyph"
 )
@@ -37,6 +38,9 @@ type screen struct {
 	private bool   // CSI '?' private-parameter prefix
 	interm  byte   // last intermediate byte (charset selector etc.)
 	oscBuf  []byte // OSC string accumulator
+	utf8Buf []byte // partial multi-byte sequence carried across write() calls
+
+	g0Graphics bool // G0 holds the DEC special graphics set (ESC ( 0)
 
 	onTitle func(string)
 }
@@ -127,11 +131,23 @@ func (s *screen) step(b byte) {
 	case stOSC:
 		s.osc(b)
 	case stCharset:
-		s.st = stGround // swallow the selector, we only run one charset
+		// only G0 is consulted when printing; the other slots are tracked as
+		// designated-and-ignored (SI/SO shifting is out of scope).
+		if s.interm == '(' {
+			s.g0Graphics = b == '0'
+		}
+		s.st = stGround
 	}
 }
 
 func (s *screen) ground(b byte) {
+	if b >= 0x80 {
+		s.decodeUTF8(b)
+		return
+	}
+	if len(s.utf8Buf) > 0 {
+		s.utf8Buf = s.utf8Buf[:0] // an ASCII byte abandons a truncated sequence
+	}
 	switch {
 	case b == 0x1b: // ESC
 		s.st = stEscape
@@ -152,7 +168,7 @@ func (s *screen) ground(b byte) {
 	case b < 0x20:
 		// other C0: ignore
 	default:
-		s.put(b)
+		s.put(rune(b))
 	}
 }
 
@@ -168,6 +184,7 @@ func (s *screen) escape(b byte) {
 		s.st = stOSC
 		s.oscBuf = s.oscBuf[:0]
 	case '(', ')', '*', '+':
+		s.interm = b
 		s.st = stCharset
 	case '7': // DECSC save cursor
 		s.savedCx, s.savedCy, s.savedPen = s.cx, s.cy, s.pen
@@ -327,20 +344,105 @@ func (s *screen) finishOSC() {
 	}
 }
 
-// put writes a printable byte at the cursor, applying deferred autowrap.
-func (s *screen) put(b byte) {
+// decodeUTF8 accumulates a multi-byte sequence and prints it once complete. The
+// buffer persists across write() calls, so a rune split over two pty reads still
+// lands as one glyph rather than a run of latin-1 garbage.
+func (s *screen) decodeUTF8(b byte) {
+	s.utf8Buf = append(s.utf8Buf, b)
+	if utf8.FullRune(s.utf8Buf) {
+		r, _ := utf8.DecodeRune(s.utf8Buf)
+		s.utf8Buf = s.utf8Buf[:0]
+		s.put(r)
+		return
+	}
+	if len(s.utf8Buf) >= utf8.UTFMax {
+		s.utf8Buf = s.utf8Buf[:0]
+		s.put(utf8.RuneError)
+	}
+}
+
+// decGraphics maps 0x5f..0x7e to the DEC special graphics set, which ncurses and
+// friends select with ESC ( 0 to draw box lines. Without it, `qqq` prints as the
+// letter q instead of a horizontal rule.
+var decGraphics = [...]rune{
+	' ', '◆', '▒', '␉', '␌', '␍', '␊', '°',
+	'±', '␤', '␋', '┘', '┐', '┌', '└', '┼',
+	'⎺', '⎻', '─', '⎼', '⎽', '├', '┤', '┴',
+	'┬', '│', '≤', '≥', 'π', '≠', '£', '·',
+}
+
+// put writes a printable rune at the cursor, applying the active charset,
+// deferred autowrap, and double-width layout.
+func (s *screen) put(r rune) {
+	if s.g0Graphics && r >= 0x5f && r <= 0x7e {
+		r = decGraphics[r-0x5f]
+	}
+	// ASCII is width 1 without consulting the table — this is the hot path.
+	w := 1
+	if r >= 0x1100 {
+		w = glyph.RuneWidth(r)
+	}
 	if s.wrapNext && s.autowrap {
 		s.cx = 0
 		s.lineFeed()
 		s.wrapNext = false
 	}
+	// a double-width rune never straddles the right margin: wrap it whole.
+	if w == 2 && s.cx == s.cols-1 {
+		if !s.autowrap {
+			return
+		}
+		s.cx = 0
+		s.lineFeed()
+	}
+
 	c := s.cellAt(s.cx, s.cy)
-	c.Rune = rune(b)
+	if isWideHalf(c.Rune) {
+		s.breakWideAt(s.cx)
+	}
+	c.Rune = r
 	c.Style = s.pen
-	if s.cx == s.cols-1 {
+	if w == 2 {
+		if p := s.cellAt(s.cx+1, s.cy); isWideHalf(p.Rune) {
+			s.breakWideAt(s.cx + 1)
+		}
+		p := s.cellAt(s.cx+1, s.cy)
+		p.Rune = 0 // placeholder: the renderer skips the second half
+		p.Style = s.pen
+	}
+
+	if nx := s.cx + w; nx >= s.cols {
+		s.cx = s.cols - 1
 		s.wrapNext = true // sit at the last column until the next glyph
 	} else {
-		s.cx++
+		s.cx = nx
+	}
+}
+
+// isWideHalf reports whether a cell could be either half of a double-width pair:
+// the placeholder (rune 0) or a rune wide enough to have one. It gates the
+// bisect check so the ASCII path never pays for the table lookup.
+func isWideHalf(r rune) bool {
+	return r == 0 || (r >= 0x1100 && glyph.RuneWidth(r) == 2)
+}
+
+// breakWideAt blanks the remains of a double-width pair that a write at x is
+// about to bisect, so no orphaned half survives to render as a hole.
+func (s *screen) breakWideAt(x int) {
+	if x < 0 || x >= s.cols {
+		return
+	}
+	c := s.cellAt(x, s.cy)
+	switch {
+	case c.Rune == 0 && x > 0:
+		if left := s.cellAt(x-1, s.cy); glyph.RuneWidth(left.Rune) == 2 {
+			left.Rune = ' '
+		}
+		c.Rune = ' '
+	case glyph.RuneWidth(c.Rune) == 2 && x+1 < s.cols:
+		if right := s.cellAt(x+1, s.cy); right.Rune == 0 {
+			right.Rune = ' '
+		}
 	}
 }
 
@@ -497,6 +599,8 @@ func (s *screen) reset() {
 	s.autowrap = true
 	s.cursorVisible = true
 	s.wrapNext = false
+	s.g0Graphics = false
+	s.utf8Buf = s.utf8Buf[:0]
 	s.clearAll()
 }
 
