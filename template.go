@@ -75,6 +75,13 @@ type valueBranchNode interface {
 }
 
 // LayoutFunc positions children given their sizes and available space.
+//
+// children is a scratch slice owned by the engine and reused every frame. Read
+// it during the call; do not retain it.
+//
+// The returned rects are the caller's slice. Allocating one per call allocates
+// once per frame, so reuse a slice held beside the layout to stay on the
+// zero-allocation path.
 type LayoutFunc func(children []ChildSize, availW, availH int) []Rect
 
 // ChildSize represents a child's computed minimum dimensions.
@@ -174,10 +181,13 @@ type Template struct {
 	refsCollected bool
 
 	// scratch buffers for per-frame reuse (avoid nil-slice allocs in hot paths)
-	flexScratchIdx  []int16   // flex child indices (shared by VBox + HBox phases)
-	flexScratchGrow []float32 // flex grow values (shared by VBox + HBox phases)
-	flexScratchImpl []int16   // implicit flex children (HBox only)
-	treeScratchPfx  []bool    // tree node line prefix
+	flexScratchIdx  []int16     // flex child indices (shared by VBox + HBox phases)
+	flexScratchGrow []float32   // flex grow values (shared by VBox + HBox phases)
+	flexScratchImpl []int16     // implicit flex children (HBox only)
+	treeScratchPfx  []bool      // tree node line prefix
+	layoutScratchCS []ChildSize // custom-layout child sizes; safe to share because
+	//                             layout runs bottom-up and each call consumes it
+	//                             before returning
 
 	// ext pools — contiguous allocations for cache-friendly render access.
 
@@ -7810,8 +7820,8 @@ func (t *Template) layoutCustom(idx int16, op *Op, geom *Geom) {
 		return
 	}
 
-	// Collect child sizes
-	var childSizes []ChildSize
+	// Collect child sizes into the shared scratch, keeping its grown capacity.
+	childSizes := t.layoutScratchCS[:0]
 	for i := op.ChildStart; i < op.ChildEnd; i++ {
 		childOp := &t.ops[i]
 		if childOp.Parent != idx {
@@ -7823,8 +7833,10 @@ func (t *Template) layoutCustom(idx int16, op *Op, geom *Geom) {
 			MinH: int(childGeom.H),
 		})
 	}
+	t.layoutScratchCS = childSizes
 
-	// Call the layout function
+	// Call the layout function. The rects it returns are the caller's slice; a
+	// LayoutFunc that allocates one per call allocates once per frame.
 	rects := clExt.layout(childSizes, int(geom.W), int(geom.H))
 
 	// Apply positions to children
