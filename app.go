@@ -57,7 +57,10 @@ type App struct {
 	viewStack     []string // pushed views (for modal overlays)
 
 	// State
-	running        bool
+	// running is written by Stop, which is public and callable from any
+	// goroutine (an App.Apply closure runs on the render goroutine), while the
+	// Run loop reads it. Atomic for the same reason as appDirty below.
+	running        atomic.Bool
 	renderMu       sync.Mutex
 	renderChan     chan struct{}
 	// render generations: reqGen stamps every RequestRender; doneGen records the
@@ -214,7 +217,7 @@ func (a *App) RunNonInteractive() error {
 		return fmt.Errorf("RunNonInteractive only works with inline apps")
 	}
 
-	a.running = true
+	a.running.Store(true)
 	a.nonInteractive = true
 
 	// Clean up buffer pool on exit
@@ -237,7 +240,7 @@ func (a *App) RunNonInteractive() error {
 	}
 	framePending := false
 
-	for a.running {
+	for a.running.Load() {
 		select {
 		case <-a.renderChan:
 			if !framePending {
@@ -1456,7 +1459,7 @@ func (a *App) RunFrom(startView string) error {
 }
 
 func (a *App) run(startView string) error {
-	a.running = true
+	a.running.Store(true)
 
 	// Set up starting view if specified
 	if startView != "" && a.viewTemplates != nil {
@@ -1538,7 +1541,7 @@ func (a *App) run(startView string) error {
 	// render immediately on input for zero-latency response;
 	// signal debounce timer to skip its next frame since we just rendered
 	err := a.input.Run(a.reader, func(handled bool) {
-		if !a.running {
+		if !a.running.Load() {
 			return
 		}
 		// Stamp the last-input time. This is the one central place every key
@@ -1565,7 +1568,7 @@ func (a *App) run(startView string) error {
 	})
 
 	// Normal termination via Stop() causes reader to return error
-	if !a.running {
+	if !a.running.Load() {
 		// Reopen stdin for inline apps so subsequent apps can use it
 		if a.inline {
 			reopenStdin()
@@ -1615,7 +1618,7 @@ func (a *App) handleRenderRequests() {
 	for {
 		select {
 		case <-a.renderChan:
-			if !a.running {
+			if !a.running.Load() {
 				return
 			}
 			if !framePending {
@@ -1627,7 +1630,7 @@ func (a *App) handleRenderRequests() {
 			}
 		case <-frameTimer.C:
 			framePending = false
-			if !a.running {
+			if !a.running.Load() {
 				return
 			}
 			// skip only when the last completed render already covered every
@@ -1648,7 +1651,7 @@ func (a *App) handleRenderRequests() {
 
 // Stop signals the application to stop.
 func (a *App) Stop() {
-	a.running = false
+	a.running.Store(false)
 	// Close stdin to unblock the input reader (not needed for non-interactive)
 	if !a.nonInteractive {
 		os.Stdin.Close()
