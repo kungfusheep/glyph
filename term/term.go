@@ -154,7 +154,13 @@ func (t *TermC) syncFrame() {
 func (t *TermC) startAt(w, h int) {
 	t.scr = newScreen(h, w)
 	t.scr.onTitle = t.onTitle
-	// terminal queries are answered as pty input: programs block on the reply
+	// Terminal queries are answered as pty input: programs block on the reply.
+	//
+	// This write happens on the reader goroutine. It can only block if the slave's
+	// input buffer fills (~4KB), which needs a child that emits queries and never
+	// reads its stdin — and such a child is already broken, since it would hang on
+	// its own reply. If that ever becomes real, hand the reply to a writer
+	// goroutine so the reader's only job stays reading.
 	t.scr.onReply = func(b []byte) { t.Write(b) }
 
 	p, err := startPTY(t.shell, t.env, uint16(h), uint16(w))
