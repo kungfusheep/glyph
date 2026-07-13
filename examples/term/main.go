@@ -17,7 +17,7 @@ package main
 import (
 	"log"
 	"strconv"
-	"sync"
+	"sync/atomic"
 
 	. "github.com/kungfusheep/glyph"
 	termpkg "github.com/kungfusheep/glyph/term"
@@ -50,16 +50,9 @@ type ui struct {
 	render func() // repaint request
 	stop   func() // last shell exited
 
-	// mu guards the tree and the pool against the INPUT goroutine, which is the
-	// only reader that is not already on the render goroutine: HandleUnmatched
-	// reads tree.focused there to route a key to the focused pane.
-	//
-	// The invariant that makes this safe, in full: every write lands on the render
-	// goroutine (via apply) under mu; the input goroutine reads under mu; and the
-	// template's Execute reads bound state on the render goroutine, after the
-	// applies have already run, so it needs no lock at all. Every reader is either
-	// on the mutating goroutine or holding mu.
-	mu   sync.Mutex
+	// tree, chips, the pool and the screen box are ALL written inside apply, so
+	// they have exactly one writer context: the frame top, before Execute reads
+	// them. No lock guards them because nothing else touches them.
 	tree *tree
 
 	slots    [maxPanes]*termpkg.TermC
@@ -77,6 +70,12 @@ type ui struct {
 	// chips is the status line's bound model, rewritten whenever the pane set or
 	// the focus changes. The template reads it every frame.
 	chips []chip
+
+	// focused is the one piece of state the INPUT goroutine reads: HandleUnmatched
+	// needs the active terminal to route a keystroke to. It is published here as a
+	// pointer rather than read off the tree, so the input path never touches
+	// apply-owned state and needs no lock.
+	focused atomic.Pointer[termpkg.TermC]
 }
 
 // chip is one pane's entry in the status line. Label is derived at the point the
@@ -110,11 +109,7 @@ func newUI(apply func(func()), render, stop func(), tune func(*termpkg.TermC)) *
 
 // resize records the screen box the layout works from.
 func (u *ui) resize(w, h int) {
-	u.apply(func() {
-		u.mu.Lock()
-		u.w, u.h = w, h
-		u.mu.Unlock()
-	})
+	u.apply(func() { u.w, u.h = w, h })
 }
 
 // view is the whole screen, compiled once. Splits, focus changes and pane deaths
@@ -157,11 +152,8 @@ func main() {
 	// Every unbound key goes to the focused shell. Ctrl-B is held by riffkey as
 	// a sequence prefix, so it never leaks here.
 	app.Router().HandleUnmatched(func(k riffkey.Key) bool {
-		u.mu.Lock()
-		f := u.tree.focused
-		u.mu.Unlock()
-		if f != nil && !f.dead {
-			return u.slots[f.slot].HandleKey(k)
+		if t := u.focused.Load(); t != nil {
+			return t.HandleKey(k)
 		}
 		return false
 	})
@@ -188,9 +180,6 @@ func (u *ui) paneComponents() []Component {
 // tracked screen box, less the status row. The rects it returns are what give the
 // container its height, so returning them IS how the pane area gets sized.
 func (u *ui) layout(_ []ChildSize, availW, _ int) []Rect {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
 	// reused across frames: this runs on the render path, and the caller copies
 	// the rects into child geometry before returning, so it never retains them.
 	rects := u.rects[:]
@@ -244,7 +233,7 @@ func placeNode(n *node, box Rect, rects []Rect) {
 	}
 }
 
-// newPane claims a slot for a new shell. Caller holds u.mu (or is in setup).
+// newPane claims a slot for a new shell. Called inside apply (or at setup).
 // It returns nil when the pool is exhausted.
 func (u *ui) newPane() *pane {
 	if len(u.free) == 0 {
@@ -259,8 +248,8 @@ func (u *ui) newPane() *pane {
 }
 
 // sync pushes tree state into the parts of the world that are not the tree: the
-// focus flag on each terminal, and the status line's chip model. It runs at every
-// mutation, never during render. Caller holds u.mu (or is in setup).
+// focus flag on each terminal, the status line's chip model, and the focused
+// pointer the input goroutine reads. It runs inside apply, never during render.
 func (u *ui) sync() {
 	leaves := u.tree.leaves()
 	u.chips = u.chips[:0]
@@ -271,12 +260,15 @@ func (u *ui) sync() {
 			Focused: p == u.tree.focused,
 		})
 	}
+	if f := u.tree.focused; f != nil {
+		u.focused.Store(u.slots[f.slot])
+	} else {
+		u.focused.Store(nil)
+	}
 }
 
 func (u *ui) split(horizontal bool) {
 	u.apply(func() {
-		u.mu.Lock()
-		defer u.mu.Unlock()
 		if p := u.newPane(); p != nil {
 			u.tree.splitFocused(horizontal, p)
 		}
@@ -286,20 +278,16 @@ func (u *ui) split(horizontal bool) {
 
 func (u *ui) focusNext() {
 	u.apply(func() {
-		u.mu.Lock()
-		defer u.mu.Unlock()
 		u.tree.focusNext()
 		u.sync()
 	})
 }
 
+// closeFocused kills the focused shell. Its reader then hits EOF and onSlotExit
+// prunes the pane.
 func (u *ui) closeFocused() {
-	u.mu.Lock()
-	f := u.tree.focused
-	u.mu.Unlock()
-	if f != nil {
-		// the reader hits EOF and onSlotExit prunes the pane
-		u.slots[f.slot].Close()
+	if t := u.focused.Load(); t != nil {
+		t.Close()
 	}
 }
 
@@ -311,7 +299,6 @@ func (u *ui) closeFocused() {
 // from this goroutine races the template iterating it.
 func (u *ui) onSlotExit(slot int) {
 	u.apply(func() {
-		u.mu.Lock()
 		for _, p := range u.tree.leaves() {
 			if p.slot == slot {
 				p.dead = true
@@ -319,11 +306,9 @@ func (u *ui) onSlotExit(slot int) {
 		}
 		u.tree.prune()
 		u.free = append(u.free, slot)
-		empty := len(u.tree.leaves()) == 0
 		u.sync()
-		u.mu.Unlock()
 
-		if empty {
+		if len(u.tree.leaves()) == 0 {
 			u.stop()
 		}
 	})

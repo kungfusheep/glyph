@@ -12,25 +12,44 @@ import (
 // testUI builds the app with deterministic shells and a compiled-once template,
 // returning the ui and a render func. The template is built ONCE — every render
 // re-executes it, which is the property the example is meant to demonstrate.
-func testUI(t *testing.T, w, h int) (*ui, func() *Buffer) {
+func testUI(t *testing.T, w, h int) (u *ui, render func() *Buffer, drain func()) {
 	t.Helper()
-	// synchronous apply: these tests render on the test goroutine, so a mutation
-	// can run in place. The concurrent case is covered in race_test.go.
-	u := newUI(func(fn func()) { fn() }, func() {}, func() {}, func(tc *termpkg.TermC) {
-		tc.Shell("/bin/sh").Env("PS1=", "TERM=dumb")
-	})
+	// Queue applies and drain them at frame top, exactly as glyph does. Running a
+	// closure inline would execute a pty-reader callback on the reader goroutine,
+	// which is the very thing apply exists to prevent — and the tests would then
+	// be modelling something the app never does.
+	applies := make(chan func(), 1024)
+	u = newUI(
+		func(fn func()) { applies <- fn },
+		func() {}, func() {},
+		func(tc *termpkg.TermC) { tc.Shell("/bin/sh").Env("PS1=", "TERM=dumb") },
+	)
+	drain = func() {
+		for {
+			select {
+			case fn := <-applies:
+				fn()
+			default:
+				return
+			}
+		}
+	}
 	u.resize(w, h)
+	drain()
 	tmpl := Build(u.view())
 	t.Cleanup(func() {
+		drain()
 		for _, p := range u.tree.leaves() {
 			u.slots[p.slot].Close()
 		}
 	})
-	return u, func() *Buffer {
+	render = func() *Buffer {
+		drain() // frame top
 		buf := NewBuffer(w, h)
 		tmpl.Execute(buf, int16(w), int16(h))
 		return buf
 	}
+	return u, render, drain
 }
 
 // rowIndexOf returns the column where sub first appears in any row, or -1.
@@ -51,7 +70,7 @@ func rowIndexOf(buf *Buffer, h int, sub string) int {
 func TestViewRendersAndRoutesAcrossSplit(t *testing.T) {
 	const W, H = 60, 16
 
-	u, render := testUI(t, W, H)
+	u, render, _ := testUI(t, W, H)
 	render() // first render lazily starts pane 0's pty
 
 	p0 := u.tree.leaves()[0]
@@ -62,7 +81,7 @@ func TestViewRendersAndRoutesAcrossSplit(t *testing.T) {
 
 	// split side by side — focus moves to the new pane (tmux %)
 	u.split(true)
-	render() // lazily starts pane 1 at its new (narrower) geometry
+	render() // drains the apply, then lazily starts pane 1 at its new geometry
 
 	p1 := u.tree.focused
 	u.slots[p1.slot].Write([]byte("echo PANE_ONE\n"))
@@ -85,7 +104,7 @@ func TestViewRendersAndRoutesAcrossSplit(t *testing.T) {
 // launching the app would spawn maxPanes shells.
 func TestUnusedSlotsNeverStartShells(t *testing.T) {
 	const W, H = 60, 16
-	u, render := testUI(t, W, H)
+	u, render, _ := testUI(t, W, H)
 	render()
 
 	live := u.tree.leaves()
@@ -108,7 +127,7 @@ func TestUnusedSlotsNeverStartShells(t *testing.T) {
 // compiled template, and focus has moved to it.
 func TestStatusLineTracksFocusAcrossSplit(t *testing.T) {
 	const W, H = 60, 8
-	u, render := testUI(t, W, H)
+	u, render, _ := testUI(t, W, H)
 
 	last := render().GetLine(H - 1)
 	if !strings.Contains(last, "glyph-term") {
@@ -151,12 +170,13 @@ func waitFor(t *testing.T, render func() *Buffer, h int, sub string, d time.Dura
 // carrying the state.
 func TestTemplateSurvivesStructuralChange(t *testing.T) {
 	const W, H = 60, 16
-	u, render := testUI(t, W, H)
+	u, render, drain := testUI(t, W, H)
 	render()
 
 	u.split(true)  // 2 panes
 	u.split(false) // 3 panes
 	u.focusNext()
+	drain()
 
 	if got := len(u.tree.leaves()); got != 3 {
 		t.Fatalf("expected 3 panes, got %d", got)
@@ -189,8 +209,9 @@ func TestTemplateSurvivesStructuralChange(t *testing.T) {
 // garbage at frame rate — the same defect the terminal's blit had.
 func TestLayoutDoesNotAllocatePerFrame(t *testing.T) {
 	const W, H = 60, 16
-	u, _ := testUI(t, W, H)
+	u, _, drain := testUI(t, W, H)
 	u.split(true)
+	drain()
 	u.layout(nil, W, 0) // warm
 
 	if got := testing.AllocsPerRun(50, func() { u.layout(nil, W, 0) }); got != 0 {
