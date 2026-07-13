@@ -307,3 +307,32 @@ func TestReplyNotSentUnderScreenLock(t *testing.T) {
 		t.Fatal("onReply fired while write() held the screen lock")
 	}
 }
+
+// TestCSIParameterPrefixSwallowed feeds the escape sequences a hosted agent emits
+// in its first frame. The '<' '=' '>' prefixes are parameter bytes like '?', so an
+// unimplemented one must be consumed, not abort the sequence and leak its
+// parameters into the grid as printable text.
+func TestCSIParameterPrefixSwallowed(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{"alt screen", "\x1b[?1049h"},
+		{"kitty keyboard push", "\x1b[>1u"},
+		{"kitty keyboard query", "\x1b[?u"},
+		{"modifyOtherKeys", "\x1b[>4;2m"},
+		{"mouse reporting", "\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h"},
+		{"bracketed paste + focus", "\x1b[?2004h\x1b[?1004h"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newScreen(4, 40)
+			feed(s, tc.in)
+			feed(s, "OK")
+			if got := rowText(s, 0); got != "OK" {
+				t.Errorf("row0 = %q, want %q — escape leaked into the grid", got, "OK")
+			}
+		})
+	}
+}

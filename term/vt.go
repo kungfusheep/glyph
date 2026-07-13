@@ -37,6 +37,7 @@ type screen struct {
 	st      parseState
 	params  []int
 	private bool   // CSI '?' private-parameter prefix
+	prefix  byte   // CSI parameter-prefix byte, 0x3c-0x3f ('<' '=' '>' '?')
 	interm  byte   // last intermediate byte (charset selector etc.)
 	oscBuf  []byte // OSC string accumulator
 	utf8Buf []byte // partial multi-byte sequence carried across write() calls
@@ -214,6 +215,7 @@ func (s *screen) escape(b byte) {
 		s.params = s.params[:0]
 		s.params = append(s.params, 0)
 		s.private = false
+		s.prefix = 0
 		s.interm = 0
 	case ']':
 		s.st = stOSC
@@ -254,8 +256,9 @@ func (s *screen) csi(b byte) {
 		s.params[n] = s.params[n]*10 + int(b-'0')
 	case b == ';':
 		s.params = append(s.params, 0)
-	case b == '?':
-		s.private = true
+	case b >= 0x3c && b <= 0x3f: // parameter prefix: '<' '=' '>' '?'
+		s.prefix = b
+		s.private = b == '?'
 	case b >= 0x20 && b <= 0x2f: // intermediate
 		s.interm = b
 	case b >= 0x40 && b <= 0x7e: // final byte
@@ -274,8 +277,13 @@ func (s *screen) param(i, def int) int {
 }
 
 func (s *screen) dispatchCSI(final byte) {
-	if s.private {
-		s.privateMode(final)
+	if s.prefix != 0 {
+		if s.private {
+			s.privateMode(final)
+		}
+		// '<' '=' '>' forms (kitty keyboard protocol, modifyOtherKeys) are
+		// consumed and ignored. Without a prefix case they would abort the
+		// sequence and the parameters would print into the grid as text.
 		return
 	}
 	switch final {
