@@ -89,6 +89,13 @@ type ChildSize struct {
 	MinW, MinH int
 }
 
+// scratchPoison is written over the custom-layout child sizes once the LayoutFunc
+// returns. The slice it is handed aliases an engine-owned scratch, so retaining it
+// is a contract violation; a wildly negative size makes that violation show up as
+// an obviously broken layout on the very next frame rather than as plausible data
+// from the wrong frame months later.
+const scratchPoison = -0x0BADC0DE
+
 // Rect represents a positioned rectangle.
 type Rect struct {
 	X, Y, W, H int
@@ -7865,6 +7872,16 @@ func (t *Template) layoutCustom(idx int16, op *Op, geom *Geom) {
 	// Call the layout function. The rects it returns are the caller's slice; a
 	// LayoutFunc that allocates one per call allocates once per frame.
 	rects := clExt.layout(childSizes, int(geom.W), int(geom.H))
+
+	// childSizes aliases an engine-owned scratch that is refilled every frame, so
+	// a LayoutFunc must read it during the call and never retain it. Scribble it
+	// now that the callback has returned: a layout that kept the slice sees
+	// obvious nonsense on the next frame instead of plausible-looking data that
+	// silently belongs to a different frame. Nothing downstream reads childSizes —
+	// only rects, above — so this is free to do here.
+	for i := range childSizes {
+		childSizes[i] = ChildSize{MinW: scratchPoison, MinH: scratchPoison}
+	}
 
 	// Apply positions to children
 	childIdx := 0

@@ -7319,6 +7319,41 @@ func TestCustomLayoutDoesNotAllocatePerFrame(t *testing.T) {
 	}
 }
 
+// TestArrangeScratchIsPoisonedAfterCallback makes the retain-the-slice mistake
+// fail loudly. The children slice a LayoutFunc receives aliases an engine-owned
+// scratch that is refilled every frame, so keeping it is a contract violation —
+// but one that would otherwise produce plausible data belonging to a different
+// frame, surfacing as a subtly wrong layout much later and nowhere near the cause.
+//
+// Poisoning it the moment the callback returns turns that into obvious nonsense on
+// the very next read.
+func TestArrangeScratchIsPoisonedAfterCallback(t *testing.T) {
+	var retained []ChildSize // the mistake: a LayoutFunc that keeps the slice
+	rects := make([]Rect, 3)
+	layout := func(children []ChildSize, availW, availH int) []Rect {
+		retained = children
+		r := rects[:len(children)]
+		for i := range children {
+			r[i] = Rect{X: 0, Y: i, W: 10, H: 1}
+		}
+		return r
+	}
+
+	tmpl := Build(Arrange(layout)(Text("A"), Text("B"), Text("C")))
+	buf := NewBuffer(40, 10)
+	tmpl.Execute(buf, 40, 10)
+
+	if len(retained) == 0 {
+		t.Fatal("the layout never saw its children")
+	}
+	for i, cs := range retained {
+		if cs.MinW != scratchPoison || cs.MinH != scratchPoison {
+			t.Errorf("retained[%d] = %+v, want poison — a LayoutFunc that keeps the "+
+				"children slice must see obvious nonsense, not data from another frame", i, cs)
+		}
+	}
+}
+
 // BenchmarkCustomLayoutFrame measures a steady-state Arrange frame.
 func BenchmarkCustomLayoutFrame(b *testing.B) {
 	rects := make([]Rect, 6)
