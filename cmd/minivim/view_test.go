@@ -167,3 +167,55 @@ func TestEditorGeometryMatchesEngine(t *testing.T) {
 		}
 	}
 }
+
+// TestWindowLayerReclaimsMemory guards the cost of keeping the layer alive.
+// EnsureSize only grows, so a window that reuses its layer would carry the
+// largest document it ever showed for the rest of the session.
+//
+// The layer POINTER must survive — the compiled template holds it, and swapping
+// it is the bug the reuse exists to prevent — while the buffer behind it shrinks.
+func TestWindowLayerReclaimsMemory(t *testing.T) {
+	ed := newTestEditor(80, 24)
+	w := ed.focusedWindow
+
+	big := make([]string, 100000)
+	for i := range big {
+		big[i] = "x"
+	}
+	w.buffer.Lines = big
+	ed.initWindowLayer(w, 80)
+
+	layerBefore := w.contentLayer
+	if h := w.contentLayer.Buffer().Height(); h < 100000 {
+		t.Fatalf("buffer is %d rows for a 100k-line file, want at least 100000", h)
+	}
+
+	// open a short file in the same window
+	w.buffer.Lines = []string{"one", "two", "three"}
+	w.renderedMin, w.renderedMax = -1, -1
+	ed.initWindowLayer(w, 80)
+
+	if got := w.contentLayer.Buffer().Height(); got > 1000 {
+		t.Errorf("buffer still %d rows after opening a 3-line file — the window carries every document it ever showed", got)
+	}
+	if w.contentLayer != layerBefore {
+		t.Error("the layer pointer changed — the compiled template is now stranded on the old layer")
+	}
+
+	// and a narrowed terminal reclaims the width
+	ed.initWindowLayer(w, 400)
+	ed.initWindowLayer(w, 80)
+	if got := w.contentLayer.Buffer().Width(); got > 80 {
+		t.Errorf("buffer still %d columns after narrowing to 80", got)
+	}
+	if w.contentLayer != layerBefore {
+		t.Error("the layer pointer changed across a resize")
+	}
+
+	// the content must still paint after the buffer was swapped underneath
+	buf := glyph.NewBuffer(80, 24)
+	glyph.Build(buildView(ed)).Execute(buf, 80, 24)
+	if !strings.Contains(rowText(buf, 0), "one") {
+		t.Errorf("window is blank after the buffer swap; row0 = %q", rowText(buf, 0))
+	}
+}
