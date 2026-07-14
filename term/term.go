@@ -33,10 +33,27 @@ type TermC struct {
 	// is garbage at pty output rate. Reallocated only when the viewport resizes.
 	buf *glyph.Buffer
 
-	mu         sync.Mutex
+	mu sync.Mutex
+	// rw is the byte stream the terminal drives: the master side of a pty we
+	// forked (New), or a stream handed to us by a caller whose process lives
+	// elsewhere (Stream). pty is non-nil ONLY when we forked it, which is what
+	// decides whether Close may kill anything.
+	rw         io.ReadWriter
 	pty        *pty
+	onResize   func(rows, cols uint16)
 	curW, curH int
 	focused    bool
+	closing    bool
+
+	// writes are funnelled through one goroutine. The reader answers terminal
+	// queries (cursor position, device attributes) by writing back, and a write
+	// that blocks on the reader's own goroutine stops it draining the far side.
+	// A pty master only blocks once the child stops reading, but a socket blocks
+	// whenever the peer is slow, so the reader must never write directly.
+	wmu    sync.Mutex
+	wcond  *sync.Cond
+	wq     [][]byte
+	wclose bool
 }
 
 // New creates a terminal component running $SHELL (or /bin/sh). The pty starts
@@ -45,12 +62,42 @@ type TermC struct {
 // New (not Term) is the constructor: the package name already carries the noun,
 // so term.New() reads without stutter, the way list.New() does.
 func New() *TermC {
+	t := newTermC()
+	t.shell = defaultShell()
+	t.env = os.Environ()
+	return t
+}
+
+// Stream drives the terminal from an existing byte stream instead of forking a
+// shell. Output is read from rw and keys are written to it, so the process on the
+// far side can live in another process entirely — behind a socket, say — and
+// outlive the component.
+//
+// onResize is called with the new cell geometry whenever the layout box changes,
+// in place of the TIOCSWINSZ the component issues when it owns the pty. It is how
+// the far side learns its size.
+//
+// onResize FIRES ON THE RENDER GOROUTINE, inside Execute, and it must not block:
+// enqueue the resize and return. A caller that writes it to a socket inline stalls
+// the frame whenever the peer is slow, and a window drag calls this on consecutive
+// frames, not once.
+//
+// The component does not own the far-side process, so Close closes the stream and
+// leaves that process running. Use New for a terminal that forks and owns its own
+// shell.
+func Stream(rw io.ReadWriter, onResize func(rows, cols uint16)) *TermC {
+	t := newTermC()
+	t.rw = rw
+	t.onResize = onResize
+	return t
+}
+
+func newTermC() *TermC {
 	t := &TermC{
-		shell: defaultShell(),
-		env:   os.Environ(),
 		grow:  1, // terminals fill their box by default
 		layer: glyph.NewLayer(),
 	}
+	t.wcond = sync.NewCond(&t.wmu)
 	// syncFrame runs every frame the layer needs rendering (output arrived or
 	// the viewport changed). The framework has already set the viewport, so it
 	// is the natural place to size the pty and blit the grid.
@@ -107,26 +154,47 @@ func (t *TermC) Focus(focused bool) *TermC {
 // Ref calls f with this TermC and returns it for chaining.
 func (t *TermC) Ref(f func(*TermC)) *TermC { f(t); return t }
 
-// Write sends raw bytes to the pty (the shell's stdin).
+// Write sends raw bytes to the terminal as input (the far side's stdin). The
+// bytes are queued for the writer goroutine, so this never blocks on a slow peer.
 func (t *TermC) Write(p []byte) (int, error) {
 	t.mu.Lock()
-	pty := t.pty
+	rw := t.rw
 	t.mu.Unlock()
-	if pty == nil {
+	if rw == nil {
 		return 0, io.ErrClosedPipe
 	}
-	return pty.master.Write(p)
+	t.enqueue(p)
+	return len(p), nil
 }
 
-// Close tears down the pty and reaps the shell.
+// Close tears down the terminal.
+//
+// It kills the far-side process ONLY if this component forked it (New). A
+// stream-backed terminal (Stream) does not own the process on the other end, so
+// Close closes the stream and stops the reader, and that process keeps running —
+// which is what lets a host detach from a long-lived agent instead of killing it.
 func (t *TermC) Close() error {
 	t.mu.Lock()
-	p := t.pty
-	t.mu.Unlock()
-	if p == nil {
+	if t.closing {
+		t.mu.Unlock()
 		return nil
 	}
-	return p.close()
+	t.closing = true
+	p, rw := t.pty, t.rw
+	t.mu.Unlock()
+
+	t.wmu.Lock()
+	t.wclose = true
+	t.wcond.Broadcast()
+	t.wmu.Unlock()
+
+	if p != nil {
+		return p.close() // we forked it, so we reap it
+	}
+	if c, ok := rw.(io.Closer); ok {
+		return c.Close() // hand the stream back; the far side lives on
+	}
+	return nil
 }
 
 // Build implements glyph.Component: the terminal renders through a Layer, so it
@@ -150,53 +218,105 @@ func (t *TermC) syncFrame() {
 	t.blitToLayer(w, h)
 }
 
-// startAt opens the pty at the given cell geometry and starts the reader.
+// startAt brings the terminal up at the given cell geometry: it forks a pty when
+// it owns one, sizes the far side, and starts the reader and writer.
 func (t *TermC) startAt(w, h int) {
 	t.scr = newScreen(h, w)
 	t.scr.onTitle = t.onTitle
-	// Terminal queries are answered as pty input: programs block on the reply.
-	//
-	// This write happens on the reader goroutine, so a blocking write would stop
-	// the reader draining the child. Measured, not assumed: a shell flooding DSR
-	// in a loop and never reading its stdin moved 2MB with zero reader stalls, so
-	// the query path does not wedge. But a master write CAN block — filling the
-	// slave's input queue with bytes the child never consumes blocks at ~34KB.
-	//
-	// The safety here rests on replies being small and reactive, one per query,
-	// not on master writes being unblockable. If replies ever grow large or
-	// unsolicited (mouse reporting, bracketed paste), re-measure: the fix is a
-	// writer goroutine so the reader's only job stays reading.
-	t.scr.onReply = func(b []byte) { t.Write(b) }
+	// Terminal queries are answered as terminal input: programs block on the
+	// reply. The reply is queued, never written inline, so the reader's only job
+	// stays reading.
+	t.scr.onReply = t.enqueue
 
-	p, err := startPTY(t.shell, t.env, uint16(h), uint16(w))
-	if err != nil {
-		if t.onExit != nil {
-			t.onExit(err)
-		}
-		return
-	}
 	t.mu.Lock()
-	t.pty = p
-	t.curW, t.curH = w, h
+	rw := t.rw
 	t.mu.Unlock()
 
-	go t.readLoop(p)
+	if rw == nil { // New: we fork the shell and own it
+		p, err := startPTY(t.shell, t.env, uint16(h), uint16(w))
+		if err != nil {
+			if t.onExit != nil {
+				t.onExit(err)
+			}
+			return
+		}
+		t.mu.Lock()
+		t.pty = p
+		t.rw = p.master
+		// TIOCSWINSZ on a pty we own: local, and it cannot meaningfully block.
+		t.onResize = func(rows, cols uint16) { p.resize(rows, cols) }
+		rw = p.master
+		t.mu.Unlock()
+	}
+
+	t.mu.Lock()
+	t.curW, t.curH = w, h
+	onResize := t.onResize
+	t.mu.Unlock()
+
+	// a stream-backed terminal has to be told its size before the far side paints
+	// its first frame; the forked pty was already opened at this geometry.
+	if t.pty == nil && onResize != nil {
+		onResize(uint16(h), uint16(w))
+	}
+
+	go t.writeLoop(rw)
+	go t.readLoop(rw)
 }
 
-// resizeIfNeeded reshapes the grid and pty when the viewport changes.
+// enqueue hands bytes to the writer goroutine. It never blocks the caller, so it
+// is safe from the reader goroutine (terminal query replies) and from the render
+// goroutine.
+func (t *TermC) enqueue(b []byte) {
+	cp := make([]byte, len(b))
+	copy(cp, b)
+	t.wmu.Lock()
+	if !t.wclose {
+		t.wq = append(t.wq, cp)
+		t.wcond.Signal()
+	}
+	t.wmu.Unlock()
+}
+
+// writeLoop is the only writer to the stream.
+func (t *TermC) writeLoop(rw io.ReadWriter) {
+	for {
+		t.wmu.Lock()
+		for len(t.wq) == 0 && !t.wclose {
+			t.wcond.Wait()
+		}
+		if t.wclose {
+			t.wmu.Unlock()
+			return
+		}
+		batch := t.wq
+		t.wq = nil
+		t.wmu.Unlock()
+
+		for _, b := range batch {
+			if _, err := rw.Write(b); err != nil {
+				return // the stream is gone; the reader reports it
+			}
+		}
+	}
+}
+
+// resizeIfNeeded reshapes the grid and tells the far side, when the viewport
+// changes. This runs on the render goroutine, which is why onResize must not
+// block (see Stream).
 func (t *TermC) resizeIfNeeded(w, h int) {
 	t.mu.Lock()
 	changed := w != t.curW || h != t.curH
-	p := t.pty
+	onResize := t.onResize
 	if changed {
 		t.curW, t.curH = w, h
 	}
 	t.mu.Unlock()
-	if !changed || p == nil {
+	if !changed || onResize == nil {
 		return
 	}
 	t.scr.resize(h, w)
-	p.resize(uint16(h), uint16(w))
+	onResize(uint16(h), uint16(w))
 }
 
 // blitToLayer copies the grid into the layer's buffer, then mirrors the pty
@@ -232,12 +352,12 @@ func (t *TermC) blitToLayer(w, h int) {
 	}
 }
 
-// readLoop pumps pty output into the screen and requests repaints. It exits on
-// EOF/error (the shell closed), firing OnExit.
-func (t *TermC) readLoop(p *pty) {
+// readLoop pumps the far side's output into the screen and requests repaints. It
+// exits on EOF/error (the far side went away), firing OnExit.
+func (t *TermC) readLoop(rw io.ReadWriter) {
 	buf := make([]byte, 32*1024)
 	for {
-		n, err := p.master.Read(buf)
+		n, err := rw.Read(buf)
 		if n > 0 {
 			t.scr.write(buf[:n])
 			t.layer.Invalidate()

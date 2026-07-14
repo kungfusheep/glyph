@@ -1,8 +1,11 @@
 package term
 
 import (
+	"io"
+	"net"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -200,4 +203,79 @@ func TestFullScreenProgramInPane(t *testing.T) {
 	waitFor(t, 5*time.Second, "the shell's output to come back", func() bool {
 		return bufContains(renderTerm(tc, w, h), h, "MARKER_IN_SHELL")
 	})
+}
+
+// TestStreamDoesNotOwnTheFarSide is the point of the Stream constructor: the
+// component drives a process it did not fork, and closing the pane leaves that
+// process running.
+//
+// The far side is modelled the way a host actually holds one: a real shell on a
+// pty owned by someone else, reached over a socket. The terminal only ever sees
+// the socket, so closing it cannot reach the process.
+func TestStreamDoesNotOwnTheFarSide(t *testing.T) {
+	p, err := startPTY("/bin/sh", []string{"PS1=", "TERM=dumb"}, 10, 40)
+	if err != nil {
+		t.Fatalf("start far side: %v", err)
+	}
+	defer p.close()
+	pid := p.cmd.Process.Pid
+
+	hostSide, uiSide := net.Pipe()
+	go io.Copy(hostSide, p.master) // far side → socket
+	go io.Copy(p.master, hostSide) // socket → far side
+
+	var gotRows, gotCols uint16
+	tc := Stream(uiSide, func(rows, cols uint16) { gotRows, gotCols = rows, cols })
+	tc.OnUpdate(func() {})
+
+	const w, h = 40, 10
+	renderTerm(tc, w, h)
+
+	// output flows in, keys flow out — over the injected stream, with no pty of ours
+	tc.Write([]byte("echo STREAM_OK\n"))
+	waitFor(t, 5*time.Second, "output over the injected stream", func() bool {
+		return bufContains(renderTerm(tc, w, h), h, "STREAM_OK")
+	})
+	if gotRows != h || gotCols != w {
+		t.Errorf("onResize got %dx%d, want %dx%d — the far side was never told its size", gotRows, gotCols, h, w)
+	}
+
+	// leaving the pane closes the stream...
+	if err := tc.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if _, err := uiSide.Write([]byte("x")); err == nil {
+		t.Error("the stream is still open after Close — Close must hand the stream back")
+	}
+
+	// ...and does not reach the process behind it
+	time.Sleep(300 * time.Millisecond)
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("far-side process %d died on Close (%v) — the component killed what it does not own", pid, err)
+	}
+}
+
+// TestNewOwnsItsShell is the contrast: a terminal that forked its own shell still
+// reaps it, so Close stays a full teardown for the case where the component IS the
+// owner.
+func TestNewOwnsItsShell(t *testing.T) {
+	tc := New().Shell("/bin/sh").Env("PS1=", "TERM=dumb")
+	tc.OnUpdate(func() {})
+	renderTerm(tc, 40, 10)
+
+	waitFor(t, 5*time.Second, "the shell to start", func() bool {
+		tc.mu.Lock()
+		defer tc.mu.Unlock()
+		return tc.pty != nil
+	})
+	tc.mu.Lock()
+	pid := tc.pty.cmd.Process.Pid
+	tc.mu.Unlock()
+
+	if err := tc.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if err := syscall.Kill(pid, 0); err == nil {
+		t.Errorf("shell %d still alive after Close — a terminal that forked its own shell must reap it", pid)
+	}
 }
