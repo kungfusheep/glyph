@@ -7354,6 +7354,51 @@ func TestArrangeScratchIsPoisonedAfterCallback(t *testing.T) {
 	}
 }
 
+// TestVBoxDoesNotAllocatePerFrame guards the zero-allocation contract on the
+// ordinary container path — the one every app uses.
+//
+// annotateVRuleExtensions runs for every VBox on every frame, and it used to build
+// a []childInfo by append plus a map. Under ~7 children both stayed on the stack,
+// so the existing zero-alloc tests never saw it; past that they escaped and a plain
+// VBox allocated on every frame, growing with the child count. The child counts
+// here straddle that threshold deliberately.
+func TestVBoxDoesNotAllocatePerFrame(t *testing.T) {
+	for _, n := range []int{4, 7, 8, 16, 32} {
+		t.Run(fmt.Sprintf("children=%d", n), func(t *testing.T) {
+			kids := make([]Component, 0, n)
+			for i := 0; i < n; i++ {
+				kids = append(kids, Text("x"))
+			}
+			tmpl := Build(VBox(kids...))
+			buf := NewBuffer(80, 60)
+			tmpl.Execute(buf, 80, 60) // first frame grows the scratch
+
+			allocs := testing.AllocsPerRun(50, func() { tmpl.Execute(buf, 80, 60) })
+			if allocs != 0 {
+				t.Errorf("a %d-child VBox allocates %.0f times per frame, want 0 — the "+
+					"layout path must reuse its scratch buffers", n, allocs)
+			}
+		})
+	}
+}
+
+// TestVBoxWithRulesDoesNotAllocatePerFrame covers the path that actually does the
+// annotation work — a bordered container with HRules, where the early-out does not
+// apply and the scratch buffers are the only thing keeping the frame allocation-free.
+func TestVBoxWithRulesDoesNotAllocatePerFrame(t *testing.T) {
+	tmpl := Build(VBox.Border(BorderRounded)(
+		Text("a"), HRule(), Text("b"), HRule(), Text("c"),
+		Text("d"), Text("e"), Text("f"), Text("g"), Text("h"),
+	))
+	buf := NewBuffer(80, 60)
+	tmpl.Execute(buf, 80, 60)
+
+	allocs := testing.AllocsPerRun(50, func() { tmpl.Execute(buf, 80, 60) })
+	if allocs != 0 {
+		t.Errorf("a bordered VBox with HRules allocates %.0f times per frame, want 0", allocs)
+	}
+}
+
 // BenchmarkCustomLayoutFrame measures a steady-state Arrange frame.
 func BenchmarkCustomLayoutFrame(b *testing.B) {
 	rects := make([]Rect, 6)
