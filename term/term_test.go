@@ -279,3 +279,104 @@ func TestNewOwnsItsShell(t *testing.T) {
 		t.Errorf("shell %d still alive after Close — a terminal that forked its own shell must reap it", pid)
 	}
 }
+
+// blockedStream is a stream whose Write never returns: a peer that has wedged.
+// Reads block until the test closes done.
+type blockedStream struct {
+	done   chan struct{}
+	writes chan int
+}
+
+func (b *blockedStream) Read(p []byte) (int, error) {
+	<-b.done
+	return 0, io.EOF
+}
+
+func (b *blockedStream) Write(p []byte) (int, error) {
+	b.writes <- len(p)
+	<-b.done // never returns while the peer is wedged
+	return 0, io.EOF
+}
+
+// TestCloseIsSilentAndFarSideIsNot is the signal a host detaches on. Both paths
+// end at a read error on the same goroutine, so they must be told apart: a pane
+// the host closed says nothing, a far side that died reports it.
+func TestCloseIsSilentAndFarSideIsNot(t *testing.T) {
+	t.Run("close is silent", func(t *testing.T) {
+		hostSide, uiSide := net.Pipe()
+		defer hostSide.Close()
+
+		exits := make(chan error, 1)
+		tc := Stream(uiSide, func(rows, cols uint16) {})
+		tc.OnUpdate(func() {})
+		tc.OnExit(func(err error) { exits <- err })
+		renderTerm(tc, 40, 10)
+
+		tc.Close()
+
+		select {
+		case err := <-exits:
+			t.Fatalf("OnExit fired with %v on a close we performed — a host cannot tell its own detach from a crash", err)
+		case <-time.After(400 * time.Millisecond):
+		}
+	})
+
+	t.Run("far side going away reports", func(t *testing.T) {
+		hostSide, uiSide := net.Pipe()
+
+		exits := make(chan error, 1)
+		tc := Stream(uiSide, func(rows, cols uint16) {})
+		tc.OnUpdate(func() {})
+		tc.OnExit(func(err error) { exits <- err })
+		defer tc.Close()
+		renderTerm(tc, 40, 10)
+
+		hostSide.Close() // the far side went away on its own
+
+		select {
+		case err := <-exits:
+			if err == nil {
+				t.Error("OnExit fired with a nil error; it must carry what happened")
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("the far side went away and OnExit never fired")
+		}
+	})
+}
+
+// TestRenderNeverBlocksOnConsumerIO: a wedged peer must not stall a frame. Writes
+// are queued for the writer goroutine, so neither the render goroutine nor the
+// reader ever waits on the far side.
+func TestRenderNeverBlocksOnConsumerIO(t *testing.T) {
+	bs := &blockedStream{done: make(chan struct{}), writes: make(chan int, 8)}
+	defer close(bs.done)
+
+	tc := Stream(bs, func(rows, cols uint16) {})
+	tc.OnUpdate(func() {})
+	renderTerm(tc, 40, 10)
+
+	// a key: the writer goroutine takes it and wedges on the peer
+	tc.Write([]byte("hello"))
+	select {
+	case <-bs.writes:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the writer never reached the stream")
+	}
+
+	// with the writer wedged, frames must still complete — including one that
+	// resizes, which is the path that calls onResize on the render goroutine
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tc.Write([]byte("more"))
+		renderTerm(tc, 40, 10)
+		renderTerm(tc, 60, 20) // resize: exercises resizeIfNeeded
+		renderTerm(tc, 40, 10)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a frame blocked on a wedged peer — consumer IO reached the render goroutine")
+	}
+}

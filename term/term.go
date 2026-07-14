@@ -122,13 +122,19 @@ func (t *TermC) Env(env ...string) *TermC { t.env = env; return t }
 // fixed-size terminal sized by an explicit Height/Width on the layout.
 func (t *TermC) Grow(g float32) *TermC { t.grow = g; return t }
 
-// OnExit registers a callback fired when the shell process exits.
+// OnExit registers a callback fired when the FAR SIDE goes away: the shell exits,
+// or the stream reaches EOF or fails to read. It carries that error.
 //
-// It fires on the pty reader goroutine, NOT the render goroutine. Do not touch
-// bound state from it: the template reads bound state during Execute with no
-// host lock, so a mutex on the write side cannot make that read safe. Marshal
-// the change with App.Apply, which runs it at frame top before Execute.
-// RequestRender is safe to call directly.
+// Close does NOT fire it. The distinction is the point: a host that closes a pane
+// and a far side that dies both surface as a read error on the same goroutine, so
+// without this a detach could not be told from a crash. OnExit means the process
+// went away on its own; a silent teardown means you closed it.
+//
+// It fires on the reader goroutine, NOT the render goroutine. Do not touch bound
+// state from it: the template reads bound state during Execute with no host lock,
+// so a mutex on the write side cannot make that read safe. Marshal the change with
+// App.Apply, which runs it at frame top before Execute. RequestRender is safe to
+// call directly.
 func (t *TermC) OnExit(fn func(error)) *TermC { t.onExit = fn; return t }
 
 // OnTitle registers a callback fired when the shell sets the window title
@@ -366,7 +372,14 @@ func (t *TermC) readLoop(rw io.ReadWriter) {
 			}
 		}
 		if err != nil {
-			if t.onExit != nil {
+			// A teardown we performed ourselves arrives here as a read error too,
+			// so it has to be told apart from the far side going away — otherwise a
+			// host cannot distinguish a process that died from a pane it closed.
+			// Close is silent; only the far side fires OnExit.
+			t.mu.Lock()
+			closing := t.closing
+			t.mu.Unlock()
+			if !closing && t.onExit != nil {
 				t.onExit(err)
 			}
 			if t.onUpdate != nil {
