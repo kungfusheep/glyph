@@ -12,21 +12,35 @@ import (
 // maintains a cell grid, a cursor, and the current pen. It is content-blind —
 // it renders whatever escape sequences arrive, it does not understand programs.
 //
-// Scope is a shell session and line-oriented tools: printable text with
-// deferred autowrap, the common C0 controls, CSI cursor/erase/scroll/SGR, and
-// OSC title. Alt-screen and truecolor-mouse programs render on a later slice;
-// this is enough to run a shell and see its output correctly.
+// Scope is a shell session, line-oriented tools, and full-screen programs:
+// printable text with deferred autowrap, the common C0 controls, CSI
+// cursor/erase/scroll/SGR, OSC title, and the alternate screen. Mouse reporting,
+// bracketed paste and focus reporting are consumed but not acted on, so a program
+// that asks for them falls back to plain encodings.
 type screen struct {
 	mu sync.Mutex
 
 	rows, cols int
-	cells      []glyph.Cell // row-major, len == rows*cols
+	cells      []glyph.Cell // row-major, len == rows*cols; aliases primary or alt
+
+	// the alternate screen. A full-screen program paints a blank alt grid and the
+	// primary grid survives underneath it untouched, so leaving restores whatever
+	// the shell had on screen. cells aliases whichever is active, so every write
+	// path stays unaware of the swap.
+	primary   []glyph.Cell
+	alt       []glyph.Cell // nil until a program first asks for it
+	altActive bool
 
 	cx, cy int         // cursor, 0-based
 	pen    glyph.Style // current graphic rendition
 
 	savedCx, savedCy int
 	savedPen         glyph.Style
+
+	// 1049 saves the cursor separately from DECSC (ESC 7), so a program that uses
+	// both does not have one clobber the other.
+	altSavedCx, altSavedCy int
+	altSavedPen            glyph.Style
 
 	scrollTop, scrollBot int // scroll region, 0-based inclusive
 	autowrap             bool
@@ -73,15 +87,69 @@ func newScreen(rows, cols int) *screen {
 	s := &screen{
 		rows:          rows,
 		cols:          cols,
-		cells:         make([]glyph.Cell, rows*cols),
+		primary:       make([]glyph.Cell, rows*cols),
 		scrollTop:     0,
 		scrollBot:     rows - 1,
 		autowrap:      true,
 		cursorVisible: true,
 		params:        make([]int, 0, 8),
 	}
+	s.cells = s.primary
 	s.clearAll()
 	return s
+}
+
+// enterAlt makes the alternate grid active, blank. saveCursor distinguishes 1049
+// (which saves and restores the cursor across the swap) from the older 47/1047.
+func (s *screen) enterAlt(saveCursor bool) {
+	if s.altActive {
+		return
+	}
+	if saveCursor {
+		s.altSavedCx, s.altSavedCy, s.altSavedPen = s.cx, s.cy, s.pen
+	}
+	if len(s.alt) != s.rows*s.cols {
+		s.alt = make([]glyph.Cell, s.rows*s.cols)
+	}
+	s.cells = s.alt
+	s.altActive = true
+	s.clearAll()
+	s.cx, s.cy = 0, 0
+	s.wrapNext = false
+}
+
+// leaveAlt returns to the primary grid, which still holds whatever was on screen
+// when the program took over.
+func (s *screen) leaveAlt(restoreCursor bool) {
+	if !s.altActive {
+		return
+	}
+	s.cells = s.primary
+	s.altActive = false
+	if restoreCursor {
+		s.cx = clamp(s.altSavedCx, 0, s.cols-1)
+		s.cy = clamp(s.altSavedCy, 0, s.rows-1)
+		s.pen = s.altSavedPen
+	}
+	s.wrapNext = false
+}
+
+// reshapeGrid returns a grid of the new geometry holding the top-left overlap of
+// the old one.
+func reshapeGrid(old []glyph.Cell, oldRows, oldCols, rows, cols int) []glyph.Cell {
+	next := make([]glyph.Cell, rows*cols)
+	blank := glyph.Cell{Rune: ' '}
+	for i := range next {
+		next[i] = blank
+	}
+	copyRows := min(rows, oldRows)
+	copyCols := min(cols, oldCols)
+	for y := 0; y < copyRows; y++ {
+		for x := 0; x < copyCols; x++ {
+			next[y*cols+x] = old[y*oldCols+x]
+		}
+	}
+	return next
 }
 
 // cellAt returns a pointer to the cell at col x, row y. Caller holds s.mu.
@@ -104,19 +172,18 @@ func (s *screen) resize(rows, cols int) {
 	if rows == s.rows && cols == s.cols {
 		return
 	}
-	next := make([]glyph.Cell, rows*cols)
-	blank := glyph.Cell{Rune: ' '}
-	for i := range next {
-		next[i] = blank
+	// both grids reshape: the primary is the scrollback a program is sitting on
+	// top of, so a resize taken while the alt screen is active must not leave it
+	// the old size to be restored into.
+	s.primary = reshapeGrid(s.primary, s.rows, s.cols, rows, cols)
+	if s.alt != nil {
+		s.alt = reshapeGrid(s.alt, s.rows, s.cols, rows, cols)
 	}
-	copyRows := min(rows, s.rows)
-	copyCols := min(cols, s.cols)
-	for y := 0; y < copyRows; y++ {
-		for x := 0; x < copyCols; x++ {
-			next[y*cols+x] = s.cells[y*s.cols+x]
-		}
+	if s.altActive {
+		s.cells = s.alt
+	} else {
+		s.cells = s.primary
 	}
-	s.cells = next
 	s.rows, s.cols = rows, cols
 	s.scrollTop = 0
 	s.scrollBot = rows - 1
@@ -365,8 +432,19 @@ func (s *screen) privateMode(final byte) {
 		s.cursorVisible = set
 	case 7: // DECAWM autowrap
 		s.autowrap = set
+	case 1049: // alt screen, saving and restoring the cursor with the swap
+		if set {
+			s.enterAlt(true)
+		} else {
+			s.leaveAlt(true)
+		}
+	case 47, 1047: // the older alt-screen forms: swap only, cursor untouched
+		if set {
+			s.enterAlt(false)
+		} else {
+			s.leaveAlt(false)
+		}
 	}
-	// 1049/47/1047 alt-screen intentionally unhandled in this slice
 }
 
 func (s *screen) osc(b byte) {

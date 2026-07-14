@@ -1,6 +1,7 @@
 package term
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -143,4 +144,60 @@ func TestOnTitleNotCalledUnderScreenLock(t *testing.T) {
 	if got != "my-title" {
 		t.Fatalf("onTitle got %q, want my-title", got)
 	}
+}
+
+// waitFor polls cond every 20ms until it holds or the deadline passes. Real
+// programs start, paint and exit on their own schedule; a fixed sleep either
+// flakes or wastes the difference.
+func waitFor(t *testing.T, d time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out after %s waiting for %s", d, what)
+}
+
+// TestFullScreenProgramInPane drives a REAL full-screen program through the pane,
+// which is the only thing that proves the alternate screen: vi takes over, paints
+// its own grid, and the shell's output is still underneath when it quits.
+//
+// The synthetic tests in vt_test.go pin the mechanism; this pins the outcome.
+func TestFullScreenProgramInPane(t *testing.T) {
+	if _, err := exec.LookPath("vi"); err != nil {
+		t.Skip("vi not installed")
+	}
+
+	tc := New().Shell("/bin/sh").Env("PS1=$ ", "TERM=xterm", "LANG=C")
+	tc.OnUpdate(func() {})
+	defer tc.Close()
+
+	const w, h = 40, 10
+	renderTerm(tc, w, h) // first render starts the pty
+
+	if _, err := tc.Write([]byte("echo MARKER_IN_SHELL\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	waitFor(t, 5*time.Second, "the shell's output", func() bool {
+		return bufContains(renderTerm(tc, w, h), h, "MARKER_IN_SHELL")
+	})
+
+	// vi takes the screen: its grid is blank apart from what it paints, so the
+	// shell's output must NOT be visible through it.
+	tc.Write([]byte("vi\n"))
+	waitFor(t, 5*time.Second, "vi to paint the alt screen", func() bool {
+		return bufContains(renderTerm(tc, w, h), h, "~")
+	})
+	if b := renderTerm(tc, w, h); bufContains(b, h, "MARKER_IN_SHELL") {
+		t.Error("the shell's output shows through the alt screen — the program is painting into the scrollback grid")
+	}
+
+	// and leaving restores what the shell had on screen
+	tc.Write([]byte("\x1b:q\r"))
+	waitFor(t, 5*time.Second, "the shell's output to come back", func() bool {
+		return bufContains(renderTerm(tc, w, h), h, "MARKER_IN_SHELL")
+	})
 }

@@ -336,3 +336,83 @@ func TestCSIParameterPrefixSwallowed(t *testing.T) {
 		})
 	}
 }
+
+// TestAltScreenPreservesPrimary is the property that makes the alt screen worth
+// having: a full-screen program paints a blank grid, and what the shell had on
+// screen is still there when it leaves.
+func TestAltScreenPreservesPrimary(t *testing.T) {
+	s := newScreen(4, 20)
+	feed(s, "shell output")
+
+	feed(s, "\x1b[?1049h") // program takes over
+	if got := rowText(s, 0); got != "" {
+		t.Fatalf("alt grid row0 = %q, want blank", got)
+	}
+	feed(s, "full screen ui")
+	if got := rowText(s, 0); got != "full screen ui" {
+		t.Fatalf("alt grid row0 = %q, want the program's output", got)
+	}
+
+	feed(s, "\x1b[?1049l") // program exits
+	if got := rowText(s, 0); got != "shell output" {
+		t.Fatalf("row0 after leaving alt = %q, want the shell's output back", got)
+	}
+}
+
+// TestAltScreenRestoresCursor covers the half of 1049 that 47/1047 do not do.
+func TestAltScreenRestoresCursor(t *testing.T) {
+	s := newScreen(4, 20)
+	feed(s, "\x1b[3;7H") // park the cursor at row 3, col 7 (1-based)
+	cx, cy := s.cx, s.cy
+
+	feed(s, "\x1b[?1049h")
+	if s.cx != 0 || s.cy != 0 {
+		t.Fatalf("alt entered at (%d,%d), want home", s.cx, s.cy)
+	}
+	feed(s, "\x1b[2;2Hmoved")
+
+	feed(s, "\x1b[?1049l")
+	if s.cx != cx || s.cy != cy {
+		t.Errorf("cursor = (%d,%d) after leaving alt, want (%d,%d)", s.cx, s.cy, cx, cy)
+	}
+}
+
+// TestAltScreenLegacyForms: 47 and 1047 swap the grid but leave the cursor alone.
+func TestAltScreenLegacyForms(t *testing.T) {
+	for _, mode := range []string{"47", "1047"} {
+		t.Run(mode, func(t *testing.T) {
+			s := newScreen(4, 20)
+			feed(s, "primary")
+			feed(s, "\x1b[?"+mode+"h")
+			feed(s, "alt")
+			if got := rowText(s, 0); got != "alt" {
+				t.Fatalf("alt row0 = %q, want %q", got, "alt")
+			}
+			feed(s, "\x1b[?"+mode+"l")
+			if got := rowText(s, 0); got != "primary" {
+				t.Errorf("row0 = %q after leaving alt, want %q", got, "primary")
+			}
+		})
+	}
+}
+
+// TestAltScreenResizeReshapesBoth: a resize taken while a program owns the screen
+// must not leave the primary at the old geometry to be restored into.
+func TestAltScreenResizeReshapesBoth(t *testing.T) {
+	s := newScreen(4, 20)
+	feed(s, "kept")
+
+	feed(s, "\x1b[?1049h")
+	s.resize(6, 30)
+	feed(s, "\x1b[?1049l")
+
+	if s.rows != 6 || s.cols != 30 {
+		t.Fatalf("geometry = %dx%d, want 6x30", s.rows, s.cols)
+	}
+	if len(s.cells) != 6*30 {
+		t.Fatalf("primary grid is %d cells, want %d — restored into a stale grid", len(s.cells), 6*30)
+	}
+	if got := rowText(s, 0); got != "kept" {
+		t.Errorf("row0 = %q, want %q", got, "kept")
+	}
+}

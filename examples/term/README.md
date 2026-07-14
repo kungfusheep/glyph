@@ -12,9 +12,12 @@ Scope, deliberately small:
 
 Not scope: sessions, detach/reattach persistence, copy mode, configuration.
 
-Full-screen programs (vim, htop, less) do not render yet: they drive the
-alternate screen buffer, which is a later slice of the terminal component. A
-plain shell and line-oriented tools (ls, cat, git, pipelines) render correctly.
+Full-screen programs (vim, htop, less) render: they drive the alternate screen
+buffer, which the pane keeps as a second grid, so what the shell had on screen
+survives underneath and comes back when the program exits.
+
+Mouse reporting, bracketed paste and focus reporting are consumed but not acted
+on, so a program that asks for them falls back to plain encodings.
 
 Keys: `Ctrl-B` then `%` split side by side, `"` split stacked, `o` cycle focus,
 `x` close the pane. Every other key goes to the focused shell. The app exits
