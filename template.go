@@ -7905,12 +7905,19 @@ func (t *Template) layoutCustom(idx int16, op *Op, geom *Geom) {
 	// LayoutFunc that allocates one per call allocates once per frame.
 	rects := clExt.layout(childSizes, int(geom.W), int(geom.H))
 
-	// childSizes aliases an engine-owned scratch that is refilled every frame, so
-	// a LayoutFunc must read it during the call and never retain it. Scribble it
-	// now that the callback has returned: a layout that kept the slice sees
-	// obvious nonsense on the next frame instead of plausible-looking data that
-	// silently belongs to a different frame. Nothing downstream reads childSizes —
-	// only rects, above — so this is free to do here.
+	// childSizes aliases an engine-owned scratch that is refilled every frame, so a
+	// LayoutFunc must read it during the call and never retain it. Scribble it now
+	// that the callback has returned, so a layout that kept the slice reads obvious
+	// nonsense rather than plausible data belonging to some other container's frame.
+	// Nothing downstream reads childSizes — only rects, above — so this is free here.
+	//
+	// What it catches, precisely: the stash-and-read-later mistake — keep the sizes,
+	// read them from an event handler or a later tick. That is the realistic shape,
+	// and it reads poison. It does NOT catch a layout that re-reads its retained
+	// slice inside a later callback, because the refill above runs first and puts
+	// valid current sizes back. That read is of correct data and corrupts nothing,
+	// which is why the poison is left passive rather than made to panic: by the time
+	// any layout runs, there is no poison left for the engine to detect.
 	for i := range childSizes {
 		childSizes[i] = ChildSize{MinW: scratchPoison, MinH: scratchPoison}
 	}
