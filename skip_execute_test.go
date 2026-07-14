@@ -616,3 +616,42 @@ func TestSwitchingAwayFromAnimatingViewStopsItsTicker(t *testing.T) {
 			"drive render requests at 60fps for a view nobody is showing, forever")
 	}
 }
+
+// TestSetViewStopsDiscardedTemplatesTicker closes the third strand path. A view
+// that leaves the render path is retired by deactivateView, and a settling
+// animation retires itself in paintAndFinish — but SetView replaces the template
+// in place, and a template discarded mid-animation never executes again, so it can
+// never reach the frame that would settle its own ticker.
+//
+// Stranded is worse than leaked here: the goroutine's tick requests a render, so
+// each orphan wakes the app every tick forever on behalf of a view nobody paints.
+// SetView is the sanctioned rebuild path, so a split or a modal during an animation
+// strands one every time.
+func TestSetViewStopsDiscardedTemplatesTicker(t *testing.T) {
+	before := runtime.NumGoroutine()
+
+	app := NewApp()
+	for i := 0; i < 20; i++ {
+		app.SetView(VBox(Text("x")))
+		app.template.animating = true
+		app.template.requestRender = func() {}
+		buf := NewBuffer(20, 5)
+		app.template.paintAndFinish(buf, 20, 5)
+		if app.template.animTicker == nil {
+			t.Fatal("an animating frame did not start the ticker")
+		}
+		// the next SetView discards this template while it is still animating
+	}
+	app.SetView(VBox(Text("done")))
+
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before+2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if leaked := runtime.NumGoroutine() - before; leaked > 2 {
+		t.Errorf("%d goroutines stranded after 20 templates discarded mid-animation — a "+
+			"template dropped by SetView never reaches the frame that would settle its ticker, "+
+			"so it keeps requesting renders for a view nobody paints", leaked)
+	}
+}

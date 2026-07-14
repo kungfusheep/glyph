@@ -340,6 +340,14 @@ func (a *App) SetView(view Component) *App {
 		panic(fmt.Sprintf("SetView called %d times, limit is %d. Use reactive updates via pointers instead of calling SetView repeatedly.", a.setViewCount, a.setViewLimit))
 	}
 
+	// the outgoing template is dropped here, so it never executes again and can
+	// never reach the frame that would settle its own animation ticker. Left
+	// running, its goroutine keeps requesting renders every tick for a view
+	// nobody will paint, and each rebuild during an animation strands another.
+	if a.template != nil {
+		a.template.stopAnimTicker()
+	}
+
 	a.template = Build(view)
 	a.template.SetApp(a) // Link for jump mode support
 	a.template.requestRender = a.RequestRender
