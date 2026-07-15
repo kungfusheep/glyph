@@ -89,6 +89,13 @@ type ChildSize struct {
 	MinW, MinH int
 }
 
+// scratchPoison is written over the custom-layout child sizes once the LayoutFunc
+// returns. The slice it is handed aliases an engine-owned scratch, so retaining it
+// is a contract violation; a wildly negative size makes that violation show up as
+// an obviously broken layout on the very next frame rather than as plausible data
+// from the wrong frame months later.
+const scratchPoison = -0x0BADC0DE
+
 // Rect represents a positioned rectangle.
 type Rect struct {
 	X, Y, W, H int
@@ -181,11 +188,13 @@ type Template struct {
 	refsCollected bool
 
 	// scratch buffers for per-frame reuse (avoid nil-slice allocs in hot paths)
-	flexScratchIdx  []int16     // flex child indices (shared by VBox + HBox phases)
-	flexScratchGrow []float32   // flex grow values (shared by VBox + HBox phases)
-	flexScratchImpl []int16     // implicit flex children (HBox only)
-	treeScratchPfx  []bool      // tree node line prefix
-	layoutScratchCS []ChildSize // custom-layout child sizes; safe to share because
+	vruleChildren   []vruleChild // VRule-extension child geometry
+	vruleHRuleYs    []int16      // VRule-extension HRule Y positions
+	flexScratchIdx  []int16      // flex child indices (shared by VBox + HBox phases)
+	flexScratchGrow []float32    // flex grow values (shared by VBox + HBox phases)
+	flexScratchImpl []int16      // implicit flex children (HBox only)
+	treeScratchPfx  []bool       // tree node line prefix
+	layoutScratchCS []ChildSize  // custom-layout child sizes; safe to share because
 	//                             layout runs bottom-up and each call consumes it
 	//                             before returning
 
@@ -835,13 +844,13 @@ type Op struct {
 	Parent int16 // parent op index, -1 for root children
 
 	// Layout hints
-	Width        int16   // explicit width
-	Height       int16   // explicit height
-	PercentWidth float32 // 0.0-1.0
-	FlexGrow     float32 // share of remaining space
-	Gap          int8    // gap between children
-	ContentSized bool    // has fixed-width children (don't implicit flex)
-	FitContent   bool    // size to content instead of filling available space
+	Width        int16        // explicit width
+	Height       int16        // explicit height
+	PercentWidth float32      // 0.0-1.0
+	FlexGrow     float32      // share of remaining space
+	Gap          int8         // gap between children
+	ContentSized bool         // has fixed-width children (don't implicit flex)
+	FitContent   bool         // size to content instead of filling available space
 	MaxWidth     int16        // >0: upper bound on width (a pure cap; compose with FitContent/Grow/WidthPct for base sizing)
 	Overflow     OverflowMode // clip children to an explicit-Height box (default) or let them overflow
 
@@ -3272,10 +3281,10 @@ type opRichText struct {
 
 	// markdown mode (richMdPtr/richMdOff): a bound source string tokenised to spans,
 	// cached parse-on-change. markdown=false renders the source as one plain span.
-	mdSrcPtr   *string              // richMdPtr: global source (GC-pinned)
-	mdSrcOff   uintptr              // richMdOff: offset from elemBase
-	markdown   bool                 // tokenise (true) vs single plain span (false)
-	mdCacheOne mdCache              // global (richMdPtr) cache
+	mdSrcPtr   *string               // richMdPtr: global source (GC-pinned)
+	mdSrcOff   uintptr               // richMdOff: offset from elemBase
+	markdown   bool                  // tokenise (true) vs single plain span (false)
+	mdCacheOne mdCache               // global (richMdPtr) cache
 	mdCacheMap perItemCache[mdCache] // per-item cache for richMdOff (key: elemBase)
 }
 
@@ -5773,10 +5782,10 @@ func (t *Template) ExecutePaint(buf *Buffer, screenW, screenH int16) bool {
 
 // geomSnap is one op's recorded geometry inputs from the last full layout.
 type geomSnap struct {
-	w, h   int16
-	gap    int8
-	flex   float32
-	pct    float32
+	w, h int16
+	gap  int8
+	flex float32
+	pct  float32
 }
 
 // collectPaintOps gathers, once, the op indices the paint-only gate must inspect:
@@ -6860,34 +6869,64 @@ func (t *Template) stampVRuleXPair(containerIdx int16, delta1, delta2 int16) {
 	}
 }
 
+// vruleChild is a child's geometry, captured while annotating VRule extensions.
+type vruleChild struct {
+	idx    int16
+	yStart int16
+	height int16
+}
+
+// containsY reports whether an HRule sits at y. A container has a handful of rules
+// at most, so scanning beats the map this replaced — which allocated every frame.
+func containsY(ys []int16, y int16) bool {
+	for _, v := range ys {
+		if v == y {
+			return true
+		}
+	}
+	return false
+}
+
 // annotateVRuleExtensions finds HRule children of the VBox at idx and, for each,
 // walks sibling container subtrees to set RuleExtendTop/Bot on VRules with RuleExtend=true.
 func (t *Template) annotateVRuleExtensions(idx int16, op *Op, totalH int16) {
+	hasBorder := op.Border.HasBorder()
+
+	// Every flag set below is driven by an HRule's position or a border edge, so a
+	// container with neither cannot set one. That is the ordinary VBox, and it used
+	// to walk its children and allocate twice per frame to decide it had nothing to
+	// do. Find out cheaply first.
+	hasHRule := false
+	for i := op.ChildStart; i < op.ChildEnd; i++ {
+		if t.ops[i].Parent == idx && t.ops[i].Kind == OpHRule {
+			hasHRule = true
+			break
+		}
+	}
+	if !hasHRule && !hasBorder {
+		return
+	}
+
 	contentOffY := op.Margin[0] + op.Border.PadTop()
 
-	type childInfo struct {
-		idx    int16
-		yStart int16
-		height int16
-	}
-	var children []childInfo
+	// scratch, reused across frames: this runs on the layout path, so a fresh slice
+	// here is garbage proportional to the frame rate. Safe to share because layout
+	// is bottom-up and one container's annotation completes before the next begins;
+	// sub-templates (ForEach/If) carry their own.
+	children := t.vruleChildren[:0]
+	hRuleYs := t.vruleHRuleYs[:0]
 	for i := op.ChildStart; i < op.ChildEnd; i++ {
 		childOp := &t.ops[i]
 		if childOp.Parent != idx {
 			continue
 		}
-		children = append(children, childInfo{i, t.geom[i].LocalY, t.geom[i].H})
-	}
-
-	// collect HRule Y positions
-	hRuleYs := make(map[int16]bool)
-	for _, c := range children {
-		if t.ops[c.idx].Kind == OpHRule {
-			hRuleYs[c.yStart] = true
+		g := &t.geom[i]
+		children = append(children, vruleChild{i, g.LocalY, g.H})
+		if childOp.Kind == OpHRule {
+			hRuleYs = append(hRuleYs, g.LocalY)
 		}
 	}
-
-	hasBorder := op.Border.HasBorder()
+	t.vruleChildren, t.vruleHRuleYs = children, hRuleYs
 
 	for _, c := range children {
 		childOp := &t.ops[c.idx]
@@ -6901,8 +6940,8 @@ func (t *Template) annotateVRuleExtensions(idx int16, op *Op, totalH int16) {
 		if childOp.Kind != OpContainer {
 			continue
 		}
-		extTop := hRuleYs[c.yStart-1] || (hasBorder && c.yStart == contentOffY)
-		extBot := hRuleYs[c.yStart+c.height] || (hasBorder && c.yStart+c.height == contentOffY+totalH)
+		extTop := containsY(hRuleYs, c.yStart-1) || (hasBorder && c.yStart == contentOffY)
+		extBot := containsY(hRuleYs, c.yStart+c.height) || (hasBorder && c.yStart+c.height == contentOffY+totalH)
 		if extTop || extBot {
 			t.stampVRuleExtend(c.idx, extTop, extBot)
 		}
@@ -7865,6 +7904,23 @@ func (t *Template) layoutCustom(idx int16, op *Op, geom *Geom) {
 	// Call the layout function. The rects it returns are the caller's slice; a
 	// LayoutFunc that allocates one per call allocates once per frame.
 	rects := clExt.layout(childSizes, int(geom.W), int(geom.H))
+
+	// childSizes aliases an engine-owned scratch that is refilled every frame, so a
+	// LayoutFunc must read it during the call and never retain it. Scribble it now
+	// that the callback has returned, so a layout that kept the slice reads obvious
+	// nonsense rather than plausible data belonging to some other container's frame.
+	// Nothing downstream reads childSizes — only rects, above — so this is free here.
+	//
+	// What it catches, precisely: the stash-and-read-later mistake — keep the sizes,
+	// read them from an event handler or a later tick. That is the realistic shape,
+	// and it reads poison. It does NOT catch a layout that re-reads its retained
+	// slice inside a later callback, because the refill above runs first and puts
+	// valid current sizes back. That read is of correct data and corrupts nothing,
+	// which is why the poison is left passive rather than made to panic: by the time
+	// any layout runs, there is no poison left for the engine to detect.
+	for i := range childSizes {
+		childSizes[i] = ChildSize{MinW: scratchPoison, MinH: scratchPoison}
+	}
 
 	// Apply positions to children
 	childIdx := 0

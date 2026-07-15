@@ -2842,13 +2842,31 @@ func (ed *Editor) initLayer(width int) {
 // template holds this pointer, so swapping in a fresh Layer would strand the
 // template on the old one and the window would render stale content until the
 // next recompile.
+//
+// Reusing it means the layer's buffer outlives each document, so this also
+// right-sizes that buffer when it is far larger than the window now needs. The
+// pointer is the contract; the memory behind it is not.
 func (ed *Editor) initWindowLayer(w *Window, width int) {
 	w.viewportWidth = width
 	if w.contentLayer == nil {
 		w.contentLayer = glyph.NewLayer()
 	}
 	// Layer holds ALL lines plus some buffer for scrolling
-	w.contentLayer.EnsureSize(width, len(w.buffer.Lines)+w.viewportHeight)
+	needH := len(w.buffer.Lines) + w.viewportHeight
+
+	// EnsureSize only ever grows. Since the layer now lives for the window's
+	// lifetime, the buffer would otherwise keep the high-water mark of every
+	// document the window has ever shown: open a 100k-line file, then a short one
+	// in the same window, and it still carries 100k rows. Same for a terminal
+	// widened and then narrowed.
+	//
+	// Swap the BUFFER, never the layer: the compiled template holds the layer
+	// pointer, so the pointer has to survive while the memory behind it does not.
+	if b := w.contentLayer.Buffer(); b != nil && width > 0 && needH > 0 &&
+		(b.Width() > width || b.Height() > 2*needH) {
+		w.contentLayer.SetBuffer(glyph.NewBuffer(width, needH))
+	}
+	w.contentLayer.EnsureSize(width, needH)
 	// Set viewport dimensions BEFORE rendering so ScrollTo works correctly
 	w.contentLayer.SetViewport(width, w.viewportHeight)
 	w.renderedMin = -1
