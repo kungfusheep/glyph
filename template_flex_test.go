@@ -1439,6 +1439,15 @@ func findPercentColWidth(t *Template) int16 {
 // horizontally. Height is not: an item is as tall as its content, and a Grow on
 // a container inside an item has nothing to grow into. Anyone who changes this
 // is changing how lists size, which is a different decision from how boxes size.
+//
+// This is a tripwire, not only a guard. Item geometry lives in a side array the
+// flex and custom-layout passes never walk, which is the same fact as height
+// being intrinsic here and as a layout being unable to place items. When that
+// seam is opened so a layout can address items, this test starts failing as a
+// side effect. That failure is the signal to re-decide how lists size, not a
+// regression to silence. Do not weaken the assertion to get the build green;
+// the height budget an item would then receive is a list-sizing decision that
+// needs its own design.
 func TestForEachItemHeightIsIntrinsic(t *testing.T) {
 	type row struct{ Name, Val string }
 	rows := []row{{"a", "1"}, {"b", "2"}}
