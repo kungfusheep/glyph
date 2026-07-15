@@ -119,7 +119,10 @@ func (s *screen) enterAlt(saveCursor bool) {
 }
 
 // leaveAlt returns to the primary grid, which still holds whatever was on screen
-// when the program took over.
+// when the program took over. The scroll region is deliberately NOT restored: a
+// DECSTBM set inside the alt screen survives the swap, matching xterm, which does
+// not save margins across 1049 either. A program that leaves them set is broken in
+// any terminal, so tracking them here would only mask that.
 func (s *screen) leaveAlt(restoreCursor bool) {
 	if !s.altActive {
 		return
