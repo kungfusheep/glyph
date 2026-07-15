@@ -1,12 +1,25 @@
 package term
 
 import (
+	"errors"
 	"io"
 	"os"
 	"sync"
 
 	glyph "github.com/kungfusheep/glyph"
 )
+
+// maxQueuedWriteBytes caps the bytes waiting for the writer goroutine. A peer that
+// stops draining (a wedged socket to a long-lived host) leaves the writer parked
+// inside rw.Write with nobody draining the queue; without a ceiling it grows for
+// every keystroke. 1 MiB never triggers while the peer keeps up — the writer drains
+// faster than a human types — and bounds the leak when it does not.
+const maxQueuedWriteBytes = 1 << 20
+
+// errWriteStalled is what Write returns once the queue overflowed because the far
+// side stopped draining. A terminal that cannot deliver keys is broken whether the
+// peer errored or hung; this makes the second case observable too.
+var errWriteStalled = errors.New("term: write stream stalled, far side stopped draining")
 
 // TermC is an embeddable terminal: it runs a shell on a pty and renders the
 // shell's screen as glyph cells. Drop it into any layout like any other
@@ -50,11 +63,12 @@ type TermC struct {
 	// that blocks on the reader's own goroutine stops it draining the far side.
 	// A pty master only blocks once the child stops reading, but a socket blocks
 	// whenever the peer is slow, so the reader must never write directly.
-	wmu    sync.Mutex
-	wcond  *sync.Cond
-	wq     [][]byte
-	wclose bool
-	werr   error // the write error that shut the loop, nil if we closed it ourselves
+	wmu     sync.Mutex
+	wcond   *sync.Cond
+	wq      [][]byte
+	wqBytes int  // bytes currently queued, bounded by maxQueuedWriteBytes
+	wclose  bool
+	werr    error // the write error that shut the loop, nil if we closed it ourselves
 }
 
 // New creates a terminal component running $SHELL (or /bin/sh). The pty starts
@@ -283,6 +297,11 @@ func (t *TermC) startAt(w, h int) {
 // is safe from the reader goroutine (terminal query replies) and from the render
 // goroutine. It returns false once the write side is gone, so the queue cannot
 // grow without a writer to drain it and the caller can report the failure.
+//
+// Two things close the write side: the writer goroutine hitting a write error, and
+// the queue overflowing maxQueuedWriteBytes because the far side stopped draining.
+// The second is why the ceiling lives here rather than only on the error path — a
+// wedged peer never errors, it just never returns from rw.Write.
 func (t *TermC) enqueue(b []byte) bool {
 	cp := make([]byte, len(b))
 	copy(cp, b)
@@ -291,7 +310,16 @@ func (t *TermC) enqueue(b []byte) bool {
 	if t.wclose {
 		return false
 	}
+	if t.wqBytes+len(cp) > maxQueuedWriteBytes {
+		t.wclose = true
+		t.werr = errWriteStalled
+		t.wq = nil
+		t.wqBytes = 0
+		t.wcond.Broadcast()
+		return false
+	}
 	t.wq = append(t.wq, cp)
+	t.wqBytes += len(cp)
 	t.wcond.Signal()
 	return true
 }
@@ -309,6 +337,7 @@ func (t *TermC) writeLoop(rw io.ReadWriter) {
 		}
 		batch := t.wq
 		t.wq = nil
+		t.wqBytes = 0
 		t.wmu.Unlock()
 
 		for _, b := range batch {

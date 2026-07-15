@@ -430,3 +430,46 @@ func TestWriteReportsDeadStream(t *testing.T) {
 		t.Errorf("write queue holds %d batches for a dead writer — enqueue kept appending with nobody draining", n)
 	}
 }
+
+// TestWriteQueueIsBounded: a peer that WEDGES inside rw.Write (blocks, never
+// errors) parks the writer goroutine there, so enqueue has no drainer. Without a
+// ceiling the queue grows for as long as the human keeps typing at a pane that
+// looks alive. The queue must cap and the stream must go degraded so Write can
+// report it, the same observable failure as a dead stream.
+func TestWriteQueueIsBounded(t *testing.T) {
+	bs := &blockedStream{done: make(chan struct{}), writes: make(chan int, 8)}
+	defer close(bs.done)
+
+	tc := Stream(bs, func(rows, cols uint16) {})
+	tc.OnUpdate(func() {})
+	renderTerm(tc, 40, 10)
+
+	// the first key wedges the writer inside rw.Write
+	tc.Write([]byte("x"))
+	select {
+	case <-bs.writes:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the writer never reached the stream")
+	}
+
+	// pump far more than any sane ceiling; with the writer stuck, this all queues
+	chunk := make([]byte, 1024)
+	var lastErr error
+	for i := 0; i < 64*1024; i++ {
+		if _, err := tc.Write(chunk); err != nil {
+			lastErr = err
+			break
+		}
+	}
+	if lastErr == nil {
+		t.Fatal("Write never reported the stalled stream — the queue grew without bound")
+	}
+
+	// on overflow the queue is dropped and the stream is degraded, not left holding
+	tc.wmu.Lock()
+	n := len(tc.wq)
+	tc.wmu.Unlock()
+	if n != 0 {
+		t.Errorf("queue holds %d batches after degrade — overflow must drop them, not keep leaking", n)
+	}
+}
