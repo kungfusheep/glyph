@@ -380,3 +380,53 @@ func TestRenderNeverBlocksOnConsumerIO(t *testing.T) {
 		t.Fatal("a frame blocked on a wedged peer — consumer IO reached the render goroutine")
 	}
 }
+
+// halfOpenStream is a peer that stopped reading without closing: writes fail,
+// reads block. The read side staying open is the point — the reader never sees
+// EOF, so the write side's death has to be reported on the write path itself.
+type halfOpenStream struct {
+	readGate chan struct{}
+	writeErr error
+}
+
+func (h *halfOpenStream) Read(p []byte) (int, error) {
+	<-h.readGate
+	return 0, io.EOF
+}
+
+func (h *halfOpenStream) Write(p []byte) (int, error) { return 0, h.writeErr }
+
+// TestWriteReportsDeadStream: when the writer goroutine dies on a write error,
+// Write must report the failure and the queue must stop growing. A half-open peer
+// (write fails, read blocks) is the case the reader cannot cover, so a naive
+// "return, the reader reports it" leaves every keystroke lying about success and
+// the queue accumulating forever.
+func TestWriteReportsDeadStream(t *testing.T) {
+	s := &halfOpenStream{readGate: make(chan struct{}), writeErr: syscall.EPIPE}
+	defer close(s.readGate)
+
+	tc := Stream(s, func(rows, cols uint16) {})
+	tc.OnUpdate(func() {})
+	renderTerm(tc, 40, 10)
+
+	// the first key reaches the writer, which hits EPIPE and shuts the write side
+	tc.Write([]byte("a"))
+
+	// once the writer is dead, Write must stop returning success
+	var lastErr error
+	waitFor(t, 2*time.Second, "Write to report the dead stream", func() bool {
+		_, lastErr = tc.Write([]byte("b"))
+		return lastErr != nil
+	})
+	if lastErr != syscall.EPIPE {
+		t.Errorf("Write returned %v, want the real write error EPIPE — the failure must not be masked", lastErr)
+	}
+
+	// and the queue must not have accumulated the rejected keys
+	tc.wmu.Lock()
+	n := len(tc.wq)
+	tc.wmu.Unlock()
+	if n > 1 {
+		t.Errorf("write queue holds %d batches for a dead writer — enqueue kept appending with nobody draining", n)
+	}
+}

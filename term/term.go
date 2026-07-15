@@ -54,6 +54,7 @@ type TermC struct {
 	wcond  *sync.Cond
 	wq     [][]byte
 	wclose bool
+	werr   error // the write error that shut the loop, nil if we closed it ourselves
 }
 
 // New creates a terminal component running $SHELL (or /bin/sh). The pty starts
@@ -169,7 +170,15 @@ func (t *TermC) Write(p []byte) (int, error) {
 	if rw == nil {
 		return 0, io.ErrClosedPipe
 	}
-	t.enqueue(p)
+	if !t.enqueue(p) {
+		t.wmu.Lock()
+		err := t.werr
+		t.wmu.Unlock()
+		if err == nil {
+			err = io.ErrClosedPipe // the write side was closed by us, not by a failure
+		}
+		return 0, err
+	}
 	return len(p), nil
 }
 
@@ -232,7 +241,7 @@ func (t *TermC) startAt(w, h int) {
 	// Terminal queries are answered as terminal input: programs block on the
 	// reply. The reply is queued, never written inline, so the reader's only job
 	// stays reading.
-	t.scr.onReply = t.enqueue
+	t.scr.onReply = func(b []byte) { t.enqueue(b) }
 
 	t.mu.Lock()
 	rw := t.rw
@@ -272,16 +281,19 @@ func (t *TermC) startAt(w, h int) {
 
 // enqueue hands bytes to the writer goroutine. It never blocks the caller, so it
 // is safe from the reader goroutine (terminal query replies) and from the render
-// goroutine.
-func (t *TermC) enqueue(b []byte) {
+// goroutine. It returns false once the write side is gone, so the queue cannot
+// grow without a writer to drain it and the caller can report the failure.
+func (t *TermC) enqueue(b []byte) bool {
 	cp := make([]byte, len(b))
 	copy(cp, b)
 	t.wmu.Lock()
-	if !t.wclose {
-		t.wq = append(t.wq, cp)
-		t.wcond.Signal()
+	defer t.wmu.Unlock()
+	if t.wclose {
+		return false
 	}
-	t.wmu.Unlock()
+	t.wq = append(t.wq, cp)
+	t.wcond.Signal()
+	return true
 }
 
 // writeLoop is the only writer to the stream.
@@ -301,7 +313,16 @@ func (t *TermC) writeLoop(rw io.ReadWriter) {
 
 		for _, b := range batch {
 			if _, err := rw.Write(b); err != nil {
-				return // the stream is gone; the reader reports it
+				// the write side is gone. On a half-open stream the reader can
+				// still be blocked with nothing to report, so the death has to
+				// be recorded here: close the queue so enqueue stops accepting
+				// and Write returns the real error instead of a silent success.
+				t.wmu.Lock()
+				t.wclose = true
+				t.werr = err
+				t.wcond.Broadcast()
+				t.wmu.Unlock()
+				return
 			}
 		}
 	}
