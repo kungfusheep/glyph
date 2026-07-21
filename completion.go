@@ -10,10 +10,10 @@ import "strings"
 // explicit patterns before the TextInput HandleUnmatched — no modal capture, no router
 // push/pop). See ADR 71.
 //
-//	Complete(&agentNames).Trigger('@').OnSubmit(send)
+//	Complete(&usernames).Trigger('@').OnSubmit(send)
 //
 // With a Trigger rune, only the token after the last trigger before the caret is
-// completed (e.g. "@kes" → "@Kestrel "); with no trigger, the whole value is the prefix.
+// completed (e.g. "@mar" → "@Marlow "); with no trigger, the whole value is the prefix.
 type CompletionC struct {
 	source   *[]string
 	trigger  rune

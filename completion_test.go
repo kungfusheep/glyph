@@ -22,23 +22,23 @@ func navHandler(t *testing.T, c *CompletionC, pattern string) func() {
 // Trigger arms on the token after the last trigger before the caret; prefix-filters the
 // source; opens when there are matches.
 func TestCompletionTriggerAndMatches(t *testing.T) {
-	src := []string{"Kestrel", "Kessel", "Komorebi", "Sable"}
+	src := []string{"Marlow", "Marley", "Quinn", "Sable"}
 	c := Complete(&src).Trigger('@')
-	c.input.field.Value = "@kes"
+	c.input.field.Value = "@mar"
 	c.input.field.Cursor = 4
 	c.recompute()
 
 	if !c.open {
-		t.Fatal("should be open with matches for prefix 'kes'")
+		t.Fatal("should be open with matches for prefix 'mar'")
 	}
-	if len(c.matches) != 2 || c.matches[0] != "Kestrel" || c.matches[1] != "Kessel" {
-		t.Fatalf("matches = %v, want [Kestrel Kessel]", c.matches)
+	if len(c.matches) != 2 || c.matches[0] != "Marlow" || c.matches[1] != "Marley" {
+		t.Fatalf("matches = %v, want [Marlow Marley]", c.matches)
 	}
 }
 
 // A space between the caret and the trigger breaks the token — no completion across words.
 func TestCompletionTokenBreaksOnSpace(t *testing.T) {
-	src := []string{"Kestrel"}
+	src := []string{"Marlow"}
 	c := Complete(&src).Trigger('@')
 	c.input.field.Value = "@k done"
 	c.input.field.Cursor = 7 // after "done"
@@ -50,16 +50,16 @@ func TestCompletionTokenBreaksOnSpace(t *testing.T) {
 
 // Default pick replaces the active token (trigger + prefix) with trigger + picked + space.
 func TestCompletionPickReplacesToken(t *testing.T) {
-	src := []string{"Kestrel", "Kessel"}
+	src := []string{"Marlow", "Marley"}
 	c := Complete(&src).Trigger('@')
-	c.input.field.Value = "hi @kes"
+	c.input.field.Value = "hi @mar"
 	c.input.field.Cursor = 7
 	c.recompute()
-	c.moveSel(1) // select "Kessel"
+	c.moveSel(1) // select "Marley"
 	navHandler(t, c, "<Enter>")()
 
-	if c.input.field.Value != "hi @Kessel " {
-		t.Fatalf("value = %q, want %q", c.input.field.Value, "hi @Kessel ")
+	if c.input.field.Value != "hi @Marley " {
+		t.Fatalf("value = %q, want %q", c.input.field.Value, "hi @Marley ")
 	}
 	if c.open {
 		t.Error("pick should close the dropdown")
@@ -68,7 +68,7 @@ func TestCompletionPickReplacesToken(t *testing.T) {
 
 // Enter while closed submits; while open it picks.
 func TestCompletionClosedEnterSubmits(t *testing.T) {
-	src := []string{"Kestrel"}
+	src := []string{"Marlow"}
 	submitted := false
 	c := Complete(&src).Trigger('@').OnSubmit(func() { submitted = true })
 	c.input.field.Value = "no trigger here"
@@ -85,9 +85,9 @@ func TestCompletionClosedEnterSubmits(t *testing.T) {
 
 // Esc closes an open dropdown.
 func TestCompletionEscCloses(t *testing.T) {
-	src := []string{"Kestrel"}
+	src := []string{"Marlow"}
 	c := Complete(&src).Trigger('@')
-	c.input.field.Value = "@k"
+	c.input.field.Value = "@m"
 	c.input.field.Cursor = 2
 	c.recompute()
 	if !c.open {
@@ -118,7 +118,7 @@ func TestCompletionMoveSelWraps(t *testing.T) {
 
 // The component builds and expands without panic, and exposes its bindings + textBinding.
 func TestCompletionBuildExpands(t *testing.T) {
-	src := []string{"Kestrel"}
+	src := []string{"Marlow"}
 	c := Complete(&src).Trigger('@').Placeholder("message…")
 	if len(c.bindings()) != 1 {
 		t.Fatalf("want 1 always-on binding (Enter), got %d", len(c.bindings()))
@@ -136,7 +136,7 @@ func TestCompletionBuildExpands(t *testing.T) {
 // composer's Esc-to-cancel) receives them; when open, the dropdown's Esc shadows the
 // parent and closes the list.
 func TestCompletionEscFallsThroughWhenClosed(t *testing.T) {
-	src := []string{"Kestrel"}
+	src := []string{"Marlow"}
 	c := Complete(&src).Trigger('@')
 	parentEsc := 0
 	app := NewApp()
@@ -153,7 +153,7 @@ func TestCompletionEscFallsThroughWhenClosed(t *testing.T) {
 	}
 
 	// open the dropdown, render to activate the gated nav scope, then Esc.
-	c.input.field.Value = "@k"
+	c.input.field.Value = "@m"
 	c.input.field.Cursor = 2
 	c.recompute()
 	if !c.open {
