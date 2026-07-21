@@ -4,7 +4,7 @@ func (v VBoxC) Build() Component             { return v }
 func (h HBoxC) Build() Component             { return h }
 func (b Box) Build() Component               { return b }
 func (t TextC) Build() Component             { return t }
-func (r richTextNode) Build() Component      { return r }
+func (r RichTextNode) Build() Component      { return r }
 func (s SpacerC) Build() Component           { return s }
 func (h HRuleC) Build() Component            { return h }
 func (v VRuleC) Build() Component            { return v }

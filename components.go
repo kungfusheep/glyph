@@ -1144,7 +1144,7 @@ func (t TextC) MarginTRBL(a, b, c, d int16) TextC { t.style.margin = [4]int16{a,
 //
 // Returns a rich text node, so wrapping can be tuned: Textf(...).CharWrap()
 // switches to character-exact wrapping for truncation in fixed-height rows.
-func Textf(parts ...any) richTextNode {
+func Textf(parts ...any) RichTextNode {
 	spans := make([]Span, 0, len(parts))
 	ptrs := make([]*string, 0, len(parts))
 	hasPtrs := false
@@ -1179,7 +1179,7 @@ func Textf(parts ...any) richTextNode {
 		}
 	}
 
-	node := richTextNode{Spans: spans}
+	node := RichTextNode{Spans: spans}
 	if hasPtrs {
 		node.spanPtrs = ptrs
 	}

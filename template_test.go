@@ -5129,11 +5129,11 @@ func TestV2SplitLayout(t *testing.T) {
 		HBox(
 			VBox(
 				LayerView(layer1).Height(5),
-				richTextNode{Spans: spans1},
+				RichTextNode{Spans: spans1},
 			),
 			VBox(
 				LayerView(layer2).Height(5),
-				richTextNode{Spans: spans2},
+				RichTextNode{Spans: spans2},
 			),
 		),
 		Text("Global status"),

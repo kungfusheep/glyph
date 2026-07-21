@@ -3767,7 +3767,7 @@ func (t *Template) compile(node any, parent int16, depth int, elemBase unsafe.Po
 		return t.compileBox(v, parent, depth, elemBase, elemSize)
 	case conditionNode:
 		return t.compileCondition(v, parent, depth, elemBase, elemSize)
-	case richTextNode:
+	case RichTextNode:
 		return t.compileRichText(v, parent, depth, elemBase, elemSize)
 	case selectionList:
 		return t.compileSelectionList(&v, parent, depth, elemBase, elemSize)
@@ -3975,7 +3975,7 @@ func (t *Template) compileBox(box Box, parent int16, depth int, elemBase unsafe.
 	return idx
 }
 
-func (t *Template) compileRichText(v richTextNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
+func (t *Template) compileRichText(v RichTextNode, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
 	ext := &opRichText{charWrap: v.charWrap, preserveBG: v.preserveBG}
 
 	// bound markdown/plain source: an in-item pointer becomes an offset from elemBase

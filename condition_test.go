@@ -1116,7 +1116,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 			ForEach(&lines, func(dl *DisplayLine) Component {
 				return HBox(
 					Text(&dl.LineNum),
-					richTextNode{Spans: &dl.Spans},
+					RichTextNode{Spans: &dl.Spans},
 				)
 			}),
 		)
@@ -1152,7 +1152,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 
 		view := VBox(
 			ForEach(&lines, func(l *Line) Component {
-				return richTextNode{Spans: &l.Spans}
+				return RichTextNode{Spans: &l.Spans}
 			}),
 		)
 
@@ -1199,7 +1199,7 @@ func TestRichTextInsideForEach(t *testing.T) {
 
 		view := VBox(
 			ForEach(&lines, func(dl *DisplayLine) Component {
-				return richTextNode{Spans: &dl.Spans}
+				return RichTextNode{Spans: &dl.Spans}
 			}),
 		)
 
@@ -1284,7 +1284,7 @@ func TestDynamicStylePointersInsideForEach(t *testing.T) {
 func TestRichTextWrapsAcrossLines(t *testing.T) {
 	t.Run("word wraps static spans", func(t *testing.T) {
 		view := VBox.Width(12)(
-			richTextNode{Spans: []Span{
+			RichTextNode{Spans: []Span{
 				{Text: "hello", Style: Style{Attr: AttrBold}},
 				{Text: " world again", Style: Style{Attr: AttrDim}},
 			}},
@@ -1308,7 +1308,7 @@ func TestRichTextWrapsAcrossLines(t *testing.T) {
 
 	t.Run("preserves span styles after wrapping", func(t *testing.T) {
 		view := VBox.Width(10)(
-			richTextNode{Spans: []Span{
+			RichTextNode{Spans: []Span{
 				{Text: "plain ", Style: Style{}},
 				{Text: "selected", Style: Style{Attr: AttrInverse}},
 			}},
@@ -1340,7 +1340,7 @@ func TestRichTextWrapsAcrossLines(t *testing.T) {
 
 		view := VBox.Width(8)(
 			ForEach(&lines, func(line *Line) Component {
-				return richTextNode{Spans: &line.Spans}
+				return RichTextNode{Spans: &line.Spans}
 			}),
 		)
 

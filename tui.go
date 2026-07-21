@@ -707,9 +707,13 @@ type Span struct {
 	OnSelectRef func(NodeRef)
 }
 
-// richTextNode is the internal compiled form for inline-styled text.
-// Constructed via Rich(...) or Textf(...).
-type richTextNode struct {
+// RichTextNode is inline-styled text: a run of spans that share a line and wrap
+// together. Construct it with Rich(...) or Textf(...) rather than a literal — the
+// fields it carries are internal — then chain Markdown, CharWrap or PreserveBG.
+//
+//	Rich("Hello ", Bold("world"), "!")
+//	Rich(&body).Markdown()
+type RichTextNode struct {
 	Flex
 	Spans      any       // []Span or *[]Span
 	spanPtrs   []*string // per-span *string pointers for Textf (nil = static text)
@@ -727,7 +731,7 @@ type richTextNode struct {
 // a per-item bound string tokenises its own value (cache keyed by item identity).
 //
 //	Rich(&msg.Body).Markdown()
-func (r richTextNode) Markdown() richTextNode {
+func (r RichTextNode) Markdown() RichTextNode {
 	r.markdown = true
 	return r
 }
@@ -735,7 +739,7 @@ func (r richTextNode) Markdown() richTextNode {
 // CharWrap switches the rich text to character-exact wrapping: every rune is laid
 // down verbatim (word mode normalizes prose whitespace — drops leading, collapses
 // runs). Use for code, diffs, and anything where indentation is content.
-func (r richTextNode) CharWrap() richTextNode {
+func (r RichTextNode) CharWrap() RichTextNode {
 	r.charWrap = true
 	return r
 }
@@ -743,7 +747,7 @@ func (r richTextNode) CharWrap() richTextNode {
 // PreserveBG keeps the destination cell's background for every span's writes,
 // stamping rune and foreground over whatever sits beneath. Works for static
 // and live (*[]Span) content alike. ADR 4.
-func (r richTextNode) PreserveBG() richTextNode {
+func (r RichTextNode) PreserveBG() RichTextNode {
 	r.preserveBG = true
 	return r
 }
@@ -760,16 +764,16 @@ func (r richTextNode) PreserveBG() richTextNode {
 // construction updates the render next frame.
 //
 //	Rich(&statusSpans)  // live spans, mutate slice to update
-func Rich(parts ...any) richTextNode {
+func Rich(parts ...any) RichTextNode {
 	if len(parts) == 1 {
 		switch v := parts[0].(type) {
 		case *[]Span:
-			return richTextNode{Spans: v}
+			return RichTextNode{Spans: v}
 		case []Span:
-			return richTextNode{Spans: v}
+			return RichTextNode{Spans: v}
 		case *string:
 			// bound source — render plain unless .Markdown() upgrades it to tokenised
-			return richTextNode{mdSrc: v}
+			return RichTextNode{mdSrc: v}
 		}
 	}
 	spans := make([]Span, 0, len(parts))
@@ -781,7 +785,7 @@ func Rich(parts ...any) richTextNode {
 			spans = append(spans, v)
 		}
 	}
-	return richTextNode{Spans: spans}
+	return RichTextNode{Spans: spans}
 }
 
 // Styled creates a span with the given style.
