@@ -130,6 +130,12 @@ type Template struct {
 
 	// Current element base for ForEach context (set during layout/render)
 	elemBase unsafe.Pointer
+	// elemSlot is the SLICE SLOT for the current item. It differs from elemBase
+	// only for []*T, where ops bind at offsets inside the pointed-to struct
+	// while a whole-element callback (JumpItem) must still receive &slice[i].
+	// Handing out elemBase there yields the struct's first word typed as the
+	// element — a wild pointer that panics on deref.
+	elemSlot unsafe.Pointer
 	// Compile/runtime element contexts for nested ForEach captures. elemBase is
 	// kept for the current item fast path; elemBases keeps outer item bases
 	// addressable when an inner template captures an outer item field.
@@ -422,13 +428,35 @@ func (t *Template) runItemEvals(elemBase unsafe.Pointer) {
 }
 
 func (t *Template) runItemEvalsFrom(parent *Template, elemBase unsafe.Pointer) {
-	t.bindItemContext(parent, elemBase)
+	t.runItemEvalsSlot(parent, elemBase, inheritedSlot(parent, elemBase))
+}
+
+// runItemEvalsSlot binds the item with an explicit slice slot. Callers iterating
+// a slice know both; everything else inherits via inheritedSlot.
+func (t *Template) runItemEvalsSlot(parent *Template, elemBase, slot unsafe.Pointer) {
+	t.bindItemContextSlot(parent, elemBase, slot)
 	for _, eval := range t.itemEvals {
 		eval()
 	}
 }
 
+// inheritedSlot carries the slot down when a sub-template is bound to the SAME
+// item as its parent (an If/Switch branch inside a ForEach). Without this a
+// JumpItem inside a branch would fall back to the base and hand out the wild
+// pointer for []*T.
+func inheritedSlot(parent *Template, elemBase unsafe.Pointer) unsafe.Pointer {
+	if parent != nil && parent.elemBase == elemBase && parent.elemSlot != nil {
+		return parent.elemSlot
+	}
+	return elemBase
+}
+
 func (t *Template) bindItemContext(parent *Template, elemBase unsafe.Pointer) {
+	t.bindItemContextSlot(parent, elemBase, inheritedSlot(parent, elemBase))
+}
+
+func (t *Template) bindItemContextSlot(parent *Template, elemBase, slot unsafe.Pointer) {
+	t.elemSlot = slot
 	t.elemBase = elemBase
 	contexts := len(t.compileElemContexts)
 	if contexts == 0 {
@@ -7096,11 +7124,12 @@ func (t *Template) layout(_ int16) {
 					if ext.iterTmpl != nil && len(ext.iterTmpl.ops) > 0 {
 						firstOp := &ext.iterTmpl.ops[0]
 						if firstOp.Kind == OpContainer || firstOp.Kind == OpLayout || firstOp.Kind == OpJump || firstOp.Kind == OpRichText || firstOp.Kind == OpTextBlock {
-							elemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(li)*ext.elemSize)
+							elemPtrSlot := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(li)*ext.elemSize)
+							elemPtr := elemPtrSlot
 							if ext.elemIsPtr {
-								elemPtr = *(*unsafe.Pointer)(elemPtr)
+								elemPtr = *(*unsafe.Pointer)(elemPtrSlot)
 							}
-							ext.iterTmpl.bindItemContext(t, elemPtr)
+							ext.iterTmpl.bindItemContextSlot(t, elemPtr, elemPtrSlot)
 							ext.iterTmpl.itemIndex = li
 							for _, eval := range ext.iterTmpl.itemEvals {
 								eval()
@@ -7981,13 +8010,14 @@ func (t *Template) layoutForEach(_ int16, op *Op, availW int16) (totalH, maxW in
 	cursor := int16(0)
 	for i := 0; i < visible; i++ {
 		// Get element pointer for this item
-		elemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*feExt.elemSize)
+		elemPtrSlot := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*feExt.elemSize)
+		elemPtr := elemPtrSlot
 		if feExt.elemIsPtr {
-			elemPtr = *(*unsafe.Pointer)(elemPtr)
+			elemPtr = *(*unsafe.Pointer)(elemPtrSlot)
 		}
 
 		// Layout sub-template for this item with element base
-		feExt.iterTmpl.runItemEvalsFrom(t, elemPtr)
+		feExt.iterTmpl.runItemEvalsSlot(t, elemPtr, elemPtrSlot)
 		feExt.iterTmpl.distributeWidths(availW, elemPtr)
 		feExt.iterTmpl.layout(0)
 		itemH := feExt.iterTmpl.Height()
@@ -8032,9 +8062,10 @@ func (t *Template) layoutForEachRow(_ int16, op *Op, availW int16, gap int8) (ma
 
 	cursor := int16(0)
 	for i := 0; i < visible; i++ {
-		elemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*feExt.elemSize)
+		elemPtrSlot := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*feExt.elemSize)
+		elemPtr := elemPtrSlot
 		if feExt.elemIsPtr {
-			elemPtr = *(*unsafe.Pointer)(elemPtr)
+			elemPtr = *(*unsafe.Pointer)(elemPtrSlot)
 		}
 
 		if i > 0 && gap > 0 {
@@ -8049,7 +8080,7 @@ func (t *Template) layoutForEachRow(_ int16, op *Op, availW int16, gap int8) (ma
 		}
 
 		remainingW := availW - cursor
-		feExt.iterTmpl.runItemEvalsFrom(t, elemPtr)
+		feExt.iterTmpl.runItemEvalsSlot(t, elemPtr, elemPtrSlot)
 		itemW := templateIntrinsicWidthWithBase(feExt.iterTmpl, elemPtr)
 		if itemW <= 0 {
 			itemW = remainingW
@@ -8841,13 +8872,14 @@ func (t *Template) renderOp(buf *Buffer, idx int16, globalX, globalY, maxW int16
 			itemAbsY := absY + itemGeom.LocalY
 
 			// Rebind template ops to this element's data
-			elemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*feExt.elemSize)
+			elemPtrSlot := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*feExt.elemSize)
+			elemPtr := elemPtrSlot
 			if feExt.elemIsPtr {
-				elemPtr = *(*unsafe.Pointer)(elemPtr)
+				elemPtr = *(*unsafe.Pointer)(elemPtrSlot)
 			}
 
 			// run per-item evaluators so conditions/tweens resolve for this item
-			feExt.iterTmpl.runItemEvalsFrom(t, elemPtr)
+			feExt.iterTmpl.runItemEvalsSlot(t, elemPtr, elemPtrSlot)
 			feExt.iterTmpl.itemIndex = i
 			feExt.iterTmpl.distributeWidths(itemGeom.W, elemPtr)
 			feExt.iterTmpl.layout(0)
@@ -8893,7 +8925,15 @@ func (t *Template) renderSubTemplate(buf *Buffer, sub *Template, globalX, global
 	} else {
 		sub.inheritedFill = t.inheritedFill // propagate fill so blank cells use parent bg
 	}
-	sub.bindItemContext(t, elemBase) // ensure renderOp paths (e.g. via renderJump) see the correct element
+	// ensure renderOp paths (e.g. via renderJump) see the correct element. Keep
+	// the slice slot the iterating caller already bound: for []*T it is not
+	// recoverable from elemBase, and rebinding without it hands JumpItem the
+	// pointed-to struct's first word.
+	slot := elemBase
+	if sub.elemBase == elemBase && sub.elemSlot != nil {
+		slot = sub.elemSlot
+	}
+	sub.bindItemContextSlot(t, elemBase, slot)
 	sub.pendingOverlays = sub.pendingOverlays[:0]
 	sub.pendingScreenEffects = sub.pendingScreenEffects[:0]
 	for i := range sub.ops {
@@ -9426,13 +9466,14 @@ func (t *Template) renderSubOp(buf *Buffer, idx int16, globalX, globalY, maxW in
 				itemGeom := &feExt.geoms[j]
 				itemAbsX := absX + itemGeom.LocalX
 				itemAbsY := absY + itemGeom.LocalY
-				nestedElemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(j)*feExt.elemSize)
+				nestedElemPtrSlot := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(j)*feExt.elemSize)
+				nestedElemPtr := nestedElemPtrSlot
 				if feExt.elemIsPtr {
-					nestedElemPtr = *(*unsafe.Pointer)(nestedElemPtr)
+					nestedElemPtr = *(*unsafe.Pointer)(nestedElemPtrSlot)
 				}
-				feExt.iterTmpl.bindItemContext(t, nestedElemPtr)
+				feExt.iterTmpl.bindItemContextSlot(t, nestedElemPtr, nestedElemPtrSlot)
 				feExt.iterTmpl.itemIndex = j
-				feExt.iterTmpl.runItemEvalsFrom(t, nestedElemPtr)
+				feExt.iterTmpl.runItemEvalsSlot(t, nestedElemPtr, nestedElemPtrSlot)
 				feExt.iterTmpl.distributeWidths(itemGeom.W, nestedElemPtr)
 				feExt.iterTmpl.layout(0)
 				feExt.iterTmpl.clampRootWidth(itemGeom.W)
@@ -9695,16 +9736,17 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 
 		// Get content from iteration template
 		if ext.iterTmpl != nil && len(ext.iterTmpl.ops) > 0 {
-			elemPtr := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*ext.elemSize)
+			elemPtrSlot := unsafe.Pointer(uintptr(sliceHdr.Data) + uintptr(i)*ext.elemSize)
+			elemPtr := elemPtrSlot
 			if ext.elemIsPtr {
-				elemPtr = *(*unsafe.Pointer)(elemPtr)
+				elemPtr = *(*unsafe.Pointer)(elemPtrSlot)
 			}
 
 			if needsFullPipeline {
 				// complex layout: use pre-calculated heights from layout phase
-				ext.iterTmpl.bindItemContext(t, elemPtr)
+				ext.iterTmpl.bindItemContextSlot(t, elemPtr, elemPtrSlot)
 				ext.iterTmpl.itemIndex = i
-				ext.iterTmpl.runItemEvalsFrom(t, elemPtr)
+				ext.iterTmpl.runItemEvalsSlot(t, elemPtr, elemPtrSlot)
 				ext.iterTmpl.distributeWidths(contentW, elemPtr)
 				ext.iterTmpl.layout(0)
 				if isSelected {
@@ -9737,9 +9779,9 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 				t.renderSubTemplate(buf, ext.iterTmpl, contentX, int16(y), contentW, elemPtr)
 			} else {
 				// Simple text: fast path (no layout needed)
-				ext.iterTmpl.bindItemContext(t, elemPtr)
+				ext.iterTmpl.bindItemContextSlot(t, elemPtr, elemPtrSlot)
 				ext.iterTmpl.itemIndex = i
-				ext.iterTmpl.runItemEvalsFrom(t, elemPtr)
+				ext.iterTmpl.runItemEvalsSlot(t, elemPtr, elemPtrSlot)
 				iterOp := &ext.iterTmpl.ops[0]
 
 				switch iterOp.Kind {
@@ -9922,7 +9964,13 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 		}
 		ext := op.Ext.(*opJump)
 		onSelect := ext.onSelect
-		if base := t.elemBase; base != nil {
+		// the SLOT, not the base: for []*T they differ, and the callback's
+		// parameter type is the slice's element type
+		base := t.elemSlot
+		if base == nil {
+			base = t.elemBase
+		}
+		if base != nil {
 			if ext.onSelectItem != nil {
 				fn := ext.onSelectItem
 				onSelect = func() { fn(base) }
