@@ -24,13 +24,10 @@ func newTestEditor(w, h int) *Editor {
 		FileName: "test.txt",
 		marks:    make(map[rune]Pos),
 	}
-	win := &Window{buffer: buf, renderedMin: -1, renderedMax: -1}
-	root := &SplitNode{Window: win}
-	ed := &Editor{
-		root:          root,
-		focusedWindow: win,
-		Mode:          "NORMAL",
-	}
+	ed := &Editor{Mode: "NORMAL"}
+	win := ed.initPool(buf)
+	ed.focusedWindow = win
+	ed.root = &SplitNode{Window: win}
 	ed.resize(w, h)
 	return ed
 }
@@ -217,5 +214,106 @@ func TestWindowLayerReclaimsMemory(t *testing.T) {
 	glyph.Build(buildView(ed)).Execute(buf, 80, 24)
 	if !strings.Contains(rowText(buf, 0), "one") {
 		t.Errorf("window is blank after the buffer swap; row0 = %q", rowText(buf, 0))
+	}
+}
+
+// TestOneTemplateSurvivesSplits is the bar the pane pool exists to meet: ONE
+// compiled template for the life of the session. It compiles before any split
+// happens, then splits twice and closes once against that same template, and
+// requires every window to draw its own content each time.
+//
+// This is the test that fails on the design it replaced. When the view was a
+// recursive tree of VBox/HBox, the shape was fixed at compile time, so a split
+// after Build was invisible until SetView recompiled — which is exactly the
+// rebuild the editor is no longer allowed to do.
+func TestOneTemplateSurvivesSplits(t *testing.T) {
+	ed := newTestEditor(80, 24)
+	ed.updateAllWindows()
+
+	// compiled ONCE, before the tree ever changes shape
+	tmpl := glyph.Build(buildView(ed))
+
+	paint := func() string {
+		out := glyph.NewBuffer(80, 24)
+		tmpl.Execute(out, 80, 24)
+		var sb strings.Builder
+		for y := 0; y < 24; y++ {
+			sb.WriteString(rowText(out, y))
+			sb.WriteByte('\n')
+		}
+		return sb.String()
+	}
+
+	// one window: its content is on screen
+	if !strings.Contains(paint(), "one") {
+		t.Fatal("the single window rendered no content before any split")
+	}
+
+	// split vertically — no recompile
+	ed.splitVertical()
+	left, right := ed.root.Children[0].Window, ed.root.Children[1].Window
+	if left == right {
+		t.Fatal("splitVertical reused the same window for both panes")
+	}
+	frame := paint()
+	lw, _ := layerBox(left)
+	rw, _ := layerBox(right)
+	if lw == 0 || rw == 0 {
+		t.Fatalf("after a split with no recompile a pane has no width (left %d, right %d) — "+
+			"the template did not pick up the new tree", lw, rw)
+	}
+	if lw+rw != 80 {
+		t.Errorf("panes cover %d columns (%d + %d), want 80", lw+rw, lw, rw)
+	}
+	// both panes show the buffer, so the text appears twice on the first row
+	if n := strings.Count(strings.SplitN(frame, "\n", 2)[0], "one"); n != 2 {
+		t.Errorf("row 0 shows %d panes of content, want 2: %q", n, strings.SplitN(frame, "\n", 2)[0])
+	}
+
+	// split again — still no recompile
+	ed.splitHorizontal()
+	if got := len(ed.root.AllWindows()); got != 3 {
+		t.Fatalf("after a second split the tree holds %d windows, want 3", got)
+	}
+	for _, w := range ed.root.AllWindows() {
+		if w.viewportWidth == 0 || w.viewportHeight == 0 {
+			t.Errorf("window in slot %d has an empty viewport after the second split", w.slot)
+		}
+	}
+	if !strings.Contains(paint(), "one") {
+		t.Error("content vanished after the second split")
+	}
+
+	// closing returns the slot, and the survivors reclaim the space
+	ed.closeWindow()
+	if got := len(ed.root.AllWindows()); got != 2 {
+		t.Fatalf("after closeWindow the tree holds %d windows, want 2", got)
+	}
+	if !strings.Contains(paint(), "one") {
+		t.Error("content vanished after closing a window")
+	}
+}
+
+// TestPoolExhaustionIsReported pins the one cost of the compile-once design:
+// the pool is finite, so the (maxWindows+1)th split has to fail visibly rather
+// than silently drop a window or corrupt the tree.
+func TestPoolExhaustionIsReported(t *testing.T) {
+	ed := newTestEditor(200, 80)
+	for i := 0; i < maxWindows*2; i++ {
+		ed.splitVertical()
+	}
+	if got := len(ed.root.AllWindows()); got != maxWindows {
+		t.Fatalf("tree holds %d windows, want the pool cap of %d", got, maxWindows)
+	}
+	if ed.StatusLine == "" {
+		t.Error("splitting past the pool cap reported nothing to the user")
+	}
+	// every window still owns a distinct slot
+	seen := map[int]bool{}
+	for _, w := range ed.root.AllWindows() {
+		if seen[w.slot] {
+			t.Fatalf("slot %d is used by two windows at once", w.slot)
+		}
+		seen[w.slot] = true
 	}
 }

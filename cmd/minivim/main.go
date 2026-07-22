@@ -86,9 +86,27 @@ type Buffer struct {
 	fileTree  *FileTree    // non-nil if this is a netrw buffer
 }
 
+// maxWindows bounds the window pool. The view is compiled once and never
+// rebuilt, so every window a session can ever hold must already exist as a
+// child of the Arrange at compile time.
+//
+// A pool is needed because a Layer-backed component cannot be driven from a
+// ForEach: the compiled op captures the layer pointer, so every item would
+// render the first window's buffer. Windows therefore get a slot each, and the
+// layout hands unused slots a zero rect.
+//
+// An unused slot costs nothing — a zero-size box paints nothing — and vim's own
+// practical split count is far below this.
+const maxWindows = 8
+
 // Window is a view into a buffer
 type Window struct {
 	buffer *Buffer
+
+	// slot is this window's index in the editor's pool. It fixes which pair of
+	// Arrange children this window draws through, and never changes: the
+	// compiled template addresses panes by index.
+	slot int
 
 	// Cursor position
 	Cursor int
@@ -201,6 +219,22 @@ func (n *SplitNode) LastWindow() *Window {
 type Editor struct {
 	root          *SplitNode // root of the split tree
 	focusedWindow *Window    // currently focused window
+
+	// The window pool. Every slot is allocated before the view compiles and
+	// lives for the session, so the pointers the template captures stay valid.
+	// A split claims a free slot, a close returns one; the template never
+	// changes.
+	slots [maxWindows]*Window
+	free  []int // slot indices not currently in the tree
+
+	// paneRects is the layout's output, reused across frames to stay off the
+	// allocation path. Each window owns two entries: 2*slot is its content
+	// area, 2*slot+1 is its own status bar row.
+	paneRects [maxWindows * 2]glyph.Rect
+
+	// the screen box the layout works from, tracked because a custom-layout
+	// container is handed no height to divide.
+	screenW, screenH int
 
 	app *glyph.App // reference for cursor control
 
@@ -1609,18 +1643,7 @@ func main() {
 		FileName: fileName,
 		marks:    make(map[rune]Pos),
 	}
-	win := &Window{
-		buffer:      buf,
-		renderedMin: -1,
-		renderedMax: -1,
-	}
-
-	// Create split tree with single window as root
-	root := &SplitNode{Window: win}
-
 	ed := &Editor{
-		root:           root,
-		focusedWindow:  win,
 		Mode:           "NORMAL",
 		StatusLine:     "", // empty initially, used for messages
 		relativeNumber: true,
@@ -1628,6 +1651,12 @@ func main() {
 		showSignColumn: true,
 		macros:         make(map[rune]riffkey.Macro),
 	}
+
+	// the pool exists before the view compiles, so the template can capture
+	// every slot's layer and status bar up front
+	win := ed.initPool(buf)
+	ed.focusedWindow = win
+	ed.root = &SplitNode{Window: win}
 
 	app := glyph.NewApp()
 	ed.app = app
@@ -2096,70 +2125,24 @@ func (ed *Editor) updateCursor() {
 	screenX += offsetX
 	screenY += offsetY
 
+	if ed.app == nil {
+		return
+	}
 	ed.app.SetCursor(screenX, screenY)
 }
 
-// getWindowOffset calculates the screen offset for a window by traversing the tree
+// getWindowOffset returns the window's position on screen.
+//
+// It reads the rect the layout wrote for this window rather than re-deriving it
+// from the tree. The layout is the authority on geometry — a second walk that
+// computes the "same" offset is a second answer waiting to disagree, and a
+// cursor placed by the loser lands in the wrong pane.
 func (ed *Editor) getWindowOffset(w *Window) (x, y int) {
-	node := ed.root.FindWindow(w)
-	if node == nil {
+	if w == nil {
 		return 0, 0
 	}
-
-	// Walk up the tree, accumulating offsets
-	for node.Parent != nil {
-		parent := node.Parent
-		// If we're the second child, add the first child's dimensions
-		if parent.Children[1] == node {
-			first := parent.Children[0]
-			switch parent.Direction {
-			case SplitHorizontal:
-				// First child is above us, add its height
-				y += ed.getNodeHeight(first)
-			case SplitVertical:
-				// First child is to our left, add its width
-				x += ed.getNodeWidth(first)
-			}
-		}
-		node = parent
-	}
-	return x, y
-}
-
-// getNodeHeight returns the total height of a node (sum of all windows + status bars)
-func (ed *Editor) getNodeHeight(n *SplitNode) int {
-	if n.IsLeaf() {
-		return n.Window.viewportHeight + 1 // +1 for status bar
-	}
-	if n.Direction == SplitHorizontal {
-		// Stacked vertically - sum heights
-		return ed.getNodeHeight(n.Children[0]) + ed.getNodeHeight(n.Children[1])
-	}
-	// Side by side - max height
-	h0 := ed.getNodeHeight(n.Children[0])
-	h1 := ed.getNodeHeight(n.Children[1])
-	if h0 > h1 {
-		return h0
-	}
-	return h1
-}
-
-// getNodeWidth returns the total width of a node
-func (ed *Editor) getNodeWidth(n *SplitNode) int {
-	if n.IsLeaf() {
-		return n.Window.viewportWidth
-	}
-	if n.Direction == SplitVertical {
-		// Side by side - sum widths
-		return ed.getNodeWidth(n.Children[0]) + ed.getNodeWidth(n.Children[1])
-	}
-	// Stacked - max width
-	w0 := ed.getNodeWidth(n.Children[0])
-	w1 := ed.getNodeWidth(n.Children[1])
-	if w0 > w1 {
-		return w0
-	}
-	return w1
+	r := ed.paneRects[2*w.slot]
+	return r.X, r.Y
 }
 
 // refresh does a full re-render - use for content changes or visual mode.
@@ -2632,7 +2615,7 @@ func (ed *Editor) updateWindowStatusBar(w *Window, focused bool) {
 	// Use stored viewport width if set, otherwise full screen width
 	width := w.viewportWidth
 	if width == 0 {
-		width = ed.app.Size().Width
+		width = ed.screenW
 	}
 
 	// Left side: filename (and debug stats if enabled)
@@ -2882,24 +2865,80 @@ func (ed *Editor) initWindowLayer(w *Window, width int) {
 // recalculateViewports). Getting this wrong does not misdraw anything, it
 // desynchronises paging and cursor clamping from what is on screen.
 func (ed *Editor) resize(width, height int) {
+	// the layout divides this box; a custom-layout container is handed no
+	// height of its own, so it has to come from here
+	ed.screenW, ed.screenH = width, height
 	contentHeight := max(1, height-headerRows-messageRows)
 	ed.recalculateViewports(ed.root, width, contentHeight)
 	ed.updateAllWindows()
 }
 
-// rebuildView recompiles the template after the split tree changes SHAPE — a
-// window opening or closing adds or removes nodes, and the tree is a recursive
-// structure a compiled template cannot express dynamically.
-//
-// This is the only reason minivim recompiles. Everything else (cursor, text,
-// status line, window size) is bound by pointer and picked up on the next
-// frame. Reach for this only when the set of windows changes; calling it for
-// content or size changes throws away the compile for nothing.
-func (ed *Editor) rebuildView() {
-	if ed.app == nil {
+// requestRepaint asks for a frame after the split tree changed shape. The
+// layout re-reads the tree every frame, so a split or a close is a data change
+// like any other — there is nothing to recompile.
+func (ed *Editor) requestRepaint() {
+	// the tree changed shape, so every window's share of the screen changed
+	// with it — recompute before asking for the frame that will draw it
+	ed.resize(ed.screenW, ed.screenH)
+	if ed.app != nil {
+		ed.app.RequestRender()
+	}
+}
+
+// initPool allocates every window slot before the view compiles. The template
+// captures each slot's layer and status-bar pointers, so the slots themselves
+// have to outlive every split and close in the session.
+func (ed *Editor) initPool(first *Buffer) *Window {
+	for i := range ed.slots {
+		ed.slots[i] = &Window{
+			slot:         i,
+			buffer:       first,
+			contentLayer: glyph.NewLayer(),
+			renderedMin:  -1,
+			renderedMax:  -1,
+		}
+	}
+	// slot 0 is the first window; the rest are free
+	ed.free = make([]int, 0, maxWindows)
+	for i := maxWindows - 1; i >= 1; i-- {
+		ed.free = append(ed.free, i)
+	}
+	return ed.slots[0]
+}
+
+// claimWindow takes a free slot and resets it to view buf. It returns nil when
+// the pool is exhausted, which is the split limit the caller reports.
+func (ed *Editor) claimWindow(buf *Buffer) *Window {
+	if len(ed.free) == 0 {
+		return nil
+	}
+	i := ed.free[len(ed.free)-1]
+	ed.free = ed.free[:len(ed.free)-1]
+
+	w := ed.slots[i]
+	// reset the view state, keep slot and layer — the template holds both
+	w.buffer = buf
+	w.Cursor, w.Col = 0, 0
+	w.topLine, w.leftCol = 0, 0
+	w.visualStart, w.visualStartCol, w.visualMode = 0, 0, VisualNone
+	w.renderedMin, w.renderedMax = -1, -1
+	w.jumpList, w.jumpIndex = w.jumpList[:0], 0
+	return w
+}
+
+// releaseWindow returns a slot to the pool. The layout stops giving it a rect,
+// so it paints nothing until it is claimed again.
+func (ed *Editor) releaseWindow(w *Window) {
+	if w == nil {
 		return
 	}
-	ed.app.SetView(buildView(ed))
+	for _, i := range ed.free {
+		if i == w.slot {
+			return // already free
+		}
+	}
+	w.renderedMin, w.renderedMax = -1, -1
+	ed.free = append(ed.free, w.slot)
 }
 
 // splitHorizontal creates a horizontal split (windows stacked vertically like :sp)
@@ -2919,16 +2958,14 @@ func (ed *Editor) splitHorizontal() {
 	ed.focusedWindow.viewportHeight = halfHeight
 
 	// Create new window viewing the same buffer
-	newWin := &Window{
-		buffer:         ed.buf(),
-		Cursor:         ed.focusedWindow.Cursor,
-		Col:            ed.focusedWindow.Col,
-		topLine:        ed.focusedWindow.topLine,
-		viewportHeight: totalHeight - halfHeight,
-		viewportWidth:  ed.focusedWindow.viewportWidth,
-		renderedMin:    -1,
-		renderedMax:    -1,
+	newWin := ed.claimWindow(ed.buf())
+	if newWin == nil {
+		ed.StatusLine = "E36: Not enough room"
+		return
 	}
+	newWin.Cursor = ed.focusedWindow.Cursor
+	newWin.Col = ed.focusedWindow.Col
+	newWin.topLine = ed.focusedWindow.topLine
 
 	// Initialize layer for new window
 	ed.initWindowLayer(newWin, newWin.viewportWidth)
@@ -2945,7 +2982,7 @@ func (ed *Editor) splitHorizontal() {
 	newWindowNode.Parent = currentNode
 
 	// Refresh display
-	ed.rebuildView()
+	ed.requestRepaint()
 	ed.updateAllWindows()
 	ed.StatusLine = ""
 }
@@ -2966,16 +3003,14 @@ func (ed *Editor) splitVertical() {
 	ed.focusedWindow.viewportWidth = halfWidth
 
 	// Create new window viewing the same buffer
-	newWin := &Window{
-		buffer:         ed.buf(),
-		Cursor:         ed.focusedWindow.Cursor,
-		Col:            ed.focusedWindow.Col,
-		topLine:        ed.focusedWindow.topLine,
-		viewportHeight: ed.focusedWindow.viewportHeight,
-		viewportWidth:  totalWidth - halfWidth - 1, // -1 for separator
-		renderedMin:    -1,
-		renderedMax:    -1,
+	newWin := ed.claimWindow(ed.buf())
+	if newWin == nil {
+		ed.StatusLine = "E36: Not enough room"
+		return
 	}
+	newWin.Cursor = ed.focusedWindow.Cursor
+	newWin.Col = ed.focusedWindow.Col
+	newWin.topLine = ed.focusedWindow.topLine
 
 	// Reinitialize layers for both windows with new widths
 	ed.initWindowLayer(ed.focusedWindow, halfWidth)
@@ -2993,7 +3028,7 @@ func (ed *Editor) splitVertical() {
 	newWindowNode.Parent = currentNode
 
 	// Refresh display
-	ed.rebuildView()
+	ed.requestRepaint()
 	ed.updateAllWindows()
 	ed.StatusLine = ""
 }
@@ -3009,15 +3044,10 @@ func (ed *Editor) splitHorizontalWithBuffer(buf *Buffer) {
 	halfHeight := max(1, totalHeight/2)
 	ed.focusedWindow.viewportHeight = halfHeight
 
-	newWin := &Window{
-		buffer:         buf,
-		Cursor:         0,
-		Col:            0,
-		topLine:        0,
-		viewportHeight: totalHeight - halfHeight,
-		viewportWidth:  ed.focusedWindow.viewportWidth,
-		renderedMin:    -1,
-		renderedMax:    -1,
+	newWin := ed.claimWindow(buf)
+	if newWin == nil {
+		ed.StatusLine = "E36: Not enough room"
+		return
 	}
 
 	ed.initWindowLayer(newWin, newWin.viewportWidth)
@@ -3034,7 +3064,7 @@ func (ed *Editor) splitHorizontalWithBuffer(buf *Buffer) {
 	// Focus the new window
 	ed.focusedWindow = newWin
 
-	ed.rebuildView()
+	ed.requestRepaint()
 	ed.updateAllWindows()
 	ed.StatusLine = ""
 }
@@ -3050,15 +3080,10 @@ func (ed *Editor) splitVerticalWithBuffer(buf *Buffer) {
 	halfWidth := max(1, totalWidth/2-1)
 	ed.focusedWindow.viewportWidth = halfWidth
 
-	newWin := &Window{
-		buffer:         buf,
-		Cursor:         0,
-		Col:            0,
-		topLine:        0,
-		viewportHeight: ed.focusedWindow.viewportHeight,
-		viewportWidth:  totalWidth - halfWidth - 1,
-		renderedMin:    -1,
-		renderedMax:    -1,
+	newWin := ed.claimWindow(buf)
+	if newWin == nil {
+		ed.StatusLine = "E36: Not enough room"
+		return
 	}
 
 	ed.initWindowLayer(ed.focusedWindow, halfWidth)
@@ -3076,7 +3101,7 @@ func (ed *Editor) splitVerticalWithBuffer(buf *Buffer) {
 	// Focus the new window
 	ed.focusedWindow = newWin
 
-	ed.rebuildView()
+	ed.requestRepaint()
 	ed.updateAllWindows()
 	ed.StatusLine = ""
 }
@@ -3106,6 +3131,10 @@ func (ed *Editor) closeWindow() {
 		sibling = parent.Children[0]
 	}
 
+	// the closing window's slot goes back to the pool; the layout stops giving
+	// it a rect, so it paints nothing until it is claimed again
+	ed.releaseWindow(node.Window)
+
 	// Promote sibling to parent's position
 	parent.Direction = sibling.Direction
 	parent.Window = sibling.Window
@@ -3122,11 +3151,9 @@ func (ed *Editor) closeWindow() {
 	// Focus the first window in the sibling subtree
 	ed.focusedWindow = parent.FirstWindow()
 
-	// Recalculate viewport sizes based on available space
-	size := ed.app.Size()
-	ed.resize(size.Width, size.Height)
-
-	ed.rebuildView()
+	// requestRepaint recalculates every window's share of the screen before
+	// asking for the frame
+	ed.requestRepaint()
 	ed.updateCursor()
 }
 
@@ -3137,14 +3164,19 @@ func (ed *Editor) closeOtherWindows() {
 		return
 	}
 
+	// every other window's slot returns to the pool
+	for _, w := range ed.root.AllWindows() {
+		if w != ed.focusedWindow {
+			ed.releaseWindow(w)
+		}
+	}
+
 	// Reset to single window
 	ed.root = &SplitNode{Window: ed.focusedWindow}
 
-	// Reclaim full viewport
-	size := ed.app.Size()
-	ed.resize(size.Width, size.Height)
+	// the survivor reclaims the full viewport in requestRepaint
 
-	ed.rebuildView()
+	ed.requestRepaint()
 	ed.updateAllWindows()
 	ed.updateCursor()
 }
@@ -3525,47 +3557,80 @@ func (ed *Editor) buildBlockSelectionSpans(line string, startCol, endCol int, no
 	return spans
 }
 
-// buildWindowView builds the view for a single window
-func buildWindowView(w *Window, focused bool) glyph.Component {
-	// the window fills the box the split tree gives it; the status bar takes one
-	// row and the layer grows into the rest. sizing comes from the layout pass,
-	// so a resize never needs a recompile. baking viewportWidth/Height in here
-	// would freeze them at compile time.
-	return glyph.VBox.Grow(1)(
-		glyph.LayerView(w.contentLayer).Grow(1),
-		// Vim-style status bar (inverse video, shows filename and position)
-		glyph.Rich(&w.StatusBar),
-	)
+// paneComponents returns the pool in slot order: for each window, its content
+// layer followed by its status bar. The Arrange addresses children by index, so
+// this order is the contract paneRects relies on.
+//
+// Both are DIRECT children of the Arrange, deliberately. A custom layout writes
+// its rects to its immediate children only; it does not re-run layout for their
+// subtrees. Wrapping each pair in a VBox therefore leaves the layer sized from
+// before the rect was applied, and the window renders blank.
+func (ed *Editor) paneComponents() []glyph.Component {
+	out := make([]glyph.Component, 0, maxWindows*2)
+	for _, w := range ed.slots {
+		out = append(out,
+			glyph.LayerView(w.contentLayer),
+			// Vim-style status bar (inverse video, shows filename and position)
+			glyph.Rich(&w.StatusBar),
+		)
+	}
+	return out
 }
 
-// buildNodeView recursively builds the view for a split node
-func buildNodeView(node *SplitNode, focusedWindow *Window) glyph.Component {
-	if node.IsLeaf() {
-		return buildWindowView(node.Window, node.Window == focusedWindow)
+// layout divides the screen down the split tree every frame. The tree is data:
+// a split mutates it and the next frame reads the new shape, so the template is
+// compiled once and never rebuilt.
+//
+// availH arrives as 0 for a custom-layout container, so the height comes from
+// the screen box tracked in resize, less the message line. The rects returned
+// are what give the container its height.
+func (ed *Editor) layout(_ []glyph.ChildSize, availW, _ int) []glyph.Rect {
+	rects := ed.paneRects[:]
+	clear(rects)
+
+	w, h := ed.screenW, ed.screenH
+	if availW > 0 {
+		w = availW
+	}
+	if w <= 0 || h <= messageRows {
+		return rects // no geometry yet
 	}
 
-	// Build children recursively
-	child0 := buildNodeView(node.Children[0], focusedWindow)
-	child1 := buildNodeView(node.Children[1], focusedWindow)
+	placeNode(ed.root, glyph.Rect{X: 0, Y: 0, W: w, H: h - headerRows - messageRows}, rects)
+	return rects
+}
 
-	// each half grows equally, so the engine splits the box rather than the
-	// editor pre-computing pixel sizes for it.
-	if node.Direction == SplitHorizontal {
-		// Stack vertically (Col)
-		return glyph.VBox.Grow(1)(child0, child1)
+// placeNode divides a box down the split tree, writing each window's content
+// and status-bar rects into its own slot. Children share their parent's box
+// equally; the second absorbs the rounding remainder so no row or column is
+// dropped.
+func placeNode(n *SplitNode, box glyph.Rect, rects []glyph.Rect) {
+	if n == nil || box.W <= 0 || box.H <= 0 {
+		return
 	}
-	// Side by side (Row)
-	return glyph.HBox.Grow(1)(child0, child1)
+	if n.IsLeaf() {
+		s := n.Window.slot
+		// the status bar takes the bottom row; the content takes the rest
+		rects[2*s] = glyph.Rect{X: box.X, Y: box.Y, W: box.W, H: max(0, box.H-1)}
+		rects[2*s+1] = glyph.Rect{X: box.X, Y: box.Y + max(0, box.H-1), W: box.W, H: 1}
+		return
+	}
+	if n.Direction == SplitHorizontal {
+		half := box.H / 2
+		placeNode(n.Children[0], glyph.Rect{X: box.X, Y: box.Y, W: box.W, H: half}, rects)
+		placeNode(n.Children[1], glyph.Rect{X: box.X, Y: box.Y + half, W: box.W, H: box.H - half}, rects)
+		return
+	}
+	half := box.W / 2
+	placeNode(n.Children[0], glyph.Rect{X: box.X, Y: box.Y, W: half, H: box.H}, rects)
+	placeNode(n.Children[1], glyph.Rect{X: box.X + half, Y: box.Y, W: box.W - half, H: box.H}, rects)
 }
 
 func buildView(ed *Editor) glyph.Component {
-	// Build the window tree. It grows into everything the wildmenu and status
-	// line leave behind.
-	windowTree := buildNodeView(ed.root, ed.focusedWindow)
-
-	// Wrap in Col to add wildmenu and status line at bottom
+	// The pane area is an Arrange over the whole pool. Splits and closes mutate
+	// the tree the layout reads; nothing here is ever rebuilt.
 	return glyph.VBox(
-		windowTree,
+		glyph.Arrange(ed.layout)(ed.paneComponents()...),
 		// Wildmenu appears above status line when active
 		glyph.If(&ed.cmdCompletionActive).Eq(true).Then(glyph.Rich(&ed.cmdWildmenuSpans)),
 		glyph.Text(&ed.StatusLine),
