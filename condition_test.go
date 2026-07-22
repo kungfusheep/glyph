@@ -1707,3 +1707,104 @@ func TestEqChainInsideIfThenRebindsPerRow(t *testing.T) {
 		}
 	}
 }
+
+// A FLAT value switch — sibling Then-only Eq Ifs as container children — rebinds
+// per row, at five wide and nested inside an outer If.Then/Else. Pinned because a
+// consumer reported this form dark and it reads as the natural way to write a
+// value switch; it is supported, not merely tolerated.
+func TestSiblingThenOnlyEqSwitchInForEach(t *testing.T) {
+	type Row struct {
+		Name    string
+		Profile string
+		Live    bool
+	}
+	rows := []Row{
+		{Name: "r0", Profile: "active", Live: true},
+		{Name: "r1", Profile: "idle", Live: false},
+		{Name: "r2", Profile: "busy", Live: true},
+		{Name: "r3", Profile: "away", Live: false},
+		{Name: "r4", Profile: "off", Live: true},
+	}
+
+	dump := func(label string, view Component) string {
+		tmpl := Build(view)
+		buf := NewBuffer(48, 10)
+		tmpl.Execute(buf, 48, 10)
+		var out string
+		for y := 0; y < 10; y++ {
+			if l := strings.TrimRight(buf.GetLine(y), " "); l != "" {
+				out += l + "\n"
+			}
+		}
+		t.Logf("%s:\n%s", label, out)
+		return out
+	}
+
+	// five sibling Then-only Ifs, as a flat value switch
+	badge := func(r *Row) []Component {
+		return []Component{
+			If(&r.Profile).Eq("active").Then(Text("[A]")),
+			If(&r.Profile).Eq("idle").Then(Text("[I]")),
+			If(&r.Profile).Eq("busy").Then(Text("[B]")),
+			If(&r.Profile).Eq("away").Then(Text("[W]")),
+			If(&r.Profile).Eq("off").Then(Text("[O]")),
+		}
+	}
+
+	flat := dump("flat, 5 siblings", VBox(ForEach(&rows, func(r *Row) Component {
+		return HBox(append([]Component{Text(&r.Name)}, badge(r)...)...)
+	})))
+
+	// their full shape: the flat switch INSIDE an outer If.Then/Else, per row
+	full := dump("flat siblings inside If.Then", VBox(ForEach(&rows, func(r *Row) Component {
+		return If(&r.Live).
+			Then(HBox(append([]Component{Text(&r.Name), Text("+")}, badge(r)...)...)).
+			Else(HBox(append([]Component{Text(&r.Name), Text("-")}, badge(r)...)...))
+	})))
+
+	for i, want := range []string{"r0[A]", "r1[I]", "r2[B]", "r3[W]", "r4[O]"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("REPRODUCED (flat, row %d): missing %q", i, want)
+		}
+	}
+	for i, want := range []string{"r0+[A]", "r1-[I]", "r2+[B]", "r3-[W]", "r4+[O]"} {
+		if !strings.Contains(full, want) {
+			t.Errorf("REPRODUCED (inside If.Then, row %d): missing %q", i, want)
+		}
+	}
+}
+
+// multi-frame: does a flat sibling switch follow a value change on later frames?
+func TestSiblingThenOnlyEqSwitchFollowsMutation(t *testing.T) {
+	type Row struct{ Name, Profile string }
+	rows := []Row{{"r0", "active"}, {"r1", "idle"}}
+
+	tmpl := Build(VBox(ForEach(&rows, func(r *Row) Component {
+		return HBox(
+			Text(&r.Name),
+			If(&r.Profile).Eq("active").Then(Text("[A]")),
+			If(&r.Profile).Eq("idle").Then(Text("[I]")),
+			If(&r.Profile).Eq("busy").Then(Text("[B]")),
+		)
+	})))
+	frame := func() string {
+		buf := NewBuffer(32, 6)
+		tmpl.Execute(buf, 32, 6)
+		var out string
+		for y := 0; y < 6; y++ {
+			if l := strings.TrimRight(buf.GetLine(y), " "); l != "" {
+				out += l + "\n"
+			}
+		}
+		return out
+	}
+	f1 := frame()
+	rows[0].Profile = "busy" // mutate after first render
+	rows[1].Profile = "active"
+	f2 := frame()
+	t.Logf("frame1:\n%sframe2 (r0 busy, r1 active):\n%s", f1, f2)
+
+	if !strings.Contains(f2, "r0[B]") || !strings.Contains(f2, "r1[A]") {
+		t.Errorf("REPRODUCED across frames: got %q", f2)
+	}
+}
