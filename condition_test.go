@@ -1588,3 +1588,76 @@ func TestOverlayRefZeroesWhenGatedOut(t *testing.T) {
 		t.Errorf("gated-out OVERLAY ref must zero (got W%d H%d) — phantom dodge region", ref.W, ref.H)
 	}
 }
+
+// A string Eq bound to an element FIELD is offset-rebound per row, so each row
+// compares its own value. Pins the behaviour doubted in a consumer report: the
+// failure there was a pointer that wasn't in the element (see the sibling test),
+// not a hole in Eq. Covers []T, []*T and a nested chain, since a chain compiles
+// its Else branch as a sub-template and the offset has to survive that too.
+func TestEqOnElementFieldRebindsPerRow(t *testing.T) {
+	type Row struct{ Status string }
+
+	render := func(view Component) string {
+		tmpl := Build(view)
+		buf := NewBuffer(16, 8)
+		tmpl.Execute(buf, 16, 8)
+		var out string
+		for y := 0; y < 8; y++ {
+			if l := strings.TrimRight(buf.GetLine(y), " "); l != "" {
+				out += l + "\n"
+			}
+		}
+		return out
+	}
+
+	vals := []Row{{"active"}, {"idle"}}
+	if got := render(VBox(ForEach(&vals, func(r *Row) Component {
+		return If(&r.Status).Eq("active").Then(Text("A")).Else(Text("I"))
+	}))); got != "A\nI\n" {
+		t.Errorf("[]T: each row must compare its own field; got %q", got)
+	}
+
+	p0, p1 := &Row{"active"}, &Row{"idle"}
+	ptrs := []*Row{p0, p1}
+	if got := render(VBox(ForEach(&ptrs, func(r **Row) Component {
+		return If(&(*r).Status).Eq("active").Then(Text("A")).Else(Text("I"))
+	}))); got != "A\nI\n" {
+		t.Errorf("[]*T: each row must compare its own field; got %q", got)
+	}
+
+	chain := []Row{{"active"}, {"idle"}, {"busy"}}
+	if got := render(VBox(ForEach(&chain, func(r *Row) Component {
+		return If(&r.Status).Eq("active").Then(Text("A")).
+			Else(If(&r.Status).Eq("idle").Then(Text("I")).
+				Else(Text("B")))
+	}))); got != "A\nI\nB\n" {
+		t.Errorf("nested chain: offset must survive Else sub-templates; got %q", got)
+	}
+}
+
+// The counterpart: a pointer that is NOT inside the element fails the compile-time
+// range check, so no offset is recorded and every row evaluates the same frozen
+// value. This is the actual shape behind "every branch dark" reports — binding a
+// local computed in the row function rather than a field of the element.
+func TestEqOnComputedLocalFreezesAcrossRows(t *testing.T) {
+	type Row struct{ Status string }
+	rows := []Row{{"active"}, {"idle"}}
+
+	tmpl := Build(VBox(ForEach(&rows, func(r *Row) Component {
+		s := r.Status // not a field of the element — no offset can be taken
+		return If(&s).Eq("active").Then(Text("A")).Else(Text("I"))
+	})))
+	buf := NewBuffer(16, 4)
+	tmpl.Execute(buf, 16, 4)
+
+	var out string
+	for y := 0; y < 4; y++ {
+		if l := strings.TrimRight(buf.GetLine(y), " "); l != "" {
+			out += l + "\n"
+		}
+	}
+	if out == "A\nI\n" {
+		t.Fatalf("a computed local unexpectedly rebound per row — if this now works, "+
+			"the consumer guidance in the sibling test is stale; got %q", out)
+	}
+}
