@@ -1661,3 +1661,49 @@ func TestEqOnComputedLocalFreezesAcrossRows(t *testing.T) {
 			"the consumer guidance in the sibling test is stale; got %q", out)
 	}
 }
+
+// A string Eq chain nested inside an If.Then branch inside ForEach still rebinds
+// per row — the offset has to survive the outer If's sub-template AND an
+// intervening HBox, with a separate chain instance built for each branch.
+// Deeper composition than the sibling test, from a consumer report at that depth.
+func TestEqChainInsideIfThenRebindsPerRow(t *testing.T) {
+	type Row struct {
+		Name    string
+		Profile string
+		Live    bool
+	}
+	rows := []Row{
+		{Name: "r0", Profile: "active", Live: true},
+		{Name: "r1", Profile: "idle", Live: false},
+		{Name: "r2", Profile: "busy", Live: true},
+	}
+
+	badge := func(r *Row) Component {
+		return If(&r.Profile).Eq("active").Then(Text("[A]")).
+			Else(If(&r.Profile).Eq("idle").Then(Text("[I]")).
+				Else(If(&r.Profile).Eq("busy").Then(Text("[B]")).
+					Else(Text("[?]"))))
+	}
+
+	tmpl := Build(VBox(ForEach(&rows, func(r *Row) Component {
+		return If(&r.Live).
+			Then(HBox(Text(&r.Name), Text(" live "), badge(r))).
+			Else(HBox(Text(&r.Name), Text(" off  "), badge(r)))
+	})))
+	buf := NewBuffer(40, 8)
+	tmpl.Execute(buf, 40, 8)
+
+	var out string
+	for y := 0; y < 8; y++ {
+		if l := strings.TrimRight(buf.GetLine(y), " "); l != "" {
+			out += l + "\n"
+		}
+	}
+	t.Logf("Eq inside If.Then inside ForEach:\n%s", out)
+
+	for _, want := range []string{"r0 live [A]", "r1 off  [I]", "r2 live [B]"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("REPRODUCED: missing %q\ngot:\n%s", want, out)
+		}
+	}
+}
