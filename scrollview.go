@@ -412,7 +412,9 @@ func (sv *ScrollViewC) render() {
 	if sv.layer.app != nil {
 		sv.childTmpl.SetApp(sv.layer.app)
 	}
-	scrollForViewport := sv.layer.scrollY
+	// the DRAWN offset, not the legacy field: an armed ScrollView never moves that
+	// field, so jump labels would register as if the pane had never scrolled.
+	scrollForViewport := sv.layer.DisplayedScrollY()
 	if sv.hasPendingScroll && sv.pendingScroll >= 0 {
 		// the deferred target takes effect this frame; register jump targets
 		// against the position the content is about to land on

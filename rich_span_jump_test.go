@@ -1,6 +1,9 @@
 package glyph
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestWrapSpansRegistersJumpAtFirstRenderedLinkCell(t *testing.T) {
 	buf := NewBuffer(20, 4)
@@ -237,5 +240,47 @@ func TestScrollViewForEachRichSpanInheritsJumpViewport(t *testing.T) {
 	target := app.jumpMode.Targets[0]
 	if target.X != 12 || target.Y != 0 {
 		t.Fatalf("target = (%d,%d), want translated foreach link at (12,0)", target.X, target.Y)
+	}
+}
+
+// An ARMED ScrollView registers jump targets against the offset the content is drawn at.
+// Arming freezes the legacy scroll field, so reading that field here placed every label
+// as if the pane had never scrolled — targets landed offset by the whole scroll.
+func TestScrollViewArmedRegistersJumpTargetsAtDisplayedOffset(t *testing.T) {
+	app := NewApp()
+	rows := make([]Component, 0, 24)
+	for i := 0; i < 20; i++ {
+		rows = append(rows, Text(fmt.Sprintf("line%d", i)))
+	}
+	rows = append(rows, Rich([]Span{{Text: "link", OnSelect: func() {}}}))
+	for i := 0; i < 3; i++ {
+		rows = append(rows, Text("tail"))
+	}
+
+	sv := ScrollView.Grow(1).ScrollOffset(ScrollState())(rows...)
+	tmpl := Build(VBox(sv))
+	tmpl.SetApp(app)
+	app.jumpMode.setActive(true)
+
+	buf := NewBuffer(20, 6)
+	tmpl.Execute(buf, 20, 6) // viewport 6, content 24 -> maxScroll 18
+
+	sv.Layer().ScrollTo(18) // link (content row 20) should sit at screen row 2
+	buf.Clear()
+	tmpl.Execute(buf, 20, 6) // the blit that moves the content there
+	if got := sv.Layer().DisplayedScrollY(); got != 18 {
+		t.Fatalf("setup: displayed offset = %d, want 18", got)
+	}
+
+	app.jumpMode.ClearJumpTargets()
+	buf.Clear()
+	tmpl.Execute(buf, 20, 6)
+	app.jumpMode.AssignLabels()
+
+	if len(app.jumpMode.Targets) != 1 {
+		t.Fatalf("targets = %#v, want the one visible link", app.jumpMode.Targets)
+	}
+	if got := app.jumpMode.Targets[0].Y; got != 2 {
+		t.Errorf("jump target Y = %d, want 2 (content row 20 minus displayed 18)", got)
 	}
 }

@@ -107,7 +107,7 @@ func (l *Layer) SetContent(tmpl *Template, width, height int) {
 	tmpl.Execute(l.buffer, int16(width), int16(height))
 	l.renderDirty.Store(false)
 	l.scrollMu.Lock()
-	l.scrollY = 0
+	l.resetScrollLocked()
 	l.updateMaxScroll()
 	l.scrollMu.Unlock()
 }
@@ -121,6 +121,24 @@ func (l *Layer) SetBuffer(buf *Buffer) {
 	l.scrollY = 0
 	l.updateMaxScroll()
 	l.scrollMu.Unlock()
+}
+
+// resetScrollLocked puts a new document at the top; caller holds scrollMu. Resets the
+// PAIR — target, drawn offset and any ease in flight — not just the legacy field: an
+// armed pane that only zeroed the latter would open every new document at the previous
+// one's offset, and page navigation is what those panes do.
+//
+// SetContent only. SetBuffer is the RE-RENDER path (LogC on every append, TextViewC,
+// ScrollView itself) where resetting would yank an armed pane to the top on a refresh;
+// ScrollView restores around it, LogC does not.
+func (l *Layer) resetScrollLocked() {
+	l.scrollY = 0
+	if l.ease.target != nil {
+		*l.ease.target = 0
+	}
+	l.ease.shown = 0
+	l.ease.shownSet = false
+	l.ease.animating = false
 }
 
 // Buffer returns the underlying buffer (for direct manipulation if needed).
@@ -328,6 +346,40 @@ func (l *Layer) currentScrollLocked() int {
 		return *l.ease.target
 	}
 	return l.scrollY
+}
+
+// shownOffsetLocked is where the content is drawn RIGHT NOW, read-only; caller holds
+// scrollMu. It is the observer half of displayedOffsetLocked, which is the frame driver
+// — that one starts and advances eases as a side effect, so anything that isn't blit
+// must read through here or it perturbs animation timing from another goroutine.
+//
+// Unbound: the legacy field. Bound but never drawn: the target, since that is where the
+// first frame will put it. Mid-ease: the eased value blit last computed.
+func (l *Layer) shownOffsetLocked() int {
+	if l.ease.target == nil {
+		return l.scrollY
+	}
+	if !l.ease.shownSet {
+		target := *l.ease.target
+		if target < 0 {
+			target = 0
+		}
+		if target > l.maxScroll {
+			target = l.maxScroll
+		}
+		return target
+	}
+	return int(math.Round(l.ease.shown))
+}
+
+// DisplayedScrollY returns the offset the content is currently DRAWN at. While an eased
+// scroll is in flight this lags ScrollY, which returns the destination — so use this one
+// to ask "which rows are visible" (jump labels, hit-testing) and ScrollY to ask "am I
+// near the bottom". With no ease bound, or once one settles, the two agree.
+func (l *Layer) DisplayedScrollY() int {
+	l.scrollMu.Lock()
+	defer l.scrollMu.Unlock()
+	return l.shownOffsetLocked()
 }
 
 // displayedOffsetLocked returns the offset blit should draw at; caller holds scrollMu.
@@ -648,9 +700,11 @@ func (l *Layer) ScreenCursor() (x, y int, visible bool) {
 	}
 
 	// snapshot scroll state under the lock: ScreenCursor runs on the render
-	// goroutine (render()) while input handlers write scrollY via ScrollTo etc.
+	// goroutine (render()) while input handlers scroll via ScrollTo etc. Reads the
+	// DRAWN offset, not the destination — mid-ease the cursor must sit with the text
+	// it belongs to, and on an armed layer the legacy field never moves at all.
 	l.scrollMu.Lock()
-	scrollY, viewHeight := l.scrollY, l.viewHeight
+	scrollY, viewHeight := l.shownOffsetLocked(), l.viewHeight
 	l.scrollMu.Unlock()
 
 	// cursor Y relative to viewport (account for scroll)

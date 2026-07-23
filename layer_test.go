@@ -800,3 +800,125 @@ func TestLayerViewScrollOffsetAnimateCarriesConfig(t *testing.T) {
 		t.Errorf("ease.dur = %v, want 200ms", l.ease.dur)
 	}
 }
+
+// easedLayer is an armed layer on a fake clock, for the ADR 137 derived-reader pins.
+func easedLayer(t *testing.T, contentH int) (*Layer, *int, func(time.Duration)) {
+	t.Helper()
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, contentH))
+	l.SetViewport(10, 10)
+	cell := ScrollState()
+	Build(VBox(LayerView(l).ScrollOffset(Animate.Duration(100 * time.Millisecond).Ease(EaseLinear)(cell)).Grow(1)))
+	clock := time.Unix(1000, 0)
+	l.ease.nowFn = func() time.Time { return clock }
+	return l, cell, func(d time.Duration) { clock = clock.Add(d) }
+}
+
+// ScrollY is the destination; DisplayedScrollY is where the content actually is. Mid-ease
+// they differ — that gap is the whole reason the accessor exists, since "which rows are
+// visible" is otherwise publicly uncomputable while a glide is in flight.
+func TestLayerDisplayedScrollYLagsTargetMidEase(t *testing.T) {
+	l, _, advance := easedLayer(t, 100) // maxScroll 90
+
+	_ = boundRead(l) // establish shown at 0
+	l.ScrollTo(80)
+	if got := l.ScrollY(); got != 80 {
+		t.Fatalf("ScrollY = %d, want 80 (destination)", got)
+	}
+	_ = boundRead(l) // the blit after a retarget is what starts the ease, at t0
+	if got := l.DisplayedScrollY(); got != 0 {
+		t.Errorf("DisplayedScrollY at ease start = %d, want 0", got)
+	}
+	advance(50 * time.Millisecond)
+	_ = boundRead(l) // blit drives the ease
+	if got, want := l.DisplayedScrollY(), 40; got != want {
+		t.Errorf("DisplayedScrollY halfway = %d, want %d", got, want)
+	}
+	advance(50 * time.Millisecond)
+	_ = boundRead(l)
+	if got := l.DisplayedScrollY(); got != 80 {
+		t.Errorf("DisplayedScrollY settled = %d, want 80", got)
+	}
+	if got := l.ScrollY(); got != 80 {
+		t.Errorf("ScrollY settled = %d, want 80", got)
+	}
+}
+
+// The accessor is an OBSERVER: reading it must not start or advance an ease, or a
+// consumer polling from the input goroutine would drive animation timing.
+func TestLayerDisplayedScrollYDoesNotDriveTheEase(t *testing.T) {
+	l, _, advance := easedLayer(t, 100)
+
+	_ = boundRead(l)
+	l.ScrollTo(80)
+	_ = boundRead(l) // ease starts at t0
+	advance(50 * time.Millisecond)
+
+	shownBefore, t0Before := l.ease.shown, l.ease.animT0
+	for i := 0; i < 5; i++ {
+		if got := l.DisplayedScrollY(); got != 0 {
+			t.Fatalf("read %d moved the displayed offset to %d without a blit", i, got)
+		}
+	}
+	if l.ease.shown != shownBefore || l.ease.animT0 != t0Before {
+		t.Errorf("reading the accessor mutated ease state: shown %v→%v, t0 %v→%v",
+			shownBefore, l.ease.shown, t0Before, l.ease.animT0)
+	}
+	if got := boundRead(l); got != 40 { // the blit that DOES drive it
+		t.Errorf("after blit, displayed = %d, want 40", got)
+	}
+}
+
+// An armed, scrolled layer must place its cursor with the text it belongs to. Reading the
+// legacy field here put the cursor as if the pane had never scrolled.
+func TestLayerScreenCursorTracksDisplayedWhenArmed(t *testing.T) {
+	l, _, advance := easedLayer(t, 100)
+	l.screenX, l.screenY = 0, 0
+	l.cursor = Cursor{X: 2, Y: 25, Visible: true}
+
+	_ = boundRead(l)
+	l.ScrollTo(20)
+	_ = boundRead(l)                // ease starts
+	advance(100 * time.Millisecond) // past the duration
+	_ = boundRead(l)                // settles at the target
+	if got := l.DisplayedScrollY(); got != 20 {
+		t.Fatalf("setup: displayed = %d, want 20", got)
+	}
+
+	x, y, visible := l.ScreenCursor()
+	if !visible {
+		t.Fatal("cursor at content row 25 with viewport [20,30) should be visible")
+	}
+	if x != 2 || y != 5 {
+		t.Errorf("ScreenCursor = (%d,%d), want (2,5) — cursor row 25 minus displayed 20", x, y)
+	}
+}
+
+// A new document opens at the top, even on an armed pane. Resetting only the legacy field
+// left the bound target holding the previous document's offset.
+func TestLayerContentSwapResetsThePairWhenArmed(t *testing.T) {
+	l, cell, _ := easedLayer(t, 100)
+
+	l.ScrollTo(60)
+	if *cell != 60 {
+		t.Fatalf("setup: cell = %d, want 60", *cell)
+	}
+
+	rows := make([]Component, 100)
+	for i := range rows {
+		rows[i] = Text("row")
+	}
+	l.SetContent(Build(VBox(rows...)), 10, 100) // page navigation
+	if *cell != 0 {
+		t.Errorf("after content swap the bound target = %d, want 0", *cell)
+	}
+	if got := l.ScrollY(); got != 0 {
+		t.Errorf("ScrollY after content swap = %d, want 0", got)
+	}
+	if got := l.DisplayedScrollY(); got != 0 {
+		t.Errorf("DisplayedScrollY after content swap = %d, want 0", got)
+	}
+	if l.ease.animating {
+		t.Error("a content swap should not leave an ease in flight gliding from the old offset")
+	}
+}
