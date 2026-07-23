@@ -273,6 +273,13 @@ func (lv *LogC) syncToLayer() {
 		return
 	}
 
+	// a sync is a re-render of the same log, not a navigation to a new one, so it must
+	// not move the reader. SetBuffer resets the layer's scroll to 0, so capture the
+	// position first and restore it when the user has scrolled away — following mode
+	// re-scrolls to the end on its own, so it is left alone. ScrollTo clamps to the new
+	// maxScroll, which also handles the ring buffer shrinking content under the viewport.
+	prevScroll := lv.layer.ScrollY()
+
 	// create exact-sized buffer (EnsureSize only grows, which breaks maxScroll after ring buffer truncates)
 	const bufferWidth = 500
 	buf := NewBuffer(bufferWidth, len(lv.lines))
@@ -287,6 +294,10 @@ func (lv *LogC) syncToLayer() {
 		}
 	}
 	lv.layer.SetBuffer(buf)
+
+	if !lv.following {
+		lv.layer.ScrollTo(prevScroll)
+	}
 }
 
 // compileLogC compiles the Log component into the template.

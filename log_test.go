@@ -122,6 +122,78 @@ func TestLogScrollControl(t *testing.T) {
 	}
 }
 
+// a not-following log must keep the reader's scroll position across an append: the
+// buffer is re-rendered (SetBuffer resets scroll to 0), but that is a re-render of the
+// same log, not a navigation. Regression for the ScrollY 30 -> 0 defect.
+func TestLogAppendPreservesScrollWhenNotFollowing(t *testing.T) {
+	pr, pw := io.Pipe()
+	lv := Log(pr).MaxLines(10000)
+	layer := lv.Layer()
+	Build(VBox(lv))
+
+	for i := 0; i < 50; i++ {
+		pw.Write([]byte("line\n"))
+	}
+	waitForLines(lv, 50)
+	layer.SetViewport(40, 10)
+
+	// user scrolls up to read history: leaves following mode (readLoop reads the
+	// flag under lv.mu, so set it the same way rather than racing the reader)
+	lv.mu.Lock()
+	lv.following = false
+	lv.mu.Unlock()
+	layer.ScrollTo(30)
+	if got := layer.ScrollY(); got != 30 {
+		t.Fatalf("setup: scrollY=%d, want 30", got)
+	}
+
+	pw.Write([]byte("one more\n"))
+	waitForLines(lv, 51)
+	time.Sleep(40 * time.Millisecond)
+
+	if got := layer.ScrollY(); got != 30 {
+		t.Errorf("append while not following moved scroll to %d, want 30 preserved", got)
+	}
+	pw.Close()
+}
+
+// following mode still ends at the bottom after an append — the fix must not disturb it.
+func TestLogAppendStaysAtEndWhenFollowing(t *testing.T) {
+	pr, pw := io.Pipe()
+	lv := Log(pr).MaxLines(10000).AutoScroll(true)
+	layer := lv.Layer()
+	Build(VBox(lv))
+
+	for i := 0; i < 50; i++ {
+		pw.Write([]byte("line\n"))
+	}
+	waitForLines(lv, 50)
+	layer.SetViewport(40, 10)
+
+	pw.Write([]byte("one more\n"))
+	waitForLines(lv, 51)
+	time.Sleep(40 * time.Millisecond)
+
+	// 51 lines, viewport 10 -> maxScroll 41
+	if got, max := layer.ScrollY(), layer.MaxScroll(); got != max {
+		t.Errorf("following append left scroll at %d, want end %d", got, max)
+	}
+	pw.Close()
+}
+
+func waitForLines(lv *LogC, n int) {
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		lv.mu.Lock()
+		got := len(lv.lines)
+		lv.mu.Unlock()
+		if got >= n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func TestLogAutoScroll(t *testing.T) {
 	pr, pw := io.Pipe()
 
