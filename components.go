@@ -2076,6 +2076,7 @@ type LayerViewC struct {
 	padding       [4]int16
 	flexGrowPtr   *float32
 	flexGrowCond  any
+	scrollOffset  any
 }
 
 // LayerView displays a scrollable, pre-rendered layer within the view tree.
@@ -2120,6 +2121,23 @@ func (l LayerViewC) Grow(g any) LayerViewC {
 	case OscC:
 		l.flexGrowCond = val
 	}
+	return l
+}
+
+// ScrollOffset binds the layer's scroll position to a managed offset (ADR 38), the same
+// name and argument as ScrollView's ScrollOffset: a *int binds an instant offset, an
+// Animate over one binds an eased scroll, so ScrollTo/ScrollToTop and friends glide
+// instead of teleporting. Arming is declared here, at the mount, because that is where
+// the layer enters the tree.
+//
+//	LayerView(l).ScrollOffset(Animate(ScrollState())).Grow(1)
+//
+// The bound value is the LIVE position: the framework writes it on every scroll, so a
+// consumer arming with its own &offset hands glyph authorship of that cell. Arming a
+// layer that is already scrolled keeps its position (the cell is seeded from it);
+// re-arming with the same cell is a no-op, so rebuilding the view never moves the pane.
+func (l LayerViewC) ScrollOffset(offset any) LayerViewC {
+	l.scrollOffset = offset
 	return l
 }
 

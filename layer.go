@@ -260,6 +260,49 @@ func (l *Layer) ViewportWidth() int {
 	return l.viewWidth
 }
 
+// armScrollOffset binds offset as the layer's scroll cell (ADR 38): a *int is instant, an
+// Animate tween over one eases the displayed offset toward it. Wrong-typed and nil offsets
+// are ignored, leaving the legacy path, so this can't break an existing view.
+//
+// Binding a cell the layer isn't already using seeds it from the position in effect, so
+// arming a scrolled layer holds its place instead of snapping to the top. The guard is on
+// pointer IDENTITY, not value — a fresh cell and a live one both read 0 — which makes the
+// re-arm every rebuild performs a genuine no-op rather than one that merely looks like it.
+func (l *Layer) armScrollOffset(offset any) {
+	var (
+		target *int
+		dur    time.Duration
+		fn     func(float64) float64
+	)
+	switch o := offset.(type) {
+	case *int:
+		target = o
+	case tweenNode:
+		if p, ok := o.getTarget().(*int); ok {
+			target = p
+			dur = o.getTweenDuration()
+			fn = o.getTweenEasing()
+		}
+	}
+	if target == nil {
+		return
+	}
+
+	l.scrollMu.Lock()
+	defer l.scrollMu.Unlock()
+	if l.ease.target != target {
+		if l.ease.target != nil {
+			*target = *l.ease.target
+		} else {
+			*target = l.scrollY
+		}
+		l.ease.target = target
+	}
+	// duration and easing are configuration, not position — always the latest spelling
+	l.ease.dur = dur
+	l.ease.fn = fn
+}
+
 // scrollToLocked clamps and sets the scroll position; caller holds scrollMu. When an
 // offset is bound (ADR 38) it writes the bound target — the single source of truth the
 // displayed offset eases toward — instead of the legacy scrollY field.

@@ -699,3 +699,104 @@ func TestLayerFeatherFadesTowardDstBackground(t *testing.T) {
 		t.Errorf("edge FG.R=%d, expected between grey(128) and white(255)", fg.R)
 	}
 }
+
+// Arming through the mount is the ADR 137 surface. The pin the ADR names: an unarmed
+// Layer behaves exactly as before, so mounting a bare LayerView cannot change a view.
+func TestLayerViewScrollOffsetUnarmedUnchanged(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 100))
+	l.SetViewport(10, 10)
+	l.ScrollTo(30)
+
+	Build(VBox(LayerView(l).Grow(1))) // no ScrollOffset — must not arm
+	if l.ease.target != nil {
+		t.Fatalf("mounting a bare LayerView armed the layer: ease.target=%p", l.ease.target)
+	}
+	if got, want := l.ScrollY(), 30; got != want {
+		t.Errorf("ScrollY after bare mount = %d, want %d", got, want)
+	}
+	if got, want := l.scrollY, 30; got != want {
+		t.Errorf("legacy field after bare mount = %d, want %d", got, want)
+	}
+}
+
+// Arming binds the cell and routes scrolling through it, whether declared on a bare
+// LayerView or by ScrollView — both compile to the same arming site.
+func TestLayerViewScrollOffsetArms(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 100))
+	l.SetViewport(10, 10)
+
+	cell := ScrollState()
+	Build(VBox(LayerView(l).ScrollOffset(cell).Grow(1)))
+	if l.ease.target != cell {
+		t.Fatalf("ScrollOffset did not bind the cell: got %p want %p", l.ease.target, cell)
+	}
+	l.ScrollTo(40)
+	if *cell != 40 || boundRead(l) != 40 {
+		t.Errorf("ScrollTo(40): cell=%d displayed=%d, want 40/40", *cell, boundRead(l))
+	}
+}
+
+// Arming an already-scrolled layer must hold its place. The cell is seeded from the
+// position in effect, so a pane that mounts after scrolling doesn't snap to the top.
+func TestLayerViewScrollOffsetSeedsFromCurrentPosition(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 100))
+	l.SetViewport(10, 10)
+	l.ScrollTo(12) // unarmed: writes the legacy field
+
+	cell := ScrollState()
+	Build(VBox(LayerView(l).ScrollOffset(cell).Grow(1)))
+	if *cell != 12 {
+		t.Errorf("arming a layer scrolled to 12 seeded cell=%d, want 12", *cell)
+	}
+	if got := l.ScrollY(); got != 12 {
+		t.Errorf("ScrollY after arming = %d, want 12 (position dropped)", got)
+	}
+}
+
+// Rebuilding re-runs compile, so the same cell is re-armed every frame the view is
+// rebuilt. That must be a no-op: the guard is on pointer identity, because a live cell
+// and a fresh one are indistinguishable by value.
+func TestLayerViewScrollOffsetRearmIsNoOp(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 100))
+	l.SetViewport(10, 10)
+
+	cell := ScrollState()
+	Build(VBox(LayerView(l).ScrollOffset(cell).Grow(1)))
+	l.ScrollTo(40)
+
+	Build(VBox(LayerView(l).ScrollOffset(cell).Grow(1))) // rebuild, same cell
+	if *cell != 40 {
+		t.Errorf("re-arm clobbered the live cell: %d, want 40", *cell)
+	}
+	if got := l.ScrollY(); got != 40 {
+		t.Errorf("ScrollY after rebuild = %d, want 40", got)
+	}
+
+	// a genuinely different cell re-seeds from the position in effect
+	other := ScrollState()
+	Build(VBox(LayerView(l).ScrollOffset(other).Grow(1)))
+	if *other != 40 {
+		t.Errorf("swapped cell seeded %d, want 40", *other)
+	}
+}
+
+// An Animate over the cell carries duration and easing; a plain *int is instant. Both
+// spellings arm the same cell, and re-spelling config doesn't move the position.
+func TestLayerViewScrollOffsetAnimateCarriesConfig(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 100))
+	l.SetViewport(10, 10)
+
+	cell := ScrollState()
+	Build(VBox(LayerView(l).ScrollOffset(Animate.Duration(200 * time.Millisecond)(cell)).Grow(1)))
+	if l.ease.target != cell {
+		t.Fatalf("Animate did not bind the cell")
+	}
+	if l.ease.dur != 200*time.Millisecond {
+		t.Errorf("ease.dur = %v, want 200ms", l.ease.dur)
+	}
+}

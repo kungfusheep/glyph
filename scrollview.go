@@ -345,23 +345,14 @@ func (sv *ScrollViewC) ScrollTo(y int) {
 
 func (t *Template) compileScrollViewC(v *ScrollViewC, parent int16, depth int) int16 {
 	v.layer.SetFeather(v.feather)
-	// Bind the scroll offset (ADR 38): a *int is instant; an Animate tween over an *int
-	// eases the displayed offset toward the target. Wrong-typed offsets are ignored
-	// (the legacy scrollY path stays), so this can't break an existing view.
-	switch o := v.scrollOffset.(type) {
-	case *int:
-		v.layer.ease.target = o
-	case tweenNode:
-		if p, ok := o.getTarget().(*int); ok {
-			v.layer.ease.target = p
-			v.layer.ease.dur = o.getTweenDuration()
-			v.layer.ease.fn = o.getTweenEasing()
-		}
-	}
 	layerView := LayerView(v.layer).Grow(v.flexGrow)
 	if v.scrollbar {
 		layerView = LayerView(v.layer).Grow(1)
 	}
+	// the offset rides the LayerView so arming happens at one site (compileLayerViewC)
+	// whether it was declared here or on a bare LayerView. Set after the scrollbar
+	// branch above, which rebuilds layerView from scratch.
+	layerView = layerView.ScrollOffset(v.scrollOffset)
 	if v.heightPtr != nil {
 		layerView = layerView.HeightPtr(v.heightPtr)
 	}
