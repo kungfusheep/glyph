@@ -1485,3 +1485,34 @@ func TestForEachItemHeightIsIntrinsic(t *testing.T) {
 		}
 	}
 }
+
+// A container holding a conditional currently classifies as FLEXIBLE, so it
+// spreads to fill and pushes a following sibling to the far edge. Pinned here
+// because that classification is what proposal 134 is deciding, and today the
+// suite cannot see it change: applying the one-line fix (adding OpIf/OpSwitch
+// to opHasFiniteIntrinsicWidth) turns this row from "LEFT ... RIGHT" into
+// "LEFTRIGHT" with every other test still green — measured, not predicted.
+//
+// This is a tripwire, not a guard. A failure here means the conditional-width
+// classification changed, which is a decision to make deliberately, not a
+// regression to silence. If p134 lands, update the expectation in the same
+// commit that changes the behaviour, so the change is visible in the diff.
+//
+// The change is common to options A and B: B is "A, plus consult the selected
+// branch", so both reclassify the container as content-sized and both collapse
+// the spread. B narrows the over-reservation; it does not avoid this.
+func TestContainerHoldingConditionalSpreadsUntilP134Decides(t *testing.T) {
+	profile := "focus"
+	tmpl := Build(HBox(
+		HBox(If(&profile).Eq("focus").Then(Text("LEFT"))),
+		Text("RIGHT"),
+	))
+	buf := NewBuffer(40, 3)
+	tmpl.Execute(buf, 40, 3)
+
+	const want = "LEFT                               RIGHT"
+	if got := buf.GetLine(0); got != want {
+		t.Errorf("conditional-container width classification changed\n got: %q\nwant: %q\n"+
+			"If this is proposal 134 landing, update the expectation deliberately.", got, want)
+	}
+}
