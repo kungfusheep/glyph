@@ -317,3 +317,35 @@ func TestPoolExhaustionIsReported(t *testing.T) {
 		seen[w.slot] = true
 	}
 }
+
+// TestRefusedSplitLeavesViewportWhole pins the claim-before-mutate ordering: when the
+// pane pool is drained, a split is refused (E36), and the focused window must keep its
+// full viewport. The bug was halving viewport* before claimWindow, so a nil claim left
+// the scroll arithmetic halved while the tree was unchanged and the layout drew the full
+// rect. Measured at 120x400, pool drained: viewportHeight 398 -> 199 with the tree intact.
+func TestRefusedSplitLeavesViewportWhole(t *testing.T) {
+	ed := newTestEditor(120, 400)
+	ed.updateAllWindows()
+	ed.free = ed.free[:0] // drain the pool so the next claim fails
+
+	h := ed.focusedWindow.viewportHeight
+	if h <= 1 {
+		t.Fatalf("setup: viewportHeight %d too small to detect a halving", h)
+	}
+	ed.SplitHoriz()
+	if ed.StatusLine == "" {
+		t.Error("refused horizontal split reported nothing to the user")
+	}
+	if got := ed.focusedWindow.viewportHeight; got != h {
+		t.Errorf("refused horizontal split changed viewportHeight %d -> %d; claim must precede mutation", h, got)
+	}
+
+	w := ed.focusedWindow.viewportWidth
+	if w <= 1 {
+		t.Fatalf("setup: viewportWidth %d too small to detect a halving", w)
+	}
+	ed.SplitVert()
+	if got := ed.focusedWindow.viewportWidth; got != w {
+		t.Errorf("refused vertical split changed viewportWidth %d -> %d; claim must precede mutation", w, got)
+	}
+}

@@ -2954,15 +2954,15 @@ func (ed *Editor) splitHorizontal() {
 	totalHeight := ed.focusedWindow.viewportHeight
 	halfHeight := max(1, totalHeight/2)
 
-	// Update existing window height
-	ed.focusedWindow.viewportHeight = halfHeight
-
-	// Create new window viewing the same buffer
+	// Claim before mutating: a drained pool returns nil, and halving the viewport first
+	// would leave this window's scroll arithmetic halved while the tree is unchanged and
+	// the layout still draws the full rect (E36).
 	newWin := ed.claimWindow(ed.buf())
 	if newWin == nil {
 		ed.StatusLine = "E36: Not enough room"
 		return
 	}
+	ed.focusedWindow.viewportHeight = halfHeight
 	newWin.Cursor = ed.focusedWindow.Cursor
 	newWin.Col = ed.focusedWindow.Col
 	newWin.topLine = ed.focusedWindow.topLine
@@ -2999,15 +2999,15 @@ func (ed *Editor) splitVertical() {
 	totalWidth := ed.focusedWindow.viewportWidth
 	halfWidth := max(1, totalWidth/2-1) // -1 for separator space
 
-	// Update existing window width
-	ed.focusedWindow.viewportWidth = halfWidth
-
-	// Create new window viewing the same buffer
+	// Claim before mutating: a drained pool returns nil, and halving the viewport first
+	// would leave this window's scroll arithmetic halved while the tree is unchanged and
+	// the layout still draws the full rect (E36).
 	newWin := ed.claimWindow(ed.buf())
 	if newWin == nil {
 		ed.StatusLine = "E36: Not enough room"
 		return
 	}
+	ed.focusedWindow.viewportWidth = halfWidth
 	newWin.Cursor = ed.focusedWindow.Cursor
 	newWin.Col = ed.focusedWindow.Col
 	newWin.topLine = ed.focusedWindow.topLine
@@ -3042,13 +3042,14 @@ func (ed *Editor) splitHorizontalWithBuffer(buf *Buffer) {
 
 	totalHeight := ed.focusedWindow.viewportHeight
 	halfHeight := max(1, totalHeight/2)
-	ed.focusedWindow.viewportHeight = halfHeight
 
+	// claim before mutating — see splitHorizontal: a nil claim must leave the viewport whole
 	newWin := ed.claimWindow(buf)
 	if newWin == nil {
 		ed.StatusLine = "E36: Not enough room"
 		return
 	}
+	ed.focusedWindow.viewportHeight = halfHeight
 
 	ed.initWindowLayer(newWin, newWin.viewportWidth)
 
@@ -3078,13 +3079,14 @@ func (ed *Editor) splitVerticalWithBuffer(buf *Buffer) {
 
 	totalWidth := ed.focusedWindow.viewportWidth
 	halfWidth := max(1, totalWidth/2-1)
-	ed.focusedWindow.viewportWidth = halfWidth
 
+	// claim before mutating — see splitHorizontal: a nil claim must leave the viewport whole
 	newWin := ed.claimWindow(buf)
 	if newWin == nil {
 		ed.StatusLine = "E36: Not enough room"
 		return
 	}
+	ed.focusedWindow.viewportWidth = halfWidth
 
 	ed.initWindowLayer(ed.focusedWindow, halfWidth)
 	ed.initWindowLayer(newWin, newWin.viewportWidth)
