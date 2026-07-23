@@ -48,6 +48,11 @@ func main() {
 	}
 	layer.SetBuffer(buf)
 
+	// arm the bare LayerView so every scroll method glides instead of teleporting: the
+	// same j/k/d/u/g/G handlers below write this cell's target and the displayed offset
+	// eases toward it (ADR 137). ScrollState allocates the bound cell once at build.
+	scrollCell := ScrollState()
+
 	scrollInfo := fmt.Sprintf("Line 0/%d", contentHeight)
 
 	app.SetView(VBox(
@@ -56,8 +61,8 @@ func main() {
 		Text("╚══════════════════════════════════════════════════════════════════════════════╝"),
 		Text(""),
 
-		VBox.Border(BorderDouble).BorderFG(Cyan).Grow(1).Title("Scrollable Content")(
-			LayerView(layer).Grow(1),
+		VBox.Border(BorderDouble).BorderFG(Cyan).Grow(1).Title("Scrollable Content (gliding)")(
+			LayerView(layer).ScrollOffset(Animate(scrollCell)).Grow(1),
 		),
 
 		Text(""),

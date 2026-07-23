@@ -922,3 +922,52 @@ func TestLayerContentSwapResetsThePairWhenArmed(t *testing.T) {
 		t.Error("a content swap should not leave an ease in flight gliding from the old offset")
 	}
 }
+
+// TestLayerViewScrollOffsetGlidesEndToEnd is the scrolldemo consumer proof: a bare
+// LayerView armed through the public ScrollOffset(Animate(...)) API, driven by the same
+// ScrollTo the demo's key handlers call, eases the DISPLAYED offset toward the target
+// over the animation window rather than snapping. This is what ADR 137 buys a bare
+// LayerView pane — arming lives on the mount, no ScrollView wrapper. cmd/scrolldemo
+// wires exactly this; the trace it produces is logged for a human to eyeball.
+func TestLayerViewScrollOffsetGlidesEndToEnd(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(80, 1000))
+	l.SetViewport(80, 20) // maxScroll 980
+
+	cell := ScrollState()
+	// the exact spelling cmd/scrolldemo uses, only with a pinned duration/ease
+	Build(VBox(LayerView(l).ScrollOffset(Animate.Duration(280 * time.Millisecond).Ease(EaseLinear)(cell)).Grow(1)))
+
+	clock := time.Unix(1000, 0)
+	l.ease.nowFn = func() time.Time { return clock }
+
+	_ = boundRead(l)   // first read establishes shown=0
+	l.ScrollTo(100)    // a jump key: target 100, displayed still eases from 0
+
+	if got := l.ScrollY(); got != 100 {
+		t.Fatalf("ScrollY is the destination immediately: got %d, want 100", got)
+	}
+
+	samples := []int{boundRead(l)} // t0
+	for _, at := range []time.Duration{70, 140, 210, 280} {
+		clock = time.Unix(1000, 0).Add(at * time.Millisecond)
+		samples = append(samples, boundRead(l))
+	}
+	t.Logf("displayed offset across the glide: %v (target 100, linear over 280ms)", samples)
+
+	if samples[0] != 0 {
+		t.Errorf("glide start displayed=%d, want 0 (it jumped)", samples[0])
+	}
+	if last := samples[len(samples)-1]; last != 100 {
+		t.Errorf("glide end displayed=%d, want target 100", last)
+	}
+	for i := 1; i < len(samples); i++ {
+		if samples[i] < samples[i-1] {
+			t.Fatalf("glide not monotonic: %v", samples)
+		}
+	}
+	// linear quarters: expect roughly 25/50/75 in the middle — assert strictly interior
+	if samples[2] <= 0 || samples[2] >= 100 {
+		t.Errorf("midpoint displayed=%d, want strictly between 0 and 100 (proof it glides, not jumps)", samples[2])
+	}
+}
