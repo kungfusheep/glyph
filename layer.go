@@ -279,8 +279,14 @@ func (l *Layer) ViewportWidth() int {
 }
 
 // armScrollOffset binds offset as the layer's scroll cell (ADR 38): a *int is instant, an
-// Animate tween over one eases the displayed offset toward it. Wrong-typed and nil offsets
-// are ignored, leaving the legacy path, so this can't break an existing view.
+// Animate tween over one eases the displayed offset toward it. A wrong-typed or nil offset
+// is ignored — the call does nothing — so arming a fresh Layer can't break an existing
+// view, which stays on the legacy path.
+//
+// Ignoring is not unarming, though: once a Layer is armed, dropping the offset on a rebuild
+// (or passing nil) leaves it armed — glyph keeps authoring the bound cell and ScrollY()
+// keeps returning it. Arming is currently one-way; taking it back needs a position
+// write-back, not a nil check, and is tracked separately.
 //
 // Binding a cell the layer isn't already using seeds it from the position in effect, so
 // arming a scrolled layer holds its place instead of snapping to the top. The guard is on
