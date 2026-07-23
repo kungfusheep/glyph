@@ -157,6 +157,46 @@ func TestLogAppendPreservesScrollWhenNotFollowing(t *testing.T) {
 	pw.Close()
 }
 
+// under ring-buffer truncation a not-following log must keep viewing the same content:
+// the drop-adjust at log.go:227 translates the position across the dropped lines, and
+// the capture-restore in syncToLayer keeps that translated value alive through SetBuffer.
+// At HEAD before the fix the adjust was dead — SetBuffer zeroed it right after.
+func TestLogTruncatingAppendPreservesContent(t *testing.T) {
+	pr, pw := io.Pipe()
+	lv := Log(pr).MaxLines(50)
+	layer := lv.Layer()
+	Build(VBox(lv))
+
+	for i := 0; i < 50; i++ {
+		pw.Write([]byte("line\n"))
+	}
+	waitForLines(lv, 50)
+	layer.SetViewport(40, 10)
+
+	lv.mu.Lock()
+	lv.following = false
+	lv.mu.Unlock()
+	layer.ScrollTo(30)
+
+	// this append pushes to 51 lines, dropping 1 from the front — content at index 30
+	// shifts to 29, so keeping the same content in view means scrolling to 29. len stays
+	// capped at 50, so wait on the non-following new-line counter instead.
+	pw.Write([]byte("one more\n"))
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if lv.NewLines() >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+
+	if got := layer.ScrollY(); got != 29 {
+		t.Errorf("truncating append moved scroll to %d, want 29 (same content in view)", got)
+	}
+	pw.Close()
+}
+
 // following mode still ends at the bottom after an append — the fix must not disturb it.
 func TestLogAppendStaysAtEndWhenFollowing(t *testing.T) {
 	pr, pw := io.Pipe()
