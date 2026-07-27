@@ -279,19 +279,17 @@ func (l *Layer) ViewportWidth() int {
 }
 
 // armScrollOffset binds offset as the layer's scroll cell (ADR 38): a *int is instant, an
-// Animate tween over one eases the displayed offset toward it. A wrong-typed or nil offset
-// is ignored — the call does nothing — so arming a fresh Layer can't break an existing
-// view, which stays on the legacy path.
+// Animate tween over one eases the displayed offset toward it. Binding a cell the layer
+// isn't already using seeds it from the position in effect, so arming a scrolled layer
+// holds its place instead of snapping to the top. The guard is on pointer IDENTITY, not
+// value — a fresh cell and a live one both read 0 — which makes the re-arm every rebuild
+// performs a genuine no-op rather than one that merely looks like it.
 //
-// Ignoring is not unarming, though: once a Layer is armed, dropping the offset on a rebuild
-// (or passing nil) leaves it armed — glyph keeps authoring the bound cell and ScrollY()
-// keeps returning it. Arming is currently one-way; taking it back needs a position
-// write-back, not a nil check, and is tracked separately.
-//
-// Binding a cell the layer isn't already using seeds it from the position in effect, so
-// arming a scrolled layer holds its place instead of snapping to the top. The guard is on
-// pointer IDENTITY, not value — a fresh cell and a live one both read 0 — which makes the
-// re-arm every rebuild performs a genuine no-op rather than one that merely looks like it.
+// A nil or wrong-typed offset UNARMS: dropping the offset on a rebuild (or passing nil)
+// writes the layer's position back to the legacy field and clears the cell, so the layer
+// resumes on the legacy path. On an unarmed layer this is a no-op, so a view that never
+// armed can't be broken by the compile-time call. Unarm writes the DESTINATION the layer
+// was heading for (the target), not the mid-glide drawn offset — ADR 137 slice-2 follow-up.
 func (l *Layer) armScrollOffset(offset any) {
 	var (
 		target *int
@@ -308,12 +306,20 @@ func (l *Layer) armScrollOffset(offset any) {
 			fn = o.getTweenEasing()
 		}
 	}
-	if target == nil {
-		return
-	}
 
 	l.scrollMu.Lock()
 	defer l.scrollMu.Unlock()
+
+	if target == nil {
+		if l.ease.target != nil {
+			l.scrollY = *l.ease.target // resume at the destination, not the frozen legacy 0
+			l.ease.target = nil
+			l.ease.animating = false
+			l.ease.shownSet = false
+		}
+		return
+	}
+
 	if l.ease.target != target {
 		if l.ease.target != nil {
 			*target = *l.ease.target

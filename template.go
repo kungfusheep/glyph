@@ -5088,7 +5088,8 @@ func (t *Template) compileJumpC(v JumpC, parent int16, depth int, elemBase unsaf
 }
 
 func (t *Template) compileLayerViewC(v LayerViewC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
-	if v.scrollOffset != nil && v.layer != nil {
+	if v.layer != nil {
+		// nil offset unarms (a no-op on a never-armed layer); a real offset arms
 		v.layer.armScrollOffset(v.scrollOffset)
 	}
 	ext := &opLayer{ptr: v.layer, width: v.viewWidth, height: v.viewHeight}

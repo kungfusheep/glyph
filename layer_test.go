@@ -971,3 +971,50 @@ func TestLayerViewScrollOffsetGlidesEndToEnd(t *testing.T) {
 		t.Errorf("midpoint displayed=%d, want strictly between 0 and 100 (proof it glides, not jumps)", samples[2])
 	}
 }
+
+// TestLayerViewScrollOffsetNilUnarms pins the ADR 137 slice-2 follow-up (Pete's steer "b"):
+// dropping the offset unarms the layer, writing the DESTINATION it was heading for back to
+// the legacy field — not the mid-glide drawn offset — and the layer resumes on the legacy
+// path. A never-armed layer is untouched.
+func TestLayerViewScrollOffsetNilUnarms(t *testing.T) {
+	l, _, advance := easedLayer(t, 100) // maxScroll 90, 100ms linear ease
+
+	_ = boundRead(l)  // establish shown=0
+	l.ScrollTo(80)    // target 80, displayed still eases from 0
+	_ = boundRead(l)  // the blit after a retarget starts the ease, at t0
+	advance(50 * time.Millisecond)
+	if got := boundRead(l); got != 40 {
+		t.Fatalf("setup: mid-glide displayed=%d, want 40", got)
+	}
+
+	// drop the offset: rebuild the mount without ScrollOffset
+	Build(VBox(LayerView(l).Grow(1)))
+
+	l.scrollMu.Lock()
+	armed := l.ease.target != nil
+	legacy := l.scrollY
+	l.scrollMu.Unlock()
+	if armed {
+		t.Error("layer still armed after the offset was dropped")
+	}
+	if legacy != 80 {
+		t.Errorf("unarm wrote legacy scrollY=%d, want 80 (the destination, 'b'), not 40 (drawn)", legacy)
+	}
+	if got := l.ScrollY(); got != 80 {
+		t.Errorf("after unarm ScrollY()=%d, want 80 from the legacy path", got)
+	}
+}
+
+// unarming a layer that was never armed leaves it exactly as it was.
+func TestLayerViewScrollOffsetNilOnUnarmedIsNoop(t *testing.T) {
+	l := NewLayer()
+	l.SetBuffer(NewBuffer(10, 100))
+	l.SetViewport(10, 10)
+	l.ScrollTo(25)
+
+	Build(VBox(LayerView(l).Grow(1))) // never armed; compile calls armScrollOffset(nil)
+
+	if got := l.ScrollY(); got != 25 {
+		t.Errorf("never-armed layer disturbed by unarm: ScrollY=%d, want 25", got)
+	}
+}
