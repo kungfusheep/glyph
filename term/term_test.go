@@ -4,6 +4,7 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -471,5 +472,31 @@ func TestWriteQueueIsBounded(t *testing.T) {
 	tc.wmu.Unlock()
 	if n != 0 {
 		t.Errorf("queue holds %d batches after degrade — overflow must drop them, not keep leaking", n)
+	}
+}
+
+// A pane that shrinks keeps the rows its cursor is on, through the COMPONENT rather
+// than by calling the screen directly. The grid-level tests prove the rule and the
+// geometry test proves resizeIfNeeded forwards a size change; neither reaches the
+// behaviour a consumer actually sees, which is that a shorter box does not discard
+// what the far side is currently drawing.
+func TestShrinkingPaneKeepsTheBottomThroughTheComponent(t *testing.T) {
+	tc := New().Shell("/bin/sh").Env("PS1=", "TERM=dumb")
+	tc.OnUpdate(func() {})
+	defer tc.Close()
+
+	renderTerm(tc, 20, 10)
+	for y := 1; y <= 10; y++ {
+		tc.scr.write([]byte("\x1b[" + strconv.Itoa(y) + ";1HL" + strconv.Itoa(y)))
+	}
+	tc.scr.write([]byte("\x1b[10;1H")) // the far side is drawing at the bottom
+
+	buf := renderTerm(tc, 20, 6)
+
+	if got := strings.TrimRight(buf.GetLine(5), " "); got != "L10" {
+		t.Errorf("bottom row = %q, want %q — the shrink discarded what the far side was drawing", got, "L10")
+	}
+	if got := strings.TrimRight(buf.GetLine(0), " "); got != "L5" {
+		t.Errorf("top row = %q, want %q", got, "L5")
 	}
 }
