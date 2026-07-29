@@ -20,6 +20,13 @@ import (
 // line deletes and an insert, so it carries the alternate screen, scroll regions,
 // insert/delete-line and absolute positioning. Regenerate the golden grids with
 // ORACLE_REGEN=1 (needs tmux); the session bytes themselves are captured by hand.
+//
+// SCOPE: runes and geometry, NOT attributes. The goldens are plain text, so a change
+// that renders the right characters in the wrong colour passes every case. The fixture
+// does carry styling (100 cells on the status line), so covering it means capturing
+// with `capture-pane -e` and comparing styles here — a fixture with one styled row is
+// too thin to be worth the brittleness of an escape-sequence golden, so the gap is
+// recorded rather than half-closed.
 
 type oracleCase struct {
 	name           string
