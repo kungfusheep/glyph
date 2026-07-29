@@ -545,3 +545,38 @@ func TestAltGridIsBlankOnEveryEntry(t *testing.T) {
 		t.Errorf("alt cursor = %d,%d, want 0,0", s.cx, s.cy)
 	}
 }
+
+// Leaving the alternate screen after a resize must put the cursor back on the row it
+// was on, not on whatever row now holds that number. The primary scrolls by its own
+// cursor and the saved cursor moves with it, so the two cannot drift apart.
+func TestLeavingAltLandsOnTheRowItLeft(t *testing.T) {
+	tests := []struct {
+		name       string
+		cursorRow  int
+		wantRow    string
+		wantCursor int
+	}{
+		// the primary's cursor is below the new bottom, so its rows scroll under it
+		{"primary scrolled", 17, "L18", 7},
+		// it already fits, so nothing moves
+		{"primary untouched", 3, "L04", 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newScreen(20, 20)
+			fillRows(s, tt.cursorRow)
+
+			feed(s, "\x1b[?1049h")
+			feed(s, "\x1b[20;1Halt program at the bottom") // its own cursor, not the primary's
+			s.resize(8, 20)
+			feed(s, "\x1b[?1049l")
+
+			if s.cy != tt.wantCursor {
+				t.Errorf("cy = %d, want %d", s.cy, tt.wantCursor)
+			}
+			if got := rowText(s, s.cy); got != tt.wantRow {
+				t.Errorf("the cursor sits on %q, want %q — cursor and content drifted apart", got, tt.wantRow)
+			}
+		})
+	}
+}
