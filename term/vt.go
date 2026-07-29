@@ -100,13 +100,18 @@ func newScreen(rows, cols int) *screen {
 }
 
 // enterAlt makes the alternate grid active, blank. saveCursor distinguishes 1049
-// (which saves and restores the cursor across the swap) from the older 47/1047.
+// (which restores the cursor when the program leaves) from the older 47/1047.
+//
+// The cursor is RECORDED either way: while the alt screen is active it is the only
+// record of where the primary's cursor sits, and a resize needs that to scroll the
+// primary by its own offset. saveCursor gates the restore in leaveAlt, not the save.
 func (s *screen) enterAlt(saveCursor bool) {
 	if s.altActive {
 		return
 	}
+	s.altSavedCx, s.altSavedCy = s.cx, s.cy
 	if saveCursor {
-		s.altSavedCx, s.altSavedCy, s.altSavedPen = s.cx, s.cy, s.pen
+		s.altSavedPen = s.pen
 	}
 	if len(s.alt) != s.rows*s.cols {
 		s.alt = make([]glyph.Cell, s.rows*s.cols)
@@ -137,19 +142,20 @@ func (s *screen) leaveAlt(restoreCursor bool) {
 	s.wrapNext = false
 }
 
-// reshapeGrid returns a grid of the new geometry holding the top-left overlap of
-// the old one.
-func reshapeGrid(old []glyph.Cell, oldRows, oldCols, rows, cols int) []glyph.Cell {
+// reshapeGrid returns a grid of the new geometry holding the overlap that starts at
+// row srcTop of the old one. A srcTop above zero drops that many rows off the TOP,
+// which is how a shrink keeps the rows nearest the cursor.
+func reshapeGrid(old []glyph.Cell, oldRows, oldCols, rows, cols, srcTop int) []glyph.Cell {
 	next := make([]glyph.Cell, rows*cols)
 	blank := glyph.Cell{Rune: ' '}
 	for i := range next {
 		next[i] = blank
 	}
-	copyRows := min(rows, oldRows)
+	copyRows := min(rows, oldRows-srcTop)
 	copyCols := min(cols, oldCols)
 	for y := 0; y < copyRows; y++ {
 		for x := 0; x < copyCols; x++ {
-			next[y*cols+x] = old[y*oldCols+x]
+			next[y*cols+x] = old[(y+srcTop)*oldCols+x]
 		}
 	}
 	return next
@@ -175,15 +181,41 @@ func (s *screen) resize(rows, cols int) {
 	if rows == s.rows && cols == s.cols {
 		return
 	}
+	// A shrink drops rows off the TOP, not the bottom, by exactly enough to keep the
+	// cursor on screen. That is what xterm and tmux do, and it is what lets a program
+	// with bottom-anchored UI keep it: dropping from the bottom discards the rows the
+	// program is actually using and leaves content it has already scrolled past.
+	//
+	// The offset belongs to a GRID, not to the screen, because the two grids have
+	// different cursors: while the alternate screen is active, s.cy is the alt
+	// program's and the primary's is the one enterAlt saved.
+	dropFor := func(cursor int) int {
+		if d := cursor - (rows - 1); d > 0 {
+			return d
+		}
+		return 0
+	}
+	var primaryTop, altTop int
+	if s.altActive {
+		altTop = dropFor(s.cy)
+		primaryTop = dropFor(s.altSavedCy)
+		s.altSavedCy -= primaryTop // the saved cursor moves with its own rows
+	} else {
+		primaryTop = dropFor(s.cy)
+		// altTop stays 0: enterAlt blanks the alt grid and homes the cursor on every
+		// entry, so no cell there survives to be worth preserving.
+	}
 	// both grids reshape: the primary is the scrollback a program is sitting on
 	// top of, so a resize taken while the alt screen is active must not leave it
 	// the old size to be restored into.
-	s.primary = reshapeGrid(s.primary, s.rows, s.cols, rows, cols)
+	s.primary = reshapeGrid(s.primary, s.rows, s.cols, rows, cols, primaryTop)
 	if s.alt != nil {
-		s.alt = reshapeGrid(s.alt, s.rows, s.cols, rows, cols)
+		s.alt = reshapeGrid(s.alt, s.rows, s.cols, rows, cols, altTop)
 	}
+	activeTop := primaryTop
 	if s.altActive {
 		s.cells = s.alt
+		activeTop = altTop
 	} else {
 		s.cells = s.primary
 	}
@@ -191,7 +223,9 @@ func (s *screen) resize(rows, cols int) {
 	s.scrollTop = 0
 	s.scrollBot = rows - 1
 	s.cx = clamp(s.cx, 0, cols-1)
-	s.cy = clamp(s.cy, 0, rows-1)
+	s.cy = clamp(s.cy-activeTop, 0, rows-1)
+	s.altSavedCy = clamp(s.altSavedCy, 0, rows-1)
+	s.altSavedCx = clamp(s.altSavedCx, 0, cols-1)
 	s.wrapNext = false
 }
 

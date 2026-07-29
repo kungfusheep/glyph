@@ -416,3 +416,132 @@ func TestAltScreenResizeReshapesBoth(t *testing.T) {
 		t.Errorf("row0 = %q, want %q", got, "kept")
 	}
 }
+
+// fillRows paints "L01".."L<rows>", one per row, leaving the cursor parked on
+// cursorRow (0-based) — the shape the resize rules are stated over.
+func fillRows(s *screen, cursorRow int) {
+	for y := 0; y < s.rows; y++ {
+		feed(s, "\x1b["+itoa(y+1)+";1H")
+		n := itoa(y + 1)
+		if len(n) < 2 {
+			n = "0" + n
+		}
+		feed(s, "L"+n)
+	}
+	feed(s, "\x1b["+itoa(cursorRow+1)+";1H")
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
+}
+
+// A shrink drops rows off the TOP, enough to keep the cursor on screen. Dropping
+// them off the bottom is what loses a program's bottom-anchored UI. Both cases are
+// the behaviour xterm and tmux were measured to produce.
+func TestShrinkKeepsTheCursorsRows(t *testing.T) {
+	tests := []struct {
+		name      string
+		cursorRow int
+		wantTop   string
+		wantBot   string
+		wantCy    int
+	}{
+		// the cursor already fits, so nothing scrolls and the top survives
+		{"cursor fits", 4, "L01", "L06", 4},
+		// the cursor is below the new bottom, so the top four rows go
+		{"cursor at bottom", 9, "L05", "L10", 5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newScreen(10, 20)
+			fillRows(s, tt.cursorRow)
+			s.resize(6, 20)
+
+			if got := rowText(s, 0); got != tt.wantTop {
+				t.Errorf("row0 = %q, want %q", got, tt.wantTop)
+			}
+			if got := rowText(s, 5); got != tt.wantBot {
+				t.Errorf("row5 = %q, want %q — the bottom-anchored rows must survive", got, tt.wantBot)
+			}
+			if s.cy != tt.wantCy {
+				t.Errorf("cy = %d, want %d — the cursor must land on the row it was on", s.cy, tt.wantCy)
+			}
+		})
+	}
+}
+
+// Growing appends blank rows at the bottom and leaves the content and cursor alone.
+func TestGrowAppendsBlankRowsBelow(t *testing.T) {
+	s := newScreen(6, 20)
+	fillRows(s, 5)
+	s.resize(10, 20)
+
+	if got := rowText(s, 0); got != "L01" {
+		t.Errorf("row0 = %q, want L01", got)
+	}
+	if got := rowText(s, 5); got != "L06" {
+		t.Errorf("row5 = %q, want L06", got)
+	}
+	if got := rowText(s, 6); got != "" {
+		t.Errorf("row6 = %q, want blank", got)
+	}
+	if s.cy != 5 {
+		t.Errorf("cy = %d, want 5 — a grow must not move the cursor", s.cy)
+	}
+}
+
+// A resize taken while the alternate screen is active scrolls the primary by the
+// PRIMARY's cursor, not the alt program's, and moves the saved cursor with it. A
+// shared offset leaves cursor and content diverged the moment the program exits.
+func TestAltResizeScrollsThePrimaryByItsOwnCursor(t *testing.T) {
+	for _, enter := range []string{"\x1b[?1049h", "\x1b[?47h"} {
+		t.Run(enter, func(t *testing.T) {
+			s := newScreen(10, 20)
+			fillRows(s, 3) // the primary's cursor sits on L04, which already fits in 6 rows
+
+			feed(s, enter)
+			feed(s, "\x1b[10;1Halt") // the alt program parks at the bottom
+			s.resize(6, 20)
+			feed(s, "\x1b[?1049l\x1b[?47l")
+
+			// the primary's cursor fitted, so its rows must not have scrolled at all
+			if got := rowText(s, 0); got != "L01" {
+				t.Errorf("primary row0 = %q, want L01 — scrolled by the alt program's cursor", got)
+			}
+			if got := rowText(s, 3); got != "L04" {
+				t.Errorf("primary row3 = %q, want L04", got)
+			}
+			if s.altSavedCy != 3 {
+				t.Errorf("altSavedCy = %d, want 3 — the saved cursor must track its own rows", s.altSavedCy)
+			}
+		})
+	}
+}
+
+// The alt grid is blanked and homed on every entry, so a resize that preserved its
+// cells would be preserving nothing a program can ever read.
+func TestAltGridIsBlankOnEveryEntry(t *testing.T) {
+	s := newScreen(10, 20)
+	feed(s, "\x1b[?1049h")
+	feed(s, "\x1b[10;1Hbottom")
+	s.resize(6, 20)
+	feed(s, "\x1b[?1049l")
+	feed(s, "\x1b[?1049h")
+
+	for y := 0; y < s.rows; y++ {
+		if got := rowText(s, y); got != "" {
+			t.Errorf("alt row%d = %q, want blank on entry", y, got)
+		}
+	}
+	if s.cx != 0 || s.cy != 0 {
+		t.Errorf("alt cursor = %d,%d, want 0,0", s.cx, s.cy)
+	}
+}
