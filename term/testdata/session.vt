@@ -1,0 +1,704 @@
+nvim -u NONE -N lorem.txt
+[?1049h[22;0;0t[?1h=[H[2J[?2004h[?69$p[?2026$p[?2027$p[?2031$p[?2048$p[0m[4:3mP$qm\[?u[c[?25h]11;?[5n[?25l(B[m[H                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    [1 q[?1002h[?1006h[H[?25h[?25l[?1004h[?25h[?25l(B[m[96B[J[93mdefaults.lua: Did not detect DSR response from terminal. This results in a slower startup time.[96;97r[96;1H(B[m[38;2;224;226;234m[48;2;20;22;27m[M[r[95;1H(B[m[38;2;224;226;234m[48;2;79;82;88m                                                                                                    
+
+(B[m[38;2;140;248;247m[48;2;20;22;27mPress ENTER or type command to continue(B[m[38;2;224;226;234m[48;2;20;22;27m                                                             [2 q[2 q[?1002l[?1006l[H[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K
+[K(B[m[38;2;224;226;234m[48;2;79;82;88m
+[K
+(B[m[38;2;252;224;148m[48;2;20;22;27mdefaults.lua: Did not detect DSR response from terminal. This results in a slower startup time.(B[m[38;2;224;226;234m[48;2;20;22;27m[K
+(B[m[38;2;140;248;247m[48;2;20;22;27mPress ENTER or type command to continue(B[m[38;2;224;226;234m[48;2;20;22;27m[K[?25h[?25l[Hline 001 bbbb[K
+line 002 ccccc[K
+line 003 dddddd[K
+line 004 eeeeeee[K
+line 005 ffffffff[K
+line 006 ggggggggg[K
+line 007 hhhhhhhhhh[K
+line 008 iiiiiiiiiii[K
+line 009 jjjjjjjjjjjj[K
+line 010 aaaaaaaaaaaaa[K
+line 011 bbbbbbbbbbbbbb[K
+line 012 ccccccccccccccc[K
+line 013 dddddddddddddddd[K
+line 014 eeeeeeeeeeeeeeeee[K
+line 015 ffffffffffffffffff[K
+line 016 ggggggggggggggggggg[K
+line 017 hhh[K
+line 018 iiii[K
+line 019 jjjjj[K
+line 020 aaaaaa[K
+line 021 bbbbbbb[K
+line 022 cccccccc[K
+line 023 ddddddddd[K
+line 024 eeeeeeeeee[K
+line 025 fffffffffff[K
+line 026 gggggggggggg[K
+line 027 hhhhhhhhhhhhh[K
+line 028 iiiiiiiiiiiiii[K
+line 029 jjjjjjjjjjjjjjj[K
+line 030 aaaaaaaaaaaaaaaa[K
+line 031 bbbbbbbbbbbbbbbbb[K
+line 032 cccccccccccccccccc[K
+line 033 ddddddddddddddddddd[K
+line 034 eee[K
+line 035 ffff[K
+line 036 ggggg[K
+line 037 hhhhhh[K
+line 038 iiiiiii[K
+line 039 jjjjjjjj[K
+line 040 aaaaaaaaa[K
+line 041 bbbbbbbbbb[K
+line 042 ccccccccccc[K
+line 043 dddddddddddd[K
+line 044 eeeeeeeeeeeee[K
+line 045 ffffffffffffff[K
+line 046 ggggggggggggggg[K
+line 047 hhhhhhhhhhhhhhhh[K
+line 048 iiiiiiiiiiiiiiiii[K
+line 049 jjjjjjjjjjjjjjjjjj[K
+line 050 aaaaaaaaaaaaaaaaaaa[K
+line 051 bbb[K
+line 052 cccc[K
+line 053 ddddd[K
+line 054 eeeeee[K
+line 055 fffffff[K
+line 056 gggggggg[K
+line 057 hhhhhhhhh[K
+line 058 iiiiiiiiii[K
+line 059 jjjjjjjjjjj[K
+line 060 aaaaaaaaaaaa[K
+line 061 bbbbbbbbbbbbb[K
+line 062 cccccccccccccc[K
+line 063 ddddddddddddddd[K
+line 064 eeeeeeeeeeeeeeee[K
+line 065 fffffffffffffffff[K
+line 066 gggggggggggggggggg[K
+line 067 hhhhhhhhhhhhhhhhhhh[K
+line 068 iii[K
+line 069 jjjj[K
+line 070 aaaaa[K
+line 071 bbbbbb[K
+line 072 ccccccc[K
+line 073 dddddddd[K
+line 074 eeeeeeeee[K
+line 075 ffffffffff[K
+line 076 ggggggggggg[K
+line 077 hhhhhhhhhhhh[K
+line 078 iiiiiiiiiiiii[K
+line 079 jjjjjjjjjjjjjj[K
+line 080 aaaaaaaaaaaaaaa[K
+line 081 bbbbbbbbbbbbbbbb[K
+line 082 ccccccccccccccccc[K
+line 083 dddddddddddddddddd[K
+line 084 eeeeeeeeeeeeeeeeeee[K
+line 085 fff[K
+line 086 gggg[K
+line 087 hhhhh[K
+line 088 iiiiii[K
+line 089 jjjjjjj[K
+line 090 aaaaaaaa[K
+line 091 bbbbbbbbb[K
+line 092 cccccccccc[K
+line 093 ddddddddddd[K
+line 094 eeeeeeeeeeee[K
+line 095 fffffffffffff[K
+(B[m[38;2;224;226;234m[48;2;79;82;88mlorem.txt                                                                         1,1            Top(B[m[38;2;224;226;234m[48;2;20;22;27m
+[J[89C^F[?1002h[?1006h[H[?25h[?25l[97;90H  [1;95r[H[93M[r[3;1Hline 096 gggggggggggggg[K
+line 097 hhhhhhhhhhhhhhh[K
+line 098 iiiiiiiiiiiiiiii[K
+line 099 jjjjjjjjjjjjjjjjj[K
+line 100 aaaaaaaaaaaaaaaaaa[K
+line 101 bbbbbbbbbbbbbbbbbbb[K
+line 102 ccc[K
+line 103 dddd[K
+line 104 eeeee[K
+line 105 ffffff[K
+line 106 ggggggg[K
+line 107 hhhhhhhh[K
+line 108 iiiiiiiii[K
+line 109 jjjjjjjjjj[K
+line 110 aaaaaaaaaaa[K
+line 111 bbbbbbbbbbbb[K
+line 112 ccccccccccccc[K
+line 113 dddddddddddddd[K
+line 114 eeeeeeeeeeeeeee[K
+line 115 ffffffffffffffff[K
+line 116 ggggggggggggggggg[K
+line 117 hhhhhhhhhhhhhhhhhh[K
+line 118 iiiiiiiiiiiiiiiiiii[K
+line 119 jjj[K
+line 120 aaaa[K
+line 121 bbbbb[K
+line 122 cccccc[K
+line 123 ddddddd[K
+line 124 eeeeeeee[K
+line 125 fffffffff[K
+line 126 gggggggggg[K
+line 127 hhhhhhhhhhh[K
+line 128 iiiiiiiiiiii[K
+line 129 jjjjjjjjjjjjj[K
+line 130 aaaaaaaaaaaaaa[K
+line 131 bbbbbbbbbbbbbbb[K
+line 132 cccccccccccccccc[K
+line 133 ddddddddddddddddd[K
+line 134 eeeeeeeeeeeeeeeeee[K
+line 135 fffffffffffffffffff[K
+line 136 ggg[K
+line 137 hhhh[K
+line 138 iiiii[K
+line 139 jjjjjj[K
+line 140 aaaaaaa[K
+line 141 bbbbbbbb[K
+line 142 ccccccccc[K
+line 143 dddddddddd[K
+line 144 eeeeeeeeeee[K
+line 145 ffffffffffff[K
+line 146 ggggggggggggg[K
+line 147 hhhhhhhhhhhhhh[K
+line 148 iiiiiiiiiiiiiii[K
+line 149 jjjjjjjjjjjjjjjj[K
+line 150 aaaaaaaaaaaaaaaaa[K
+line 151 bbbbbbbbbbbbbbbbbb[K
+line 152 ccccccccccccccccccc[K
+line 153 ddd[K
+line 154 eeee[K
+line 155 fffff[K
+line 156 gggggg[K
+line 157 hhhhhhh[K
+line 158 iiiiiiii[K
+line 159 jjjjjjjjj[K
+line 160 aaaaaaaaaa[K
+line 161 bbbbbbbbbbb[K
+line 162 cccccccccccc[K
+line 163 ddddddddddddd[K
+line 164 eeeeeeeeeeeeee[K
+line 165 fffffffffffffff[K
+line 166 gggggggggggggggg[K
+line 167 hhhhhhhhhhhhhhhhh[K
+line 168 iiiiiiiiiiiiiiiiii[K
+line 169 jjjjjjjjjjjjjjjjjjj[K
+line 170 aaa[K
+line 171 bbbb[K
+line 172 ccccc[K
+line 173 dddddd[K
+line 174 eeeeeee[K
+line 175 ffffffff[K
+line 176 ggggggggg[K
+line 177 hhhhhhhhhh[K
+line 178 iiiiiiiiiii[K
+line 179 jjjjjjjjjjjj[K
+line 180 aaaaaaaaaaaaa[K
+line 181 bbbbbbbbbbbbbb[K
+line 182 ccccccccccccccc[K
+line 183 dddddddddddddddd[K
+line 184 eeeeeeeeeeeeeeeee[K
+line 185 ffffffffffffffffff[K
+line 186 ggggggggggggggggggg[K
+line 187 hhh[K
+line 188 iiii[K[96;83H(B[m[38;2;224;226;234m[48;2;79;82;88m94,1           30%[H[?25h[?25l[97;90H(B[m[38;2;224;226;234m[48;2;20;22;27m^F[H[?25h[?25l[97;90H  [1;95r[H[93M[r[3;1Hline 189 jjjjj[K
+line 190 aaaaaa[K
+line 191 bbbbbbb[K
+line 192 cccccccc[K
+line 193 ddddddddd[K
+line 194 eeeeeeeeee[K
+line 195 fffffffffff[K
+line 196 gggggggggggg[K
+line 197 hhhhhhhhhhhhh[K
+line 198 iiiiiiiiiiiiii[K
+line 199 jjjjjjjjjjjjjjj[K
+line 200 aaaaaaaaaaaaaaaa[K
+line 201 bbbbbbbbbbbbbbbbb[K
+line 202 cccccccccccccccccc[K
+line 203 ddddddddddddddddddd[K
+line 204 eee[K
+line 205 ffff[K
+line 206 ggggg[K
+line 207 hhhhhh[K
+line 208 iiiiiii[K
+line 209 jjjjjjjj[K
+line 210 aaaaaaaaa[K
+line 211 bbbbbbbbbb[K
+line 212 ccccccccccc[K
+line 213 dddddddddddd[K
+line 214 eeeeeeeeeeeee[K
+line 215 ffffffffffffff[K
+line 216 ggggggggggggggg[K
+line 217 hhhhhhhhhhhhhhhh[K
+line 218 iiiiiiiiiiiiiiiii[K
+line 219 jjjjjjjjjjjjjjjjjj[K
+line 220 aaaaaaaaaaaaaaaaaaa[K
+line 221 bbb[K
+line 222 cccc[K
+line 223 ddddd[K
+line 224 eeeeee[K
+line 225 fffffff[K
+line 226 gggggggg[K
+line 227 hhhhhhhhh[K
+line 228 iiiiiiiiii[K
+line 229 jjjjjjjjjjj[K
+line 230 aaaaaaaaaaaa[K
+line 231 bbbbbbbbbbbbb[K
+line 232 cccccccccccccc[K
+line 233 ddddddddddddddd[K
+line 234 eeeeeeeeeeeeeeee[K
+line 235 fffffffffffffffff[K
+line 236 gggggggggggggggggg[K
+line 237 hhhhhhhhhhhhhhhhhhh[K
+line 238 iii[K
+line 239 jjjj[K
+line 240 aaaaa[K
+line 241 bbbbbb[K
+line 242 ccccccc[K
+line 243 dddddddd[K
+line 244 eeeeeeeee[K
+line 245 ffffffffff[K
+line 246 ggggggggggg[K
+line 247 hhhhhhhhhhhh[K
+line 248 iiiiiiiiiiiii[K
+line 249 jjjjjjjjjjjjjj[K
+line 250 aaaaaaaaaaaaaaa[K
+line 251 bbbbbbbbbbbbbbbb[K
+line 252 ccccccccccccccccc[K
+line 253 dddddddddddddddddd[K
+line 254 eeeeeeeeeeeeeeeeeee[K
+line 255 fff[K
+line 256 gggg[K
+line 257 hhhhh[K
+line 258 iiiiii[K
+line 259 jjjjjjj[K
+line 260 aaaaaaaa[K
+line 261 bbbbbbbbb[K
+line 262 cccccccccc[K
+line 263 ddddddddddd[K
+line 264 eeeeeeeeeeee[K
+line 265 fffffffffffff[K
+line 266 gggggggggggggg[K
+line 267 hhhhhhhhhhhhhhh[K
+line 268 iiiiiiiiiiiiiiii[K
+line 269 jjjjjjjjjjjjjjjjj[K
+line 270 aaaaaaaaaaaaaaaaaa[K
+line 271 bbbbbbbbbbbbbbbbbbb[K
+line 272 ccc[K
+line 273 dddd[K
+line 274 eeeee[K
+line 275 ffffff[K
+line 276 ggggggg[K
+line 277 hhhhhhhh[K
+line 278 iiiiiiiii[K
+line 279 jjjjjjjjjj[K
+line 280 aaaaaaaaaaa[K
+line 281 bbbbbbbbbbbb[K[96;83H(B[m[38;2;224;226;234m[48;2;79;82;88m187,1          61[H[?25h[?25l[97;90H(B[m[38;2;224;226;234m[48;2;20;22;27m^B[H[?25h[?25l[97;90H  [1;6H094 eeeeeeeeeeee[2;6H095 fffffffffffff[3;6H096 gggggggggggggg[4;6H097 hhhhhhhhhhhhhhh[5;6H098 iiiiiiiiiiiiiiii[6;6H099 jjjjjjjjjjjjjjjjj[7;7H00 aaaaaaaaaaaaaaaaaa[8;7H01 bbbbbbbbbbbbbbbbbbb[9;7H02 ccc[8X[10;7H03 dddd[8X[11;7H04 eeeee[8X[12;7H05 ffffff[8X[13;7H06 ggggggg[8X[14;6H107 hhhhhhhh[8X[15;6H108 iiiiiiiii[8X[16;6H109 jjjjjjjjjj[8X[17;6H110 aaaaaaaaaaa[8X[18;6H111 bbbbbbbbbbbb[19;6H112 ccccccccccccc[20;6H113 dddddddddddddd[21;6H114 eeeeeeeeeeeeeee[22;6H115 ffffffffffffffff[23;6H116 ggggggggggggggggg[24;6H117 hhhhhhhhhhhhhhhhhh[25;6H118 iiiiiiiiiiiiiiiiiii[26;6H119 jjj[8X[27;6H120 aaaa[8X[28;6H121 bbbbb[8X[29;6H122 cccccc[8X[30;6H123 ddddddd[8X[31;6H124 eeeeeeee[8X[32;6H125 fffffffff[8X[33;6H126 gggggggggg[8X[34;6H127 hhhhhhhhhhh[8X[35;6H128 iiiiiiiiiiii[36;6H129 jjjjjjjjjjjjj[37;6H130 aaaaaaaaaaaaaa[38;6H131 bbbbbbbbbbbbbbb[39;6H132 cccccccccccccccc[40;6H133 ddddddddddddddddd[41;6H134 eeeeeeeeeeeeeeeeee[42;6H135 fffffffffffffffffff[43;6H136 ggg[8X[44;6H137 hhhh[8X[45;6H138 iiiii[8X[46;6H139 jjjjjj[8X[47;6H140 aaaaaaa[8X[48;6H141 bbbbbbbb[8X[49;6H142 ccccccccc[8X[50;6H143 dddddddddd[8X[51;6H144 eeeeeeeeeee[8X[52;6H145 ffffffffffff[53;6H146 ggggggggggggg[54;6H147 hhhhhhhhhhhhhh[55;6H148 iiiiiiiiiiiiiii[56;6H149 jjjjjjjjjjjjjjjj[57;6H150 aaaaaaaaaaaaaaaaa[58;6H151 bbbbbbbbbbbbbbbbbb[59;6H152 ccccccccccccccccccc[60;6H153 ddd[8X[61;6H154 eeee[8X[62;6H155 fffff[8X[63;6H156 gggggg[8X[64;6H157 hhhhhhh[8X[65;6H158 iiiiiiii[8X[66;6H159 jjjjjjjjj[8X[67;6H160 aaaaaaaaaa[8X[68;6H161 bbbbbbbbbbb[8X[69;6H162 cccccccccccc[70;6H163 ddddddddddddd[71;6H164 eeeeeeeeeeeeee[72;6H165 fffffffffffffff[73;6H166 gggggggggggggggg[74;6H167 hhhhhhhhhhhhhhhhh[75;6H168 iiiiiiiiiiiiiiiiii[76;6H169 jjjjjjjjjjjjjjjjjjj[77;6H170 aaa[8X[78;6H171 bbbb[8X[79;6H172 ccccc[8X[80;6H173 dddddd[8X[81;6H174 eeeeeee[8X[82;6H175 ffffffff[8X[83;6H176 ggggggggg[8X[84;6H177 hhhhhhhhhh[8X[85;6H178 iiiiiiiiiii[8X[86;6H179 jjjjjjjjjjjj[87;6H180 aaaaaaaaaaaaa[88;6H181 bbbbbbbbbbbbbb[89;6H182 ccccccccccccccc[90;6H183 dddddddddddddddd[91;6H184 eeeeeeeeeeeeeeeee[92;6H185 ffffffffffffffffff[93;6H186 ggggggggggggggggggg[94;6H187 hhh[8X[95;6H188 iiii[8X[96;85H(B[m[38;2;224;226;234m[48;2;79;82;88m8,1          30[A[?25h[?25l[97;90H(B[m[38;2;224;226;234m[48;2;20;22;27mG[A[A[?25h[?25l[97;90H [1;6H305 fffffffffffffffffff[2;6H306 ggg[10X[3;6H307 hhhh[10X[4;6H308 iiiii[10X[5;6H309 jjjjjj[10X[6;6H310 aaaaaaa[10X[7;6H311 bbbbbbbb[10X[8;6H312 ccccccccc[10X[9;6H313 dddddddddd[10;6H314 eeeeeeeeeee[11;6H315 ffffffffffff[12;6H316 ggggggggggggg[13;6H317 hhhhhhhhhhhhhh[14;6H318 iiiiiiiiiiiiiii[15;6H319 jjjjjjjjjjjjjjjj[16;6H320 aaaaaaaaaaaaaaaaa[17;6H321 bbbbbbbbbbbbbbbbbb[18;6H322 ccccccccccccccccccc[19;6H323 ddd[10X[20;6H324 eeee[10X[21;6H325 fffff[10X[22;6H326 gggggg[10X[23;6H327 hhhhhhh[10X[24;6H328 iiiiiiii[10X[25;6H329 jjjjjjjjj[10X[26;6H330 aaaaaaaaaa[27;6H331 bbbbbbbbbbb[28;6H332 cccccccccccc[29;6H333 ddddddddddddd[30;6H334 eeeeeeeeeeeeee[31;6H335 fffffffffffffff[32;6H336 gggggggggggggggg[33;6H337 hhhhhhhhhhhhhhhhh[34;6H338 iiiiiiiiiiiiiiiiii[35;6H339 jjjjjjjjjjjjjjjjjjj[36;6H340 aaa[10X[37;6H341 bbbb[10X[38;6H342 ccccc[10X[39;6H343 dddddd[10X[40;6H344 eeeeeee[10X[41;6H345 ffffffff[10X[42;6H346 ggggggggg[10X[43;6H347 hhhhhhhhhh[44;6H348 iiiiiiiiiii[45;6H349 jjjjjjjjjjjj[46;6H350 aaaaaaaaaaaaa[47;6H351 bbbbbbbbbbbbbb[48;6H352 ccccccccccccccc[49;6H353 dddddddddddddddd[50;6H354 eeeeeeeeeeeeeeeee[51;6H355 ffffffffffffffffff[52;6H356 ggggggggggggggggggg[53;6H357 hhh[10X[54;6H358 iiii[10X[55;6H359 jjjjj[10X[56;6H360 aaaaaa[10X[57;6H361 bbbbbbb[10X[58;6H362 cccccccc[10X[59;6H363 ddddddddd[10X[60;6H364 eeeeeeeeee[61;6H365 fffffffffff[62;6H366 gggggggggggg[63;6H367 hhhhhhhhhhhhh[64;6H368 iiiiiiiiiiiiii[65;6H369 jjjjjjjjjjjjjjj[66;6H370 aaaaaaaaaaaaaaaa[67;6H371 bbbbbbbbbbbbbbbbb[68;6H372 cccccccccccccccccc[69;6H373 ddddddddddddddddddd[70;6H374 eee[10X[71;6H375 ffff[10X[72;6H376 ggggg[10X[73;6H377 hhhhhh[10X[74;6H378 iiiiiii[10X[75;6H379 jjjjjjjj[10X[76;6H380 aaaaaaaaa[10X[77;6H381 bbbbbbbbbb[78;6H382 ccccccccccc[79;6H383 dddddddddddd[80;6H384 eeeeeeeeeeeee[81;6H385 ffffffffffffff[82;6H386 ggggggggggggggg[83;6H387 hhhhhhhhhhhhhhhh[84;6H388 iiiiiiiiiiiiiiiii[85;6H389 jjjjjjjjjjjjjjjjjj[86;6H390 aaaaaaaaaaaaaaaaaaa[87;6H391 bbb[10X[88;6H392 cccc[10X[89;6H393 ddddd[10X[90;6H394 eeeeee[10X[91;6H395 fffffff[10X[92;6H396 gggggggg[10X[93;6H397 hhhhhhhhh[10X[94;6H398 iiiiiiiiii[95;6H399 jjjjjjjjjjj[96;83H(B[m[38;2;224;226;234m[48;2;79;82;88m399,1          Bot[A[?25h[?25l[97;90H(B[m[38;2;224;226;234m[48;2;20;22;27mgg[A[A[?25h[?25l[97;90H  [1;6H001 bbbb[15X[2;6H002 ccccc[3;6H003 dddddd[4;6H004 eeeeeee[5;6H005 ffffffff[6;6H006 ggggggggg[7;6H007 hhhhhhhhhh[8;6H008 iiiiiiiiiii[9;6H009 jjjjjjjjjjjj[10;6H010 aaaaaaaaaaaaa[11;6H011 bbbbbbbbbbbbbb[12;6H012 ccccccccccccccc[13;6H013 dddddddddddddddd[14;6H014 eeeeeeeeeeeeeeeee[15;6H015 ffffffffffffffffff[16;6H016 ggggggggggggggggggg[17;6H017 hhh[15X[18;6H018 iiii[15X[19;6H019 jjjjj[20;6H020 aaaaaa[21;6H021 bbbbbbb[22;6H022 cccccccc[23;6H023 ddddddddd[24;6H024 eeeeeeeeee[25;6H025 fffffffffff[26;6H026 gggggggggggg[27;6H027 hhhhhhhhhhhhh[28;6H028 iiiiiiiiiiiiii[29;6H029 jjjjjjjjjjjjjjj[30;6H030 aaaaaaaaaaaaaaaa[31;6H031 bbbbbbbbbbbbbbbbb[32;6H032 cccccccccccccccccc[33;6H033 ddddddddddddddddddd[34;6H034 eee[15X[35;6H035 ffff[15X[36;6H036 ggggg[37;6H037 hhhhhh[38;6H038 iiiiiii[39;6H039 jjjjjjjj[40;6H040 aaaaaaaaa[41;6H041 bbbbbbbbbb[42;6H042 ccccccccccc[43;6H043 dddddddddddd[44;6H044 eeeeeeeeeeeee[45;6H045 ffffffffffffff[46;6H046 ggggggggggggggg[47;6H047 hhhhhhhhhhhhhhhh[48;6H048 iiiiiiiiiiiiiiiii[49;6H049 jjjjjjjjjjjjjjjjjj[50;6H050 aaaaaaaaaaaaaaaaaaa[51;6H051 bbb[15X[52;6H052 cccc[15X[53;6H053 ddddd[54;6H054 eeeeee[55;6H055 fffffff[56;6H056 gggggggg[57;6H057 hhhhhhhhh[58;6H058 iiiiiiiiii[59;6H059 jjjjjjjjjjj[60;6H060 aaaaaaaaaaaa[61;6H061 bbbbbbbbbbbbb[62;6H062 cccccccccccccc[63;6H063 ddddddddddddddd[64;6H064 eeeeeeeeeeeeeeee[65;6H065 fffffffffffffffff[66;6H066 gggggggggggggggggg[67;6H067 hhhhhhhhhhhhhhhhhhh[68;6H068 iii[15X[69;6H069 jjjj[15X[70;6H070 aaaaa[71;6H071 bbbbbb[72;6H072 ccccccc[73;6H073 dddddddd[74;6H074 eeeeeeeee[75;6H075 ffffffffff[76;6H076 ggggggggggg[77;6H077 hhhhhhhhhhhh[78;6H078 iiiiiiiiiiiii[79;6H079 jjjjjjjjjjjjjj[80;6H080 aaaaaaaaaaaaaaa[81;6H081 bbbbbbbbbbbbbbbb[82;6H082 ccccccccccccccccc[83;6H083 dddddddddddddddddd[84;6H084 eeeeeeeeeeeeeeeeeee[85;6H085 fff[15X[86;6H086 gggg[15X[87;6H087 hhhhh[88;6H088 iiiiii[89;6H089 jjjjjjj[90;6H090 aaaaaaaa[91;6H091 bbbbbbbbb[92;6H092 cccccccccc[93;6H093 ddddddddddd[94;6H094 eeeeeeeeeeee[95;6H095 fffffffffffff[96;83H(B[m[38;2;224;226;234m[48;2;79;82;88m1,1            Top[H[?25h[?25l[97;90H(B[m[38;2;224;226;234m[48;2;20;22;27m^F[H[?25h[?25l[97;90H  [1;95r[H[93M[r[3;1Hline 096 gggggggggggggg[K
+line 097 hhhhhhhhhhhhhhh[K
+line 098 iiiiiiiiiiiiiiii[K
+line 099 jjjjjjjjjjjjjjjjj[K
+line 100 aaaaaaaaaaaaaaaaaa[K
+line 101 bbbbbbbbbbbbbbbbbbb[K
+line 102 ccc[K
+line 103 dddd[K
+line 104 eeeee[K
+line 105 ffffff[K
+line 106 ggggggg[K
+line 107 hhhhhhhh[K
+line 108 iiiiiiiii[K
+line 109 jjjjjjjjjj[K
+line 110 aaaaaaaaaaa[K
+line 111 bbbbbbbbbbbb[K
+line 112 ccccccccccccc[K
+line 113 dddddddddddddd[K
+line 114 eeeeeeeeeeeeeee[K
+line 115 ffffffffffffffff[K
+line 116 ggggggggggggggggg[K
+line 117 hhhhhhhhhhhhhhhhhh[K
+line 118 iiiiiiiiiiiiiiiiiii[K
+line 119 jjj[K
+line 120 aaaa[K
+line 121 bbbbb[K
+line 122 cccccc[K
+line 123 ddddddd[K
+line 124 eeeeeeee[K
+line 125 fffffffff[K
+line 126 gggggggggg[K
+line 127 hhhhhhhhhhh[K
+line 128 iiiiiiiiiiii[K
+line 129 jjjjjjjjjjjjj[K
+line 130 aaaaaaaaaaaaaa[K
+line 131 bbbbbbbbbbbbbbb[K
+line 132 cccccccccccccccc[K
+line 133 ddddddddddddddddd[K
+line 134 eeeeeeeeeeeeeeeeee[K
+line 135 fffffffffffffffffff[K
+line 136 ggg[K
+line 137 hhhh[K
+line 138 iiiii[K
+line 139 jjjjjj[K
+line 140 aaaaaaa[K
+line 141 bbbbbbbb[K
+line 142 ccccccccc[K
+line 143 dddddddddd[K
+line 144 eeeeeeeeeee[K
+line 145 ffffffffffff[K
+line 146 ggggggggggggg[K
+line 147 hhhhhhhhhhhhhh[K
+line 148 iiiiiiiiiiiiiii[K
+line 149 jjjjjjjjjjjjjjjj[K
+line 150 aaaaaaaaaaaaaaaaa[K
+line 151 bbbbbbbbbbbbbbbbbb[K
+line 152 ccccccccccccccccccc[K
+line 153 ddd[K
+line 154 eeee[K
+line 155 fffff[K
+line 156 gggggg[K
+line 157 hhhhhhh[K
+line 158 iiiiiiii[K
+line 159 jjjjjjjjj[K
+line 160 aaaaaaaaaa[K
+line 161 bbbbbbbbbbb[K
+line 162 cccccccccccc[K
+line 163 ddddddddddddd[K
+line 164 eeeeeeeeeeeeee[K
+line 165 fffffffffffffff[K
+line 166 gggggggggggggggg[K
+line 167 hhhhhhhhhhhhhhhhh[K
+line 168 iiiiiiiiiiiiiiiiii[K
+line 169 jjjjjjjjjjjjjjjjjjj[K
+line 170 aaa[K
+line 171 bbbb[K
+line 172 ccccc[K
+line 173 dddddd[K
+line 174 eeeeeee[K
+line 175 ffffffff[K
+line 176 ggggggggg[K
+line 177 hhhhhhhhhh[K
+line 178 iiiiiiiiiii[K
+line 179 jjjjjjjjjjjj[K
+line 180 aaaaaaaaaaaaa[K
+line 181 bbbbbbbbbbbbbb[K
+line 182 ccccccccccccccc[K
+line 183 dddddddddddddddd[K
+line 184 eeeeeeeeeeeeeeeee[K
+line 185 ffffffffffffffffff[K
+line 186 ggggggggggggggggggg[K
+line 187 hhh[K
+line 188 iiii[K[96;83H(B[m[38;2;224;226;234m[48;2;79;82;88m94,1           30%[H[?25h[?25l[97;90H(B[m[38;2;224;226;234m[48;2;20;22;27m50G[H[?25h[?25l[97;90H   [1;95r[H[44L[r[Hline 050 aaaaaaaaaaaaaaaaaaa[K
+line 051 bbb[K
+line 052 cccc[K
+line 053 ddddd[K
+line 054 eeeeee[K
+line 055 fffffff[K
+line 056 gggggggg[K
+line 057 hhhhhhhhh[K
+line 058 iiiiiiiiii[K
+line 059 jjjjjjjjjjj[K
+line 060 aaaaaaaaaaaa[K
+line 061 bbbbbbbbbbbbb[K
+line 062 cccccccccccccc[K
+line 063 ddddddddddddddd[K
+line 064 eeeeeeeeeeeeeeee[K
+line 065 fffffffffffffffff[K
+line 066 gggggggggggggggggg[K
+line 067 hhhhhhhhhhhhhhhhhhh[K
+line 068 iii[K
+line 069 jjjj[K
+line 070 aaaaa[K
+line 071 bbbbbb[K
+line 072 ccccccc[K
+line 073 dddddddd[K
+line 074 eeeeeeeee[K
+line 075 ffffffffff[K
+line 076 ggggggggggg[K
+line 077 hhhhhhhhhhhh[K
+line 078 iiiiiiiiiiiii[K
+line 079 jjjjjjjjjjjjjj[K
+line 080 aaaaaaaaaaaaaaa[K
+line 081 bbbbbbbbbbbbbbbb[K
+line 082 ccccccccccccccccc[K
+line 083 dddddddddddddddddd[K
+line 084 eeeeeeeeeeeeeeeeeee[K
+line 085 fff[K
+line 086 gggg[K
+line 087 hhhhh[K
+line 088 iiiiii[K
+line 089 jjjjjjj[K
+line 090 aaaaaaaa[K
+line 091 bbbbbbbbb[K
+line 092 cccccccccc[K
+line 093 ddddddddddd[K[96;83H(B[m[38;2;224;226;234m[48;2;79;82;88m50,1           16[H[?25h[?25l[97;90H(B[m[38;2;224;226;234m[48;2;20;22;27mdd[4 q[H[?25h[?25l[97;90H  [1;95r[H[M[r[95;1Hline 145 ffffffffffff[K[96;11H(B[m[38;2;224;226;234m[48;2;79;82;88m[+][2 q[H[?25h[?25l[97;90H(B[m[38;2;224;226;234m[48;2;20;22;27mdd[4 q[H[?25h[?25l[97;90H  [1;95r[H[M[r[95;1Hline 146 ggggggggggggg[K[2 q[H[?25h[?25l[97;90Ho[H[?25h[?25l[97;90H [97;1H(B[m[38;2;179;246;192m[48;2;20;22;27m-- INSERT --[2;95r[2;1H(B[m[38;2;224;226;234m[48;2;20;22;27m[L[r[2;1H[K[96;84H(B[m[38;2;224;226;234m[48;2;79;82;88m1[6 q[94A[?25h[?25l(B[m[38;2;224;226;234m[48;2;20;22;27minserted line[96;87H(B[m[38;2;224;226;234m[48;2;79;82;88m4[2;14H[?25h[?25l(B[m[38;2;224;226;234m[48;2;20;22;27m[95B[12X[96;87H(B[m[38;2;224;226;234m[48;2;79;82;88m3[2 q[2;13H[?25h[?25l[97;90H(B[m[38;2;224;226;234m[48;2;20;22;27m^F[2;13H[?25h[?25l[97;90H  [1;95r[H[93M[r[3;1Hline 146 ggggggggggggg[K
+line 147 hhhhhhhhhhhhhh[K
+line 148 iiiiiiiiiiiiiii[K
+line 149 jjjjjjjjjjjjjjjj[K
+line 150 aaaaaaaaaaaaaaaaa[K
+line 151 bbbbbbbbbbbbbbbbbb[K
+line 152 ccccccccccccccccccc[K
+line 153 ddd[K
+line 154 eeee[K
+line 155 fffff[K
+line 156 gggggg[K
+line 157 hhhhhhh[K
+line 158 iiiiiiii[K
+line 159 jjjjjjjjj[K
+line 160 aaaaaaaaaa[K
+line 161 bbbbbbbbbbb[K
+line 162 cccccccccccc[K
+line 163 ddddddddddddd[K
+line 164 eeeeeeeeeeeeee[K
+line 165 fffffffffffffff[K
+line 166 gggggggggggggggg[K
+line 167 hhhhhhhhhhhhhhhhh[K
+line 168 iiiiiiiiiiiiiiiiii[K
+line 169 jjjjjjjjjjjjjjjjjjj[K
+line 170 aaa[K
+line 171 bbbb[K
+line 172 ccccc[K
+line 173 dddddd[K
+line 174 eeeeeee[K
+line 175 ffffffff[K
+line 176 ggggggggg[K
+line 177 hhhhhhhhhh[K
+line 178 iiiiiiiiiii[K
+line 179 jjjjjjjjjjjj[K
+line 180 aaaaaaaaaaaaa[K
+line 181 bbbbbbbbbbbbbb[K
+line 182 ccccccccccccccc[K
+line 183 dddddddddddddddd[K
+line 184 eeeeeeeeeeeeeeeee[K
+line 185 ffffffffffffffffff[K
+line 186 ggggggggggggggggggg[K
+line 187 hhh[K
+line 188 iiii[K
+line 189 jjjjj[K
+line 190 aaaaaa[K
+line 191 bbbbbbb[K
+line 192 cccccccc[K
+line 193 ddddddddd[K
+line 194 eeeeeeeeee[K
+line 195 fffffffffff[K
+line 196 gggggggggggg[K
+line 197 hhhhhhhhhhhhh[K
+line 198 iiiiiiiiiiiiii[K
+line 199 jjjjjjjjjjjjjjj[K
+line 200 aaaaaaaaaaaaaaaa[K
+line 201 bbbbbbbbbbbbbbbbb[K
+line 202 cccccccccccccccccc[K
+line 203 ddddddddddddddddddd[K
+line 204 eee[K
+line 205 ffff[K
+line 206 ggggg[K
+line 207 hhhhhh[K
+line 208 iiiiiii[K
+line 209 jjjjjjjj[K
+line 210 aaaaaaaaa[K
+line 211 bbbbbbbbbb[K
+line 212 ccccccccccc[K
+line 213 dddddddddddd[K
+line 214 eeeeeeeeeeeee[K
+line 215 ffffffffffffff[K
+line 216 ggggggggggggggg[K
+line 217 hhhhhhhhhhhhhhhh[K
+line 218 iiiiiiiiiiiiiiiii[K
+line 219 jjjjjjjjjjjjjjjjjj[K
+line 220 aaaaaaaaaaaaaaaaaaa[K
+line 221 bbb[K
+line 222 cccc[K
+line 223 ddddd[K
+line 224 eeeeee[K
+line 225 fffffff[K
+line 226 gggggggg[K
+line 227 hhhhhhhhh[K
+line 228 iiiiiiiiii[K
+line 229 jjjjjjjjjjj[K
+line 230 aaaaaaaaaaaa[K
+line 231 bbbbbbbbbbbbb[K
+line 232 cccccccccccccc[K
+line 233 ddddddddddddddd[K
+line 234 eeeeeeeeeeeeeeee[K
+line 235 fffffffffffffffff[K
+line 236 gggggggggggggggggg[K
+line 237 hhhhhhhhhhhhhhhhhhh[K
+line 238 iii[K[96;83H(B[m[38;2;224;226;234m[48;2;79;82;88m143,13         4[1;13H[?25h[?25l[97;90H(B[m[38;2;224;226;234m[48;2;20;22;27m^B[1;13H[?25h[?25l[97;90H  [1;6H052 cccc[7X
+inserted line[8X[3;6H053 ddddd[8X[4;6H054 eeeeee[8X[5;6H055 fffffff[8X[6;6H056 gggggggg[8X[7;6H057 hhhhhhhhh[8X[8;6H058 iiiiiiiiii[8X[9;6H059 jjjjjjjjjjj[8X[10;6H060 aaaaaaaaaaaa[11;6H061 bbbbbbbbbbbbb[12;6H062 cccccccccccccc[13;6H063 ddddddddddddddd[14;6H064 eeeeeeeeeeeeeeee[15;6H065 fffffffffffffffff[16;6H066 gggggggggggggggggg[17;6H067 hhhhhhhhhhhhhhhhhhh[18;6H068 iii[8X[19;6H069 jjjj[8X[20;6H070 aaaaa[8X[21;6H071 bbbbbb[8X[22;6H072 ccccccc[8X[23;6H073 dddddddd[8X[24;6H074 eeeeeeeee[8X[25;6H075 ffffffffff[8X[26;6H076 ggggggggggg[8X[27;6H077 hhhhhhhhhhhh[28;6H078 iiiiiiiiiiiii[29;6H079 jjjjjjjjjjjjjj[30;6H080 aaaaaaaaaaaaaaa[31;6H081 bbbbbbbbbbbbbbbb[32;6H082 ccccccccccccccccc[33;6H083 dddddddddddddddddd[34;6H084 eeeeeeeeeeeeeeeeeee[35;6H085 fff[8X[36;6H086 gggg[8X[37;6H087 hhhhh[8X[38;6H088 iiiiii[8X[39;6H089 jjjjjjj[8X[40;6H090 aaaaaaaa[8X[41;6H091 bbbbbbbbb[8X[42;6H092 cccccccccc[8X[43;6H093 ddddddddddd[8X[44;6H094 eeeeeeeeeeee[45;6H095 fffffffffffff[46;6H096 gggggggggggggg[47;6H097 hhhhhhhhhhhhhhh[48;6H098 iiiiiiiiiiiiiiii[49;6H099 jjjjjjjjjjjjjjjjj[50;7H00 aaaaaaaaaaaaaaaaaa[51;7H01 bbbbbbbbbbbbbbbbbbb[52;7H02 ccc[8X[53;7H03 dddd[8X[54;7H04 eeeee[8X[55;7H05 ffffff[8X[56;7H06 ggggggg[8X[57;6H107 hhhhhhhh[8X[58;6H108 iiiiiiiii[8X[59;6H109 jjjjjjjjjj[8X[60;6H110 aaaaaaaaaaa[8X[61;6H111 bbbbbbbbbbbb[62;6H112 ccccccccccccc[63;6H113 dddddddddddddd[64;6H114 eeeeeeeeeeeeeee[65;6H115 ffffffffffffffff[66;6H116 ggggggggggggggggg[67;6H117 hhhhhhhhhhhhhhhhhh[68;6H118 iiiiiiiiiiiiiiiiiii[69;6H119 jjj[8X[70;6H120 aaaa[8X[71;6H121 bbbbb[8X[72;6H122 cccccc[8X[73;6H123 ddddddd[8X[74;6H124 eeeeeeee[8X[75;6H125 fffffffff[8X[76;6H126 gggggggggg[8X[77;6H127 hhhhhhhhhhh[8X[78;6H128 iiiiiiiiiiii[79;6H129 jjjjjjjjjjjjj[80;6H130 aaaaaaaaaaaaaa[81;6H131 bbbbbbbbbbbbbbb[82;6H132 cccccccccccccccc[83;6H133 ddddddddddddddddd[84;6H134 eeeeeeeeeeeeeeeeee[85;6H135 fffffffffffffffffff[86;6H136 ggg[8X[87;6H137 hhhh[8X[88;6H138 iiiii[8X[89;6H139 jjjjjj[8X[90;6H140 aaaaaaa[8X[91;6H141 bbbbbbbb[8X[92;6H142 ccccccccc[8X[93;6H143 dddddddddd[8X[94;6H144 eeeeeeeeeee[8X[95;6H145 ffffffffffff[96;85H(B[m[38;2;224;226;234m[48;2;79;82;88m4,13         1[95;13H[?25h
