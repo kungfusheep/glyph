@@ -1,8 +1,11 @@
 package glyph
 
 import (
+	"math"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 type TestItem struct {
@@ -341,4 +344,235 @@ func TestCheckListStyleAcceptsLivePointer(t *testing.T) {
 	if got := buf.Get(4, 1).Style.FG; got != (RGB(0, 200, 0)) {
 		t.Fatalf("after theme reassignment FG = %v, want green — Style(&st) not read live (frozen-at-build parity gap)", got)
 	}
+}
+
+// easeRow is a fixed-height row, so a row offset and an item index differ by a known
+// factor and an assertion can name either without ambiguity.
+type easeRow struct{ Name string }
+
+// easeListFixture builds a clipped List over n single-row items, opted into ScrollEase
+// on a test clock. It returns the template, the bound offset, the selection and a paint
+// function so a test can drive frames without re-deriving the setup.
+func easeListFixture(t *testing.T, n, viewH int, dur time.Duration) (paint func() []string, sel *int, off *int, sl *selectionList, clock *time.Time) {
+	t.Helper()
+	rows := make([]easeRow, n)
+	for i := range rows {
+		rows[i].Name = "row" + strconv.Itoa(i)
+	}
+	selected := 0
+	offset := 0
+	lc := List(&rows).Selection(&selected).ScrollEase(Animate.Duration(dur)(&offset)).
+		Marker(" ").Render(func(r *easeRow) Component { return Text(&r.Name) })
+	tpl := Build(VBox.Grow(1)(lc))
+	now := time.Unix(0, 0)
+	// arm on the first frame, then take the clock over so time only moves when a test says
+	buf := NewBuffer(12, viewH)
+	tpl.Execute(buf, 12, int16(viewH))
+	list := lc.cached
+	list.ease.nowFn = func() time.Time { return now }
+	paint = func() []string {
+		b := NewBuffer(12, viewH)
+		tpl.Execute(b, 12, int16(viewH))
+		out := make([]string, viewH)
+		for y := 0; y < viewH; y++ {
+			out[y] = strings.TrimRight(b.GetLine(y), " ")
+		}
+		return out
+	}
+	return paint, &selected, &offset, list, &now
+}
+
+// A list that opts in glides: mid-ease the top row is BEHIND the target window, and it
+// arrives once the duration elapses. Without the presentation stage the first frame
+// after the move would already show the destination.
+func TestListScrollEaseGlidesToTheWindow(t *testing.T) {
+	paint, sel, _, list, clock := easeListFixture(t, 40, 6, 100*time.Millisecond)
+
+	if got := paint()[0]; got != " row0" {
+		t.Fatalf("resting top row = %q, want row0", got)
+	}
+
+	*sel = 10           // window top 5, well inside the 12-row snap threshold at this height
+	first := paint()[0] // starts the ease; still near the old position
+	*clock = clock.Add(50 * time.Millisecond)
+	mid := paint()[0]
+	*clock = clock.Add(60 * time.Millisecond)
+	settled := paint()
+
+	if first == mid {
+		t.Errorf("the offset did not move between frames: %q then %q", first, mid)
+	}
+	if !list.ease.shownSet {
+		t.Fatal("the ease never armed")
+	}
+	// at rest the same rows are visible as a snapping list would have shown: the selected
+	// row is the last fully-fitting one
+	if last := settled[len(settled)-1]; last != " row10" {
+		t.Errorf("settled bottom row = %q, want row10 — the eased list must rest where the snap would", last)
+	}
+	if list.ease.animating {
+		t.Error("the ease is still animating after its duration elapsed")
+	}
+}
+
+// A jump past the threshold snaps: easing hundreds of rows is a blur, and the widened
+// build it would cost buys nothing. The ease stays armed for the next move.
+func TestListScrollEaseSnapsPastTheThreshold(t *testing.T) {
+	paint, sel, off, list, _ := easeListFixture(t, 400, 6, 100*time.Millisecond)
+	paint()
+
+	*sel = 300 // far beyond scrollEaseSnapScreens * 6 rows
+	got := paint()
+
+	if list.ease.animating {
+		t.Error("a jump past the threshold must snap, not animate")
+	}
+	if last := got[len(got)-1]; last != " row300" {
+		t.Errorf("bottom row = %q, want row300 — the snap must land on the target window", last)
+	}
+	if list.ease.target == nil {
+		t.Error("the snap must leave the ease armed for the next move")
+	}
+	if *off != int(list.ease.shown) {
+		t.Errorf("target %d and displayed %v disagree after a snap", *off, list.ease.shown)
+	}
+}
+
+// The scrollbar writeback follows the EASED position, not the target: a bar resting at
+// the destination while rows still glide would disagree with the visible window on
+// every in-flight frame.
+func TestListScrollEaseScrollbarFollowsTheEasedPosition(t *testing.T) {
+	rows := make([]easeRow, 40)
+	for i := range rows {
+		rows[i].Name = "row" + strconv.Itoa(i)
+	}
+	selected, offset := 0, 0
+	var barOff, barVis, barTotal int
+	lc := List(&rows).Selection(&selected).
+		ScrollEase(Animate.Duration(100*time.Millisecond).Ease(EaseLinear)(&offset)).
+		ScrollState(&barOff, &barVis, &barTotal).
+		Marker(" ").Render(func(r *easeRow) Component { return Text(&r.Name) })
+	tpl := Build(VBox.Grow(1)(lc))
+	buf := NewBuffer(12, 6)
+	tpl.Execute(buf, 12, 6)
+	now := time.Unix(0, 0)
+	lc.cached.ease.nowFn = func() time.Time { return now }
+
+	selected = 16 // window top 11, inside the 12-row snap threshold at this height
+	tpl.Execute(buf, 12, 6)
+	now = now.Add(50 * time.Millisecond)
+	tpl.Execute(buf, 12, 6)
+
+	mid := barOff
+	if mid >= offset {
+		t.Errorf("mid-ease the bar (%d) must lag the target (%d)", mid, offset)
+	}
+	// row-stepped by construction: the bound offset is an integer, so the bar tracks the
+	// eased position ROUNDED rather than a sub-row value
+	if want := int(math.Round(lc.cached.ease.shown)); mid != want {
+		t.Errorf("bar offset %d does not track the eased position %v (rounded %d)", mid, lc.cached.ease.shown, want)
+	}
+
+	now = now.Add(60 * time.Millisecond)
+	tpl.Execute(buf, 12, 6)
+	if barOff != offset {
+		t.Errorf("at rest the bar (%d) and the target (%d) must agree", barOff, offset)
+	}
+}
+
+// Mid-tween the frame builds ONE window's worth of items, never the union of the whole
+// traversal. A long jump that widened the build would defeat the culling contract.
+//
+// This one is a TRIPWIRE, not a proof: with the eased stage removed it still passes,
+// because a snapping list never widens the build in the first place. It exists to fail
+// on a future implementation that culls across the traversal instead of from the current
+// eased position — read it as guarding that, not as evidence the stage works.
+func TestListScrollEaseCullStaysBoundedMidTween(t *testing.T) {
+	rows := make([]easeRow, 400)
+	for i := range rows {
+		rows[i].Name = "row" + strconv.Itoa(i)
+	}
+	selected, offset := 0, 0
+	built := 0
+	lc := List(&rows).Selection(&selected).
+		ScrollEase(Animate.Duration(100 * time.Millisecond)(&offset)).
+		Marker(" ").Render(func(r *easeRow) Component { built++; return Text(&r.Name) })
+	tpl := Build(VBox.Grow(1)(lc))
+	buf := NewBuffer(12, 6)
+	tpl.Execute(buf, 12, 6)
+	now := time.Unix(0, 0)
+	lc.cached.ease.nowFn = func() time.Time { return now }
+
+	selected = 8 // an eased move, inside the snap threshold
+	tpl.Execute(buf, 12, 6)
+	now = now.Add(50 * time.Millisecond)
+	built = 0
+	tpl.Execute(buf, 12, 6)
+
+	if built > 12 {
+		t.Errorf("an in-flight frame built %d rows; a bounded cull is one window's worth (~6, allow the edge row and marker pass)", built)
+	}
+}
+
+// Zero allocations on TWEEN frames specifically. A resting frame staying allocation-free
+// proves nothing about the frames where this feature does its work.
+func TestListScrollEaseTweenFrameAllocatesNothing(t *testing.T) {
+	rows := make([]easeRow, 60)
+	for i := range rows {
+		rows[i].Name = "row" + strconv.Itoa(i)
+	}
+	selected, offset := 0, 0
+	lc := List(&rows).Selection(&selected).
+		ScrollEase(Animate.Duration(10 * time.Second)(&offset)).
+		Marker(" ").Render(func(r *easeRow) Component { return Text(&r.Name) })
+	tpl := Build(VBox.Grow(1)(lc))
+	buf := NewBuffer(12, 6)
+	tpl.Execute(buf, 12, 6)
+	now := time.Unix(0, 0)
+	lc.cached.ease.nowFn = func() time.Time { return now }
+
+	selected = 8
+	tpl.Execute(buf, 12, 6)
+	now = now.Add(time.Second) // well inside a 10s ease, so every run below is mid-tween
+
+	if !lc.cached.ease.animating {
+		t.Fatal("the fixture must be mid-tween for this to measure anything")
+	}
+	got := testing.AllocsPerRun(30, func() { tpl.Execute(buf, 12, 6) })
+	if !lc.cached.ease.animating {
+		t.Fatal("the ease settled during the measurement; it no longer measures tween frames")
+	}
+	if got != 0 {
+		t.Errorf("a tween frame allocates %v times, want 0", got)
+	}
+}
+
+// One list holds one ease, so an offset bound to a ForEach element field cannot work:
+// the state is shared while the pointer differs. Measured before the refusal existed —
+// the target resolved to the compile prototype, writes landed there, and BOTH lists
+// painted from a frozen zero offset, ignoring their own selections. This is the
+// binding day-one guard for ScrollEase: it refuses at build instead.
+func TestListScrollEaseRefusesAPerItemOffset(t *testing.T) {
+	type outer struct {
+		Rows []easeRow
+		Sel  int
+		Off  int
+	}
+	outers := []outer{{Rows: make([]easeRow, 4)}, {Rows: make([]easeRow, 4)}}
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("a per-item ScrollEase offset must be refused at build, not silently frozen")
+		}
+		if msg, _ := r.(string); !strings.Contains(msg, "ScrollEase") {
+			t.Errorf("panic %q does not name the surface that refused", r)
+		}
+	}()
+
+	Build(VBox.Grow(1)(ForEach(&outers, func(o *outer) Component {
+		return VBox.Height(4)(List(&o.Rows).Selection(&o.Sel).
+			ScrollEase(Animate(&o.Off)).
+			Marker(" ").Render(func(r *easeRow) Component { return Text(&r.Name) }))
+	})))
 }

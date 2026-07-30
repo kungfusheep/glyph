@@ -4145,6 +4145,25 @@ func (t *Template) compileSelectionList(v *selectionList, parent int16, depth in
 		iterTmpl = t.compileSubTemplate(templateResult, dummyBase, compileSize)
 	}
 
+	// ScrollEase holds ONE ease state on the list, so a per-item target cannot work: the
+	// state would be shared while the pointer differed. Measured before refusing — the
+	// target resolves to the compile prototype, writes land there, and every item's list
+	// paints from a frozen zero offset and stops following its own selection. Refuse at
+	// build rather than ship that silently; per-item easing needs per-item state and has
+	// no consumer asking for it (ADR 128).
+	if v.easeSpec != nil && elemBase != nil {
+		var target *int
+		switch o := v.easeSpec.(type) {
+		case *int:
+			target = o
+		case tweenNode:
+			target, _ = o.getTarget().(*int)
+		}
+		if target != nil && isWithinRange(unsafe.Pointer(target), elemBase, elemSize) {
+			panic("ListC.ScrollEase: the offset must not be a field of the ForEach element — one list holds one ease, so a per-item target freezes on the prototype. Bind an offset outside the element.")
+		}
+	}
+
 	ext := &opSelectionList{
 		listPtr:      v,
 		selectedPtr:  v.Selected,
@@ -9642,6 +9661,7 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 	// item's measured height), not item counts — rows are what the user sees scroll, so
 	// a ScrollbarDyn tracking these matches the visual exactly even when rows have
 	// different heights (e.g. multi-line comments). Matches the Layer scrollbar's model.
+	topShift := 0 // rows of the first painted item hidden above the viewport top
 	if ext.listPtr != nil {
 		totalRows, offRows, visRows := 0, 0, 0
 		for i := 0; i < visibleLen && i < len(ext.geoms); i++ {
@@ -9653,6 +9673,65 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 				visRows += h
 			}
 		}
+
+		// The eased presentation stage (ADR 128). The window computed above is the TARGET;
+		// when a list opts in, paint starts from a row offset gliding toward it instead of
+		// snapping to it. The window, the selection and the culling contract are untouched,
+		// so a list that never opts in paints exactly as it did before.
+		if availableRows > 0 && ext.listPtr.easeSpec != nil {
+			ext.listPtr.armEase(offRows)
+			if target := ext.listPtr.ease.target; target != nil {
+				maxRows := totalRows - availableRows
+				if maxRows < 0 {
+					maxRows = 0
+				}
+				*target = offRows
+				// past a couple of screenfuls a glide is a blur, so jump — by moving the
+				// DISPLAYED position, which leaves the ease armed for the next move
+				if ext.listPtr.ease.shownSet {
+					limit := scrollEaseSnapScreens * availableRows
+					if d := offRows - ext.listPtr.ease.observe(maxRows); d > limit || -d > limit {
+						ext.listPtr.ease.shown = float64(offRows)
+						ext.listPtr.ease.animating = false
+					}
+				}
+				easedRows := ext.listPtr.ease.advance(maxRows)
+
+				// Paint from the eased row: find the item containing it and hide the part of
+				// that item above the viewport top (the existing clip rect covers it). endIdx
+				// then fills FORWARD from there, so an in-flight frame builds one window's
+				// worth of items and never the union of the whole traversal.
+				row, first := 0, 0
+				for i := 0; i < visibleLen && i < len(ext.geoms); i++ {
+					h := int(ext.geoms[i].H)
+					if row+h > easedRows {
+						first, topShift = i, easedRows-row
+						break
+					}
+					row += h
+					first = i + 1
+				}
+				startIdx = first
+				used := -topShift
+				endIdx = first
+				for i := first; i < visibleLen && i < len(ext.geoms); i++ {
+					if used >= availableRows {
+						break
+					}
+					used += int(ext.geoms[i].H)
+					endIdx = i + 1
+				}
+				if ext.listPtr.MaxVisible > 0 && endIdx > first+ext.listPtr.MaxVisible {
+					endIdx = first + ext.listPtr.MaxVisible
+				}
+				// the bar presents what is ON SCREEN, so it tracks the eased position; a bar
+				// resting at the destination would disagree with the visible window every
+				// in-flight frame
+				offRows = easedRows
+				visRows = availableRows
+			}
+		}
+
 		if ext.listPtr.scrollTotalPtr != nil {
 			*ext.listPtr.scrollTotalPtr = totalRows
 		}
@@ -9701,7 +9780,7 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		buf.PushClip(0, int(absY), buf.Width(), int(t.clipMaxY))
 		defer buf.PopClip()
 	}
-	y := int(absY)
+	y := int(absY) - topShift // topShift is 0 unless an eased list is mid-glide
 	for i := startIdx; i < endIdx; i++ {
 		itemH := int(ext.geoms[i].H)
 		isSelected := i == selectedIdx

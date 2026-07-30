@@ -78,7 +78,7 @@ type scrollEase struct {
 	target    *int
 	dur       time.Duration
 	fn        func(float64) float64
-	shown     float64   // current displayed offset (eased); valid once shownSet
+	shown     float64 // current displayed offset (eased); valid once shownSet
 	shownSet  bool
 	animFrom  float64   // displayed value when the current ease began
 	animT0    time.Time // when the current ease began

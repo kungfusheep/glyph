@@ -3,6 +3,7 @@ package glyph
 
 import (
 	"math"
+	"time"
 	"unsafe"
 )
 
@@ -563,7 +564,54 @@ type selectionList struct {
 	scrollOffsetPtr  *int // window top index
 	scrollVisiblePtr *int // visible row count
 	scrollTotalPtr   *int // total item count
+
+	// Eased row offset (ADR 128), opt-in via ListC.ScrollEase. The WINDOW is computed
+	// exactly as it always was; this only changes where paint starts, so a list that
+	// never opts in renders identical frames. easeSpec is the binding as written
+	// (*int or a tweenNode); ease is the state machine, armed on the first render.
+	easeSpec  any
+	ease      scrollEase
+	easeArmed bool
 }
+
+// scrollEaseSnapRows is how far the target may move before the ease gives up and jumps.
+// Easing hundreds of rows reads as a blur and costs the widened build for nothing, so
+// past a couple of screenfuls the offset snaps. Screenfuls, not a constant: the same
+// jump is a glide on a tall pane and a blur on a short one.
+const scrollEaseSnapScreens = 2
+
+// armEase binds the ScrollEase spec on first render, seeding the displayed position at
+// cur so the first frame does not glide in from zero. Re-arming is a no-op, so the
+// duration and easing stay whatever the latest spelling says.
+func (s *selectionList) armEase(cur int) {
+	var (
+		target *int
+		dur    time.Duration
+		fn     func(float64) float64
+	)
+	switch o := s.easeSpec.(type) {
+	case *int:
+		target = o
+	case tweenNode:
+		if p, ok := o.getTarget().(*int); ok {
+			target = p
+			dur = o.getTweenDuration()
+			fn = o.getTweenEasing()
+		}
+	}
+	if target == nil {
+		s.easeSpec = nil // an unusable spelling stays off rather than snapping every frame
+		return
+	}
+	if !s.easeArmed {
+		s.easeArmed = true
+		*target = cur
+	}
+	s.ease.arm(target, dur, fn, cur)
+}
+
+// easeTarget is the bound offset the list writes its window position to each frame.
+func (s *selectionList) easeTarget() *int { return s.ease.target }
 
 // ensureVisible adjusts scroll offset so selected item is visible.
 func (s *selectionList) ensureVisible() {
@@ -873,13 +921,13 @@ type textInput struct {
 	SyncBound bool    // Sync Value into Field when Field is Glyph-owned internal state
 
 	// Common options
-	Placeholder      string // Shown when value is empty
-	Width            int    // Field width (0 = fill available)
-	Mask             rune   // Password mask character (0 = none)
-	Style            Style  // Text style
-	PlaceholderStyle Style  // Placeholder style (zero = dim text)
-	CursorStyle      Style  // Cursor style (zero = reverse video)
-	MultiLine        bool   // wrap long text across lines instead of scrolling horizontally
+	Placeholder      string        // Shown when value is empty
+	Width            int           // Field width (0 = fill available)
+	Mask             rune          // Password mask character (0 = none)
+	Style            Style         // Text style
+	PlaceholderStyle Style         // Placeholder style (zero = dim text)
+	CursorStyle      Style         // Cursor style (zero = reverse video)
+	MultiLine        bool          // wrap long text across lines instead of scrolling horizontally
 	StyleRanges      *[]StyleRange // optional per-range styling over the value (ADR 70)
 }
 

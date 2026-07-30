@@ -182,7 +182,7 @@ func (f VBoxFn) Fill(c any) VBoxFn {
 			v.fillCond = val
 		case tweenNode:
 			v.fillCond = val
-	case OscC:
+		case OscC:
 			v.fillCond = val
 		}
 		return v
@@ -203,7 +203,7 @@ func (f VBoxFn) Style(s any) VBoxFn {
 			v.localStyleCond = val
 		case tweenNode:
 			v.localStyleCond = val
-	case OscC:
+		case OscC:
 			v.localStyleCond = val
 		}
 		return v
@@ -255,7 +255,7 @@ func (f VBoxFn) Gap(g any) VBoxFn {
 			v.gapCond = val
 		case tweenNode:
 			v.gapCond = val
-	case OscC:
+		case OscC:
 			v.gapCond = val
 		}
 		return v
@@ -331,7 +331,7 @@ func (f VBoxFn) Width(w any) VBoxFn {
 			v.widthCond = val
 		case tweenNode:
 			v.widthCond = val
-	case OscC:
+		case OscC:
 			v.widthCond = val
 		}
 		return v
@@ -355,7 +355,7 @@ func (f VBoxFn) Height(h any) VBoxFn {
 			v.heightCond = val
 		case tweenNode:
 			v.heightCond = val
-	case OscC:
+		case OscC:
 			v.heightCond = val
 		}
 		return v
@@ -415,7 +415,7 @@ func (f VBoxFn) Grow(g any) VBoxFn {
 			v.flexGrowCond = val
 		case tweenNode:
 			v.flexGrowCond = val
-	case OscC:
+		case OscC:
 			v.flexGrowCond = val
 		}
 		return v
@@ -584,7 +584,7 @@ func (f HBoxFn) Fill(c any) HBoxFn {
 			h.fillCond = val
 		case tweenNode:
 			h.fillCond = val
-	case OscC:
+		case OscC:
 			h.fillCond = val
 		}
 		return h
@@ -605,7 +605,7 @@ func (f HBoxFn) Style(s any) HBoxFn {
 			h.localStyleCond = val
 		case tweenNode:
 			h.localStyleCond = val
-	case OscC:
+		case OscC:
 			h.localStyleCond = val
 		}
 		return h
@@ -657,7 +657,7 @@ func (f HBoxFn) Gap(g any) HBoxFn {
 			h.gapCond = val
 		case tweenNode:
 			h.gapCond = val
-	case OscC:
+		case OscC:
 			h.gapCond = val
 		}
 		return h
@@ -733,7 +733,7 @@ func (f HBoxFn) Width(w any) HBoxFn {
 			h.widthCond = val
 		case tweenNode:
 			h.widthCond = val
-	case OscC:
+		case OscC:
 			h.widthCond = val
 		}
 		return h
@@ -757,7 +757,7 @@ func (f HBoxFn) Height(h any) HBoxFn {
 			c.heightCond = val
 		case tweenNode:
 			c.heightCond = val
-	case OscC:
+		case OscC:
 			c.heightCond = val
 		}
 		return c
@@ -817,7 +817,7 @@ func (f HBoxFn) Grow(g any) HBoxFn {
 			h.flexGrowCond = val
 		case tweenNode:
 			h.flexGrowCond = val
-	case OscC:
+		case OscC:
 			h.flexGrowCond = val
 		}
 		return h
@@ -2555,6 +2555,7 @@ type ListC[T any] struct {
 	scrollOffsetPtr  *int // ScrollState writeback (see ScrollState)
 	scrollVisiblePtr *int
 	scrollTotalPtr   *int
+	easeSpec         any            // ScrollEase binding (see ScrollEase)
 	cached           *selectionList // cached instance for consistent reference
 	declaredBindings []binding
 }
@@ -2565,6 +2566,22 @@ type ListC[T any] struct {
 // have different heights. Pair with ScrollbarDyn(total, visible, offset) to put a live
 // scrollbar beside a List — the List manages its own scroll internally, so this is how
 // an external scrollbar tracks it (the List analogue of ScrollbarForLayer).
+// ScrollEase makes the list paint through a continuous row offset that eases toward the
+// window's position, instead of snapping to it (ADR 128). Pass a bound *int, or wrap it
+// in Animate to ease over a duration:
+//
+//	List(&rows).Selection(&sel).ScrollEase(Animate(&rowOffset))
+//
+// The window, the selection and the data-layer culling are untouched — this is a
+// presentation stage. A list that does not call it renders exactly as before.
+//
+// A jump of more than two screenfuls snaps rather than easing: a long glide is a blur,
+// and the widened build it would cost buys nothing.
+func (l *ListC[T]) ScrollEase(offset any) *ListC[T] {
+	l.easeSpec = offset
+	return l
+}
+
 func (l *ListC[T]) ScrollState(offset, visible, total *int) *ListC[T] {
 	l.scrollOffsetPtr, l.scrollVisiblePtr, l.scrollTotalPtr = offset, visible, total
 	if l.cached != nil {
@@ -2758,6 +2775,7 @@ func (l *ListC[T]) toSelectionList() *selectionList {
 		sl.scrollOffsetPtr = l.scrollOffsetPtr
 		sl.scrollVisiblePtr = l.scrollVisiblePtr
 		sl.scrollTotalPtr = l.scrollTotalPtr
+		sl.easeSpec = l.easeSpec
 		sl.StyleDyn = l.styleDyn
 		sl.SelectedStyleDyn = l.selectedStyleDyn
 		if l.render != nil {
