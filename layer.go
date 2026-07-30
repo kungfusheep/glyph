@@ -87,16 +87,9 @@ type scrollEase struct {
 	nowFn     func() time.Time // clock hook for tests; nil = time.Now
 }
 
-// now returns the layer's clock (real time, or a test hook).
-func (l *Layer) now() time.Time {
-	if l.ease.nowFn != nil {
-		return l.ease.nowFn()
-	}
-	return time.Now()
-}
-
-// clock returns the ease's clock (real time, or a test hook). The ease owns it so a
-// driver other than a Layer can advance one on a test clock too.
+// clock returns the ease's clock (real time, or a test hook). The ease OWNS it: a second
+// accessor over the same field is what made Layer.now() call itself through nowFn and
+// overflow the stack on the only path with no test clock installed.
 func (e *scrollEase) clock() time.Time {
 	if e.nowFn != nil {
 		return e.nowFn()
@@ -471,9 +464,6 @@ func (l *Layer) DisplayedScrollY() int {
 func (l *Layer) displayedOffsetLocked() int {
 	if l.ease.target == nil {
 		return l.scrollY
-	}
-	if l.ease.nowFn == nil {
-		l.ease.nowFn = l.now // the layer's clock hook drives the shared state machine
 	}
 	return l.ease.advance(l.maxScroll)
 }

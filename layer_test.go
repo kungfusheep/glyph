@@ -941,8 +941,8 @@ func TestLayerViewScrollOffsetGlidesEndToEnd(t *testing.T) {
 	clock := time.Unix(1000, 0)
 	l.ease.nowFn = func() time.Time { return clock }
 
-	_ = boundRead(l)   // first read establishes shown=0
-	l.ScrollTo(100)    // a jump key: target 100, displayed still eases from 0
+	_ = boundRead(l) // first read establishes shown=0
+	l.ScrollTo(100)  // a jump key: target 100, displayed still eases from 0
 
 	if got := l.ScrollY(); got != 100 {
 		t.Fatalf("ScrollY is the destination immediately: got %d, want 100", got)
@@ -979,9 +979,9 @@ func TestLayerViewScrollOffsetGlidesEndToEnd(t *testing.T) {
 func TestLayerViewScrollOffsetNilUnarms(t *testing.T) {
 	l, _, advance := easedLayer(t, 100) // maxScroll 90, 100ms linear ease
 
-	_ = boundRead(l)  // establish shown=0
-	l.ScrollTo(80)    // target 80, displayed still eases from 0
-	_ = boundRead(l)  // the blit after a retarget starts the ease, at t0
+	_ = boundRead(l) // establish shown=0
+	l.ScrollTo(80)   // target 80, displayed still eases from 0
+	_ = boundRead(l) // the blit after a retarget starts the ease, at t0
 	advance(50 * time.Millisecond)
 	if got := boundRead(l); got != 40 {
 		t.Fatalf("setup: mid-glide displayed=%d, want 40", got)
@@ -1016,5 +1016,31 @@ func TestLayerViewScrollOffsetNilOnUnarmedIsNoop(t *testing.T) {
 
 	if got := l.ScrollY(); got != 25 {
 		t.Errorf("never-armed layer disturbed by unarm: ScrollY=%d, want 25", got)
+	}
+}
+
+// The layer's clock must not be installed into the hook the clock itself reads.
+// Assigning Layer.now to ease.nowFn made now() call nowFn() call now(), unbounded —
+// a stack overflow on the ONLY path a real consumer takes, since every other ease
+// test installs a test clock first and so never reaches the nil-hook branch.
+func TestLayerEaseAdvancesWithoutATestClock(t *testing.T) {
+	l := NewLayer()
+	b := NewBuffer(10, 40)
+	for y := 0; y < 40; y++ {
+		b.Set(0, y, Cell{Rune: 'x'})
+	}
+	l.SetBuffer(b)
+
+	off := 0
+	tpl := Build(VBox.Grow(1)(LayerView(l).ScrollOffset(Animate(&off))))
+	buf := NewBuffer(10, 5)
+	tpl.Execute(buf, 10, 5) // arms the ease
+
+	l.ScrollTo(20)
+	tpl.Execute(buf, 10, 5) // advances it — no nowFn installed anywhere
+	tpl.Execute(buf, 10, 5)
+
+	if l.ease.nowFn != nil {
+		t.Error("the ease must not have a clock hook installed by the render path — that is the recursion")
 	}
 }
