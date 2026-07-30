@@ -95,6 +95,103 @@ func (l *Layer) now() time.Time {
 	return time.Now()
 }
 
+// clock returns the ease's clock (real time, or a test hook). The ease owns it so a
+// driver other than a Layer can advance one on a test clock too.
+func (e *scrollEase) clock() time.Time {
+	if e.nowFn != nil {
+		return e.nowFn()
+	}
+	return time.Now()
+}
+
+// arm binds target as the source of truth for the eased offset, seeding the displayed
+// position from cur so the first frame does not jump. A nil target unarms and reports
+// the position to resume at, so the caller can restore its own unbound field.
+//
+// It is the driver-agnostic half of Layer.armScrollOffset: the List seam arms the same
+// state machine over its own row offset (ADR 128).
+func (e *scrollEase) arm(target *int, dur time.Duration, fn func(float64) float64, cur int) (resumeAt int, unarmed bool) {
+	if target == nil {
+		if e.target != nil {
+			resumeAt = *e.target
+			e.target = nil
+			e.animating = false
+			e.shownSet = false
+			return resumeAt, true
+		}
+		return 0, false
+	}
+	if e.target != target {
+		if e.target != nil {
+			*target = *e.target
+		} else {
+			*target = cur
+		}
+		e.target = target
+	}
+	// duration and easing are configuration, not position — always the latest spelling
+	e.dur = dur
+	e.fn = fn
+	return 0, false
+}
+
+// observe reports where the content is drawn RIGHT NOW without advancing anything, so
+// a reader on another goroutine cannot perturb animation timing.
+func (e *scrollEase) observe(maxScroll int) int {
+	if !e.shownSet {
+		return clampInt(*e.target, 0, maxScroll)
+	}
+	return int(math.Round(e.shown))
+}
+
+// advance moves the ease one frame toward its target and returns the offset to draw at.
+// It writes the clamp back to the target so a content grow snaps rather than leaving the
+// target out of range. animating is left true while an ease is in flight.
+func (e *scrollEase) advance(maxScroll int) int {
+	target := clampInt(*e.target, 0, maxScroll)
+	*e.target = target // write back the clamp (grow-snap guard)
+
+	if e.dur <= 0 || !e.shownSet {
+		e.shown = float64(target)
+		e.shownSet = true
+		e.animating = false
+		return target
+	}
+	// (re)start an ease when the target moves away from where we're shown/heading.
+	if int(math.Round(e.shown)) == target {
+		e.animating = false
+		e.shown = float64(target)
+		return target
+	}
+	if !e.animating || e.animTo != target {
+		e.animFrom = e.shown
+		e.animT0 = e.clock()
+		e.animTo = target
+		e.animating = true
+	}
+	p := float64(e.clock().Sub(e.animT0)) / float64(e.dur)
+	if p >= 1 {
+		e.shown = float64(target)
+		e.animating = false
+		return target
+	}
+	if e.fn != nil {
+		p = e.fn(p)
+	}
+	e.shown = e.animFrom + p*(float64(target)-e.animFrom)
+	return int(math.Round(e.shown))
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
 // NewLayer creates a new empty layer.
 func NewLayer() *Layer {
 	return &Layer{}
@@ -310,27 +407,9 @@ func (l *Layer) armScrollOffset(offset any) {
 	l.scrollMu.Lock()
 	defer l.scrollMu.Unlock()
 
-	if target == nil {
-		if l.ease.target != nil {
-			l.scrollY = *l.ease.target // resume at the destination, not the frozen legacy 0
-			l.ease.target = nil
-			l.ease.animating = false
-			l.ease.shownSet = false
-		}
-		return
+	if resumeAt, unarmed := l.ease.arm(target, dur, fn, l.scrollY); unarmed {
+		l.scrollY = resumeAt // resume at the destination, not the frozen legacy 0
 	}
-
-	if l.ease.target != target {
-		if l.ease.target != nil {
-			*target = *l.ease.target
-		} else {
-			*target = l.scrollY
-		}
-		l.ease.target = target
-	}
-	// duration and easing are configuration, not position — always the latest spelling
-	l.ease.dur = dur
-	l.ease.fn = fn
 }
 
 // scrollToLocked clamps and sets the scroll position; caller holds scrollMu. When an
@@ -371,17 +450,7 @@ func (l *Layer) shownOffsetLocked() int {
 	if l.ease.target == nil {
 		return l.scrollY
 	}
-	if !l.ease.shownSet {
-		target := *l.ease.target
-		if target < 0 {
-			target = 0
-		}
-		if target > l.maxScroll {
-			target = l.maxScroll
-		}
-		return target
-	}
-	return int(math.Round(l.ease.shown))
+	return l.ease.observe(l.maxScroll)
 }
 
 // DisplayedScrollY returns the offset the content is currently DRAWN at. While an eased
@@ -403,50 +472,10 @@ func (l *Layer) displayedOffsetLocked() int {
 	if l.ease.target == nil {
 		return l.scrollY
 	}
-	target := *l.ease.target
-	if target < 0 {
-		target = 0
+	if l.ease.nowFn == nil {
+		l.ease.nowFn = l.now // the layer's clock hook drives the shared state machine
 	}
-	if target > l.maxScroll {
-		target = l.maxScroll
-	}
-	*l.ease.target = target // write back the clamp (grow-snap guard)
-
-	if l.ease.dur <= 0 {
-		l.ease.shown = float64(target)
-		l.ease.shownSet = true
-		l.ease.animating = false
-		return target
-	}
-	if !l.ease.shownSet {
-		l.ease.shown = float64(target)
-		l.ease.shownSet = true
-		l.ease.animating = false
-		return target
-	}
-	// (re)start an ease when the target moves away from where we're shown/heading.
-	if int(math.Round(l.ease.shown)) == target {
-		l.ease.animating = false
-		l.ease.shown = float64(target)
-		return target
-	}
-	if !l.ease.animating || l.ease.animTo != target {
-		l.ease.animFrom = l.ease.shown
-		l.ease.animT0 = l.now()
-		l.ease.animTo = target
-		l.ease.animating = true
-	}
-	p := float64(l.now().Sub(l.ease.animT0)) / float64(l.ease.dur)
-	if p >= 1 {
-		l.ease.shown = float64(target)
-		l.ease.animating = false
-		return target
-	}
-	if l.ease.fn != nil {
-		p = l.ease.fn(p)
-	}
-	l.ease.shown = l.ease.animFrom + p*(float64(target)-l.ease.animFrom)
-	return int(math.Round(l.ease.shown))
+	return l.ease.advance(l.maxScroll)
 }
 
 // ScrollTo sets the scroll position, clamping to valid range.
