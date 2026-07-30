@@ -2577,6 +2577,12 @@ type ListC[T any] struct {
 //
 // A jump of more than two screenfuls snaps rather than easing: a long glide is a blur,
 // and the widened build it would cost buys nothing.
+//
+// Once a list eases, the offset ScrollState publishes is a PRESENTATION value: it reports
+// where the rows are drawn right now, not where the window is. A test that renders in a
+// tight loop sees it barely move, because easing advances on the wall clock. Assert on the
+// offset bound HERE instead — that one is the window position, written every frame with no
+// easing applied.
 func (l *ListC[T]) ScrollEase(offset any) *ListC[T] {
 	l.easeSpec = offset
 	return l
