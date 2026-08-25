@@ -2560,12 +2560,6 @@ type ListC[T any] struct {
 	declaredBindings []binding
 }
 
-// ScrollState binds three *int that the list writes each render, all in SCREEN ROWS:
-// the rows scrolled above the window (offset), the visible row count, and the total
-// content height. Rows (not item counts) so the scrollbar stays accurate when items
-// have different heights. Pair with ScrollbarDyn(total, visible, offset) to put a live
-// scrollbar beside a List — the List manages its own scroll internally, so this is how
-// an external scrollbar tracks it (the List analogue of ScrollbarForLayer).
 // ScrollEase makes the list paint through a continuous row offset that eases toward the
 // window's position, instead of snapping to it (ADR 128). Pass a bound *int, or wrap it
 // in Animate to ease over a duration:
@@ -2588,14 +2582,17 @@ func (l *ListC[T]) ScrollEase(offset any) *ListC[T] {
 	return l
 }
 
-// ScrollState publishes the list's scroll position into three bound ints, so a scrollbar
-// or a status line can read it without the list owning either. All three count ROWS, not
-// items, and all three are written every frame: offset is the row the window starts at,
-// visible the rows it shows, and total the rows behind it.
+// ScrollState binds three *int the list writes every render, all in SCREEN ROWS: offset
+// is the rows scrolled above the window, visible the row count the window shows, and
+// total the content height. Rows rather than item counts, so a scrollbar stays accurate
+// when items have different heights.
 //
-// Pair it with ScrollbarDyn to give a List a live scrollbar the way a Layer has one:
+// A List manages its own scroll internally, so this is how an external scrollbar tracks
+// it — the List analogue of ScrollbarForLayer. Note the argument orders are reverses of
+// each other:
 //
 //	List(&rows).Selection(&sel).ScrollState(&off, &vis, &total)
+//	ScrollbarDyn(&total, &vis, &off)
 //
 // Once a list eases (see ScrollEase), offset reports the EASED row rather than the window
 // target, because a bar resting at the destination would disagree with the visible window
