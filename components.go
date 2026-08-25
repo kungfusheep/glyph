@@ -2588,6 +2588,18 @@ func (l *ListC[T]) ScrollEase(offset any) *ListC[T] {
 	return l
 }
 
+// ScrollState publishes the list's scroll position into three bound ints, so a scrollbar
+// or a status line can read it without the list owning either. All three count ROWS, not
+// items, and all three are written every frame: offset is the row the window starts at,
+// visible the rows it shows, and total the rows behind it.
+//
+// Pair it with ScrollbarDyn to give a List a live scrollbar the way a Layer has one:
+//
+//	List(&rows).Selection(&sel).ScrollState(&off, &vis, &total)
+//
+// Once a list eases (see ScrollEase), offset reports the EASED row rather than the window
+// target, because a bar resting at the destination would disagree with the visible window
+// on every in-flight frame.
 func (l *ListC[T]) ScrollState(offset, visible, total *int) *ListC[T] {
 	l.scrollOffsetPtr, l.scrollVisiblePtr, l.scrollTotalPtr = offset, visible, total
 	if l.cached != nil {
