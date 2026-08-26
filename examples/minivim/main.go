@@ -1630,7 +1630,7 @@ func main() {
 	initTextObjectDefs()
 
 	// Load own source file for demo
-	fileName := "cmd/minivim/main.go"
+	fileName := "examples/minivim/main.go"
 	lines := loadFile(fileName)
 	if lines == nil {
 		lines = []string{"Could not load file", "Press 'q' to quit"}

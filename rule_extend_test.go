@@ -122,7 +122,7 @@ func TestLeadingTrailingVRuleLayout(t *testing.T) {
 }
 
 // TestAboutMeLayout tests the exact about-me layout with leading/trailing VRules
-// and double HRule, matching the cmd/about-me main.go structure.
+// and double HRule, matching the examples/about-me main.go structure.
 func TestAboutMeLayout(t *testing.T) {
 	view := VBox.Border(BorderSingle).FitContent()(
 		HRule().Extend(),

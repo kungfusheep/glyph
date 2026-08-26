@@ -927,7 +927,7 @@ func TestLayerContentSwapResetsThePairWhenArmed(t *testing.T) {
 // LayerView armed through the public ScrollOffset(Animate(...)) API, driven by the same
 // ScrollTo the demo's key handlers call, eases the DISPLAYED offset toward the target
 // over the animation window rather than snapping. This is what ADR 137 buys a bare
-// LayerView pane — arming lives on the mount, no ScrollView wrapper. cmd/scrolldemo
+// LayerView pane — arming lives on the mount, no ScrollView wrapper. examples/scrolldemo
 // wires exactly this; the trace it produces is logged for a human to eyeball.
 func TestLayerViewScrollOffsetGlidesEndToEnd(t *testing.T) {
 	l := NewLayer()
@@ -935,7 +935,7 @@ func TestLayerViewScrollOffsetGlidesEndToEnd(t *testing.T) {
 	l.SetViewport(80, 20) // maxScroll 980
 
 	cell := ScrollState()
-	// the exact spelling cmd/scrolldemo uses, only with a pinned duration/ease
+	// the exact spelling examples/scrolldemo uses, only with a pinned duration/ease
 	Build(VBox(LayerView(l).ScrollOffset(Animate.Duration(280 * time.Millisecond).Ease(EaseLinear)(cell)).Grow(1)))
 
 	clock := time.Unix(1000, 0)

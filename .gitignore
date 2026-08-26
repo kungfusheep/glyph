@@ -1,4 +1,4 @@
-# compiled binaries — anchored to root so cmd/ subdirs are not affected
+# compiled binaries — anchored to root so examples/ subdirs are not affected
 /postprocessdemo
 /avionics
 /commandcenter

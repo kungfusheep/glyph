@@ -43,5 +43,5 @@ If in doubt, follow the style of existing code.
 
 Use [GitHub Issues](https://github.com/kungfusheep/glyph/issues). Include Go version, OS, terminal emulator, and a minimal reproduction.
 
-You can run `go run github.com/kungfusheep/glyph/cmd/dr@latest` to get an issue-friendly diagnostic report. 
+You can run `go run github.com/kungfusheep/glyph/examples/dr@latest` to get an issue-friendly diagnostic report. 
 

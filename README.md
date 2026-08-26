@@ -21,21 +21,21 @@ VBox.Border(BorderDouble).Title("SYS").FitContent()(
 - **Components.** Lists, tables, inputs, fuzzy filtering, sparklines, tabs, tree views, overlays, vim bindings, theming.
 - **Your data, directly.** Pass a pointer; glyph reads the current value every update.
 
-## Demos
+## Examples
 
-Run any of the included demos to see the framework in action:
+Every example app lives in `examples/`. Run any of them to see the framework in action:
 
-| Demo | Description |
+| Example | Description |
 |------|-------------|
-| `go run ./cmd/hero` | The hero screenshot above |
-| `go run ./cmd/todo` | Todo app with checklist |
-| `go run ./cmd/glyph-fzf` | Fuzzy finder with FilterList |
-| `go run ./cmd/happypath` | Basic layout patterns |
-| `go run ./cmd/tabledemo` | AutoTable showcase |
-| `go run ./cmd/widgetdemo` | Custom widget examples |
-| `go run ./cmd/jumpdemo` | Vim-style jump labels |
-| `go run ./cmd/routing` | Multi-view navigation |
-| `go run ./cmd/minivim` | Full text editor |
+| `go run ./examples/hero` | The hero screenshot above |
+| `go run ./examples/todo` | Todo app with checklist |
+| `go run ./examples/glyph-fzf` | Fuzzy finder with FilterList |
+| `go run ./examples/happypath` | Basic layout patterns |
+| `go run ./examples/tabledemo` | AutoTable showcase |
+| `go run ./examples/widgetdemo` | Custom widget examples |
+| `go run ./examples/jumpdemo` | Vim-style jump labels |
+| `go run ./examples/routing` | Multi-view navigation |
+| `go run ./examples/minivim` | Full text editor |
 | Loads more... | |
 
 
