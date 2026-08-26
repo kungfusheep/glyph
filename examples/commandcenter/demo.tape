@@ -1,5 +1,5 @@
 # commandcenter demo recording
-# run from tui dir: vhs cmd/commandcenter/demo.tape
+# run from tui dir: vhs examples/commandcenter/demo.tape
 
 Output examples/commandcenter/demo.gif
 Output examples/commandcenter/demo.mp4
@@ -17,7 +17,7 @@ Set Theme "Builtin Dark"
 
 # build and launch
 Hide
-Type "go build ./cmd/commandcenter/ && ./commandcenter"
+Type "go build ./examples/commandcenter/ && ./commandcenter"
 Enter
 Sleep 500ms
 Show
