@@ -1,8 +1,8 @@
 # commandcenter demo recording
 # run from tui dir: vhs cmd/commandcenter/demo.tape
 
-Output cmd/commandcenter/demo.gif
-Output cmd/commandcenter/demo.mp4
+Output examples/commandcenter/demo.gif
+Output examples/commandcenter/demo.mp4
 
 Set Shell zsh
 Set FontFamily "Berkeley Mono"
