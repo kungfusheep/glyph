@@ -47,6 +47,27 @@
 /v2dashboard
 /volatilesdemo
 /widgetdemo
+/about-me
+/animated-effect
+/collapse-effect
+/dr
+/focus-effect
+/gtop
+/main
+/matchdemo
+/scatter-effect
+/wave-effect
+/cacheeffects
+/deletee
+/easeharness
+/foreach-animate
+/forme-fzf-stream
+/fuzzyfinder-stream
+/ondemo
+/spinglow
+/term
+# /term above would also hide the term package directory; re-include it
+!/term/
 
 # profiling
 *.prof
