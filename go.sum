@@ -10,6 +10,8 @@ github.com/kungfusheep/riffkey v0.0.0-20260216102013-df19649e3a0d h1:ff9WvfadD7B
 github.com/kungfusheep/riffkey v0.0.0-20260216102013-df19649e3a0d/go.mod h1:s+DoFavosJjxGBTgWlhrDKwpsDk0iL7lg3919Fmh6Ys=
 github.com/kungfusheep/riffkey v0.0.0-20260424163050-c13d19def76f h1:PqHfe+dBFpiab3iKN92zdxCjcwR3HbimyUswqLVAAQA=
 github.com/kungfusheep/riffkey v0.0.0-20260424163050-c13d19def76f/go.mod h1:s+DoFavosJjxGBTgWlhrDKwpsDk0iL7lg3919Fmh6Ys=
+github.com/kungfusheep/riffkey v0.0.0-20260826171334-5e317f83ca32 h1:W4V6VGkiMkQ2sfQwL9hVVfnDfgUpN7Zcdr7jjcwfrLw=
+github.com/kungfusheep/riffkey v0.0.0-20260826171334-5e317f83ca32/go.mod h1:s+DoFavosJjxGBTgWlhrDKwpsDk0iL7lg3919Fmh6Ys=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/mattn/go-runewidth v0.0.19 h1:v++JhqYnZuu5jSKrk9RbgF5v4CGUjqRfBm05byFGLdw=
