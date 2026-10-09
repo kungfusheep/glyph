@@ -725,6 +725,11 @@ func (l *Layer) Cursor() Cursor {
 // ScreenCursor returns the cursor position in screen coordinates.
 // This accounts for the layer's position on screen and scroll offset.
 // Returns the cursor and whether it's visible and within the viewport.
+// ScreenOffset returns where the layer's top-left corner was placed on the
+// screen by the last layout, so a Render callback can register absolute
+// positions (jump targets, for example) for content it paints.
+func (l *Layer) ScreenOffset() (x, y int) { return l.screenX, l.screenY }
+
 func (l *Layer) ScreenCursor() (x, y int, visible bool) {
 	if !l.cursor.Visible {
 		return 0, 0, false
