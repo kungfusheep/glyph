@@ -38,6 +38,8 @@ type Screen struct {
 	buf        bytes.Buffer // Reusable buffer for building output
 	forceRGB   bool         // emit all colours as true color RGB
 	syncOutput bool         // wrap frames with DEC sync output markers (\e[?2026h/l)
+	mouse      bool         // request mouse reporting while in raw mode
+	kbHeld     bool         // an OSC 523 control=app report went out; released on exit
 
 	// Synchronization - protects buffer access during resize
 	mu sync.Mutex
@@ -183,7 +185,10 @@ func (s *Screen) EnterRawMode() error {
 	s.writeString("\x1b[H")      // Move cursor to home position
 	s.writeString("\x1b[?25l")   // Hide cursor
 	s.writeString("\x1b[?2004h") // Enable bracketed paste mode
-	s.syncOutput = true          // wrap frames with synchronized output (reduces tearing)
+	if s.mouse {
+		s.writeString("\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h") // button, drag, motion, SGR coordinates
+	}
+	s.syncOutput = true // wrap frames with synchronized output (reduces tearing)
 
 	return nil
 }
@@ -241,7 +246,11 @@ func (s *Screen) ExitRawMode() error {
 	}
 
 	// Disable bracketed paste, show cursor, exit alternate screen
-	s.ResetTerminalBG()           // restore terminal's original background
+	s.ResetTerminalBG() // restore terminal's original background
+	s.releaseSoftKeyboard()
+	if s.mouse {
+		s.writeString("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l")
+	}
 	s.writeString("\x1b[?2004l") // Disable bracketed paste mode
 	s.writeString("\x1b[?25h")   // Show cursor
 	s.writeString("\x1b[?1049l") // Exit alternate screen
@@ -850,36 +859,14 @@ func appendInt(b []byte, n int) []byte {
 	return append(b, scratch[i:]...)
 }
 
-// QueryDefaultColors queries the terminal for its default foreground and
-// background colours using OSC 10 (FG) and OSC 11 (BG), and the basic-16
-// palette using OSC 4;N;?. Must be called after entering raw mode.
-// Returns zero-value Colors on failure (unsupported terminal, timeout, etc.)
-// Callers should check Mode != ColorDefault.
-func (s *Screen) QueryDefaultColors() (fg, bg Color) {
+// QueryDefaultColors asks the terminal for its default foreground and
+// background colours (OSC 10 and 11) and the basic-16 palette (OSC 4;N;?).
+// The replies arrive on the input stream and reach App.handleReply; nothing
+// is read here, so the call costs one write. Must be called after entering
+// raw mode.
+func (s *Screen) QueryDefaultColors() {
 	if !s.inRawMode {
 		return
-	}
-
-	// temporarily set non-blocking read with 100ms timeout
-	termios, err := unix.IoctlGetTermios(s.fd, ioctlGetTermios)
-	if err != nil {
-		return
-	}
-	saved := *termios
-	termios.Cc[unix.VMIN] = 0
-	termios.Cc[unix.VTIME] = 1 // 100ms in deciseconds
-	if err := unix.IoctlSetTermios(s.fd, ioctlSetTermios, termios); err != nil {
-		return
-	}
-	defer unix.IoctlSetTermios(s.fd, ioctlSetTermios, &saved)
-
-	// drain any pending input
-	var drain [256]byte
-	for {
-		n, _ := os.Stdin.Read(drain[:])
-		if n == 0 {
-			break
-		}
 	}
 
 	// query default FG/BG + all 16 palette colours in one write
@@ -895,35 +882,6 @@ func (s *Screen) QueryDefaultColors() (fg, bg Color) {
 		query = append(query, ";?\x07"...)
 	}
 	s.emit(query)
-
-	// read responses (larger buffer for 18 colour responses)
-	var resp [1024]byte
-	total := 0
-	for total < len(resp) {
-		n, err := os.Stdin.Read(resp[total:])
-		total += n
-		if err != nil || n == 0 {
-			break
-		}
-	}
-
-	if total == 0 {
-		return
-	}
-
-	data := resp[:total]
-	fg = parseOSCColor(data, '0') // OSC 10
-	bg = parseOSCColor(data, '1') // OSC 11
-
-	// parse OSC 4 palette responses and update basic16RGB
-	for i := range 16 {
-		if c := parseOSC4Color(data, i); c.Mode == ColorRGB {
-			basic16RGB[i] = [3]uint8{c.R, c.G, c.B}
-		}
-	}
-	refreshBasic16Vars()
-
-	return
 }
 
 // parseOSC4Color extracts an RGB colour from an OSC 4 palette response.
@@ -1029,3 +987,7 @@ done:
 		return uint8(val >> 8), data[n:], true
 	}
 }
+
+// SetMouse asks the terminal for mouse reporting (button presses, drags and
+// SGR coordinates) while in raw mode. Set it before EnterRawMode.
+func (s *Screen) SetMouse(on bool) { s.mouse = on }

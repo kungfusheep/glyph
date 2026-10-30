@@ -30,6 +30,12 @@ type Layer struct {
 	viewWidth  int
 	viewHeight int
 
+	// pointer regions painted into this layer's buffer, in buffer coordinates:
+	// hitBuilding fills while the content template executes, hits is the
+	// published set the app searches (swapped under App.hitMu)
+	hits        []hitRegion
+	hitBuilding []hitRegion
+
 	// Track dimensions at last render to detect when re-render needed
 	lastRenderWidth  int
 	lastRenderHeight int

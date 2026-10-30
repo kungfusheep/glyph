@@ -443,10 +443,18 @@ func (sv *ScrollViewC) render() {
 	}
 	var buf *Buffer
 	sv.lastPasses = 0
+	// regions painted into the layer buffer belong to the layer, not the screen
+	app := sv.layer.app
+	var prevSink *[]hitRegion
+	if app != nil && app.mouse {
+		prevSink = app.hitSink
+		app.hitSink = &sv.layer.hitBuilding
+	}
 	for {
 		buf = NewBuffer(w, h)
 		buf.defaultStyle = sv.layer.defaultStyle
 		buf.Clear()
+		sv.layer.hitBuilding = sv.layer.hitBuilding[:0]
 		sv.childTmpl.Execute(buf, int16(w), int16(h))
 		sv.lastPasses++
 		// ContentHeight == h means the content reached the last row — it may be clipped, so
@@ -455,6 +463,12 @@ func (sv *ScrollViewC) render() {
 			break
 		}
 		h *= 2
+	}
+	if app != nil && app.mouse {
+		app.hitSink = prevSink
+		app.hitMu.Lock()
+		sv.layer.hits, sv.layer.hitBuilding = sv.layer.hitBuilding, sv.layer.hits
+		app.hitMu.Unlock()
 	}
 	// remember a start height that holds this frame's content plus a viewport of
 	// headroom: steady-state and slow growth render in one pass next frame, while a

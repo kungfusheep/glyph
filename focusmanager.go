@@ -27,14 +27,16 @@ type FocusManager struct {
 
 	nextKey  string
 	prevKey  string
-	onChange func(index int) // called when focus changes
-	onBlur   func()          // called when all items lose focus
+	onChange func(index int)       // called when focus changes
+	onBlur   func()                // called when all items lose focus
+	onFocus  func(bool, *Keyboard) // app hook: an item gained or lost focus, with its keyboard hint
 
 	// per-item sub-router management, set by wireBindings
 	routers []*riffkey.Router // one sub-router per item (nil until wired)
 	push    func(r *riffkey.Router)
 	pop     func()
 	pushed  bool // whether a sub-router is currently pushed
+	blurred bool // BlurCurrent ran; the current index may be focused again
 
 	// bindings that should be available on every sub-router
 	// (e.g., Enter for form submit)
@@ -120,7 +122,9 @@ func (fm *FocusManager) BlurCurrent() {
 		fm.pop()
 		fm.pushed = false
 	}
+	fm.blurred = true
 	fm.items[fm.current].focusable.setFocused(false)
+	fm.notifyFocus(false)
 	if fm.onBlur != nil {
 		fm.onBlur()
 	}
@@ -147,24 +151,27 @@ func (fm *FocusManager) moveFocus(delta int) {
 		fm.pushed = false
 	}
 
+	fm.blurred = false
 	fm.items[fm.current].focusable.setFocused(false)
 	fm.current = (fm.current + len(fm.items) + delta) % len(fm.items)
 	fm.items[fm.current].focusable.setFocused(true)
 
 	// push new sub-router
 	fm.pushCurrent()
+	fm.notifyFocus(true)
 
 	if fm.onChange != nil {
 		fm.onChange(fm.current)
 	}
 }
 
-// Focus sets focus to a specific index.
+// Focus sets focus to a specific index. After BlurCurrent the current index
+// is focusable again, so a tap on a blurred field brings it back.
 func (fm *FocusManager) Focus(index int) {
 	if index < 0 || index >= len(fm.items) {
 		return
 	}
-	if fm.current == index {
+	if fm.current == index && !fm.blurred {
 		return
 	}
 
@@ -173,14 +180,47 @@ func (fm *FocusManager) Focus(index int) {
 		fm.pushed = false
 	}
 
+	fm.blurred = false
 	fm.items[fm.current].focusable.setFocused(false)
 	fm.current = index
 	fm.items[fm.current].focusable.setFocused(true)
 
 	fm.pushCurrent()
+	fm.notifyFocus(true)
 
 	if fm.onChange != nil {
 		fm.onChange(fm.current)
+	}
+}
+
+// focusItem focuses a registered component. A tap or a jump label on a
+// managed input lands here.
+func (fm *FocusManager) focusItem(f focusable) {
+	for i, item := range fm.items {
+		if item.focusable == f {
+			fm.Focus(i)
+			return
+		}
+	}
+}
+
+// keyboardHinter is implemented by focusables that declare a keyboard.
+type keyboardHinter interface{ keyboardHint() *Keyboard }
+
+// currentHint is the focused item's keyboard declaration, if it made one.
+func (fm *FocusManager) currentHint() *Keyboard {
+	if fm.current < 0 || fm.current >= len(fm.items) {
+		return nil
+	}
+	if h, ok := fm.items[fm.current].focusable.(keyboardHinter); ok {
+		return h.keyboardHint()
+	}
+	return nil
+}
+
+func (fm *FocusManager) notifyFocus(focused bool) {
+	if fm.onFocus != nil {
+		fm.onFocus(focused, fm.currentHint())
 	}
 }
 

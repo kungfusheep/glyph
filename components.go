@@ -58,6 +58,7 @@ func (k KeyC) Named(name string) KeyC {
 type OnC struct {
 	declaredBindings []binding
 	modal            bool
+	noCounts         bool
 }
 
 type OnFn func(decls ...onDecl) OnC
@@ -79,6 +80,14 @@ func (f OnFn) Modal(decls ...onDecl) OnC {
 	on := f(decls...)
 	on.modal = true
 	return on
+}
+
+// NoCounts disables vim-style count prefixes for this routing scope, so a
+// digit is a key rather than the start of a repeat count. A scope that filters
+// or types needs it: without it 1-9 are swallowed waiting for a command.
+func (o OnC) NoCounts() OnC {
+	o.noCounts = true
+	return o
 }
 
 func (o OnC) routeBindings() []binding { return o.declaredBindings }
@@ -2014,6 +2023,10 @@ type JumpC struct {
 	onSelect        func()
 	onSelectItem    func(unsafe.Pointer)
 	onSelectItemRef func(unsafe.Pointer, NodeRef)
+	onWheel         func(int)
+	tapOnly         bool    // a pointer target only: no label in jump mode
+	hover           *Style  // painted over the target while the pointer rests on it
+	hoverMix        float32 // 0 replaces the target's colours; 0 < mix < 1 washes them toward hover's
 	style           Style
 	margin          [4]int16
 	padding         [4]int16
@@ -2038,7 +2051,46 @@ func JumpItemRef[T any](child Component, onSelect func(*T, NodeRef)) JumpC {
 	return JumpC{child: child, onSelectItemRef: func(p unsafe.Pointer, ref NodeRef) { onSelect((*T)(p), ref) }}
 }
 
+// Tap wraps a child as a pointer target: a tap or click on it calls onTap. It is
+// a Jump target without a label, so jump mode never lists it. Jump targets are
+// tappable too; Tap is for targets that only make sense under a pointer. Needs
+// App.Mouse(true).
+func Tap(child Component, onTap func()) JumpC {
+	return JumpC{child: child, onSelect: onTap, tapOnly: true}
+}
+
+// TapItem is Tap inside a ForEach or List render func: onTap receives the item
+// this rendered instance was bound to.
+func TapItem[T any](child Component, onTap func(*T)) JumpC {
+	return JumpC{child: child, onSelectItem: func(p unsafe.Pointer) { onTap((*T)(p)) }, tapOnly: true}
+}
+
+// Wheel wraps a child so wheel events over it call fn with the delta in rows:
+// positive scrolls down, negative up. ScrollView and List scroll on the wheel
+// by themselves; Wheel is for anything else that should.
+func Wheel(child Component, fn func(delta int)) JumpC {
+	return JumpC{child: child, onWheel: fn, tapOnly: true}
+}
+
+// Wheel adds a wheel handler to a Tap, TapItem or Jump target.
+func (j JumpC) Wheel(fn func(delta int)) JumpC {
+	j.onWheel = fn
+	return j
+}
+
 // Style sets the component style.
+// Hover paints s over the target while the pointer rests on it (App.Mouse),
+// over the finished frame, so the target itself never re-renders. Attributes
+// add to the target's own. Set colours replace them, or with a mix in (0, 1)
+// wash them toward s's by that amount, so chips and a selection stay visible
+// under the highlight. Accepts a Style or a *Style; a pointer is read each
+// frame, so a theme can restyle it in place.
+func (j JumpC) Hover(s any, mix ...float64) JumpC {
+	j.hover = hoverStyle(s)
+	j.hoverMix = hoverMix(mix)
+	return j
+}
+
 func (j JumpC) Style(s Style) JumpC {
 	j.style = s
 	return j
@@ -2544,6 +2596,9 @@ type ListC[T any] struct {
 	internalSel      int // used when no external selection provided
 	render           func(*T) Component
 	onSelect         func(*T)
+	onTap            func(*T)
+	hover            *Style
+	hoverMix         float32
 	marker           string
 	markerStyle      Style
 	maxVisible       int
@@ -2701,6 +2756,14 @@ func (l *ListC[T]) OnSelect(fn func(*T)) *ListC[T] {
 	return l
 }
 
+// OnTap fires when a pointer tap lands on a row (App.Mouse). The row is
+// selected first, so OnSelect has already fired if the selection moved; OnTap
+// is the "open this" action, and fires even on the row already selected.
+func (l *ListC[T]) OnTap(fn func(*T)) *ListC[T] {
+	l.onTap = fn
+	return l
+}
+
 // Marker sets the selection marker (default "> ").
 func (l *ListC[T]) Marker(m string) *ListC[T] {
 	l.marker = m
@@ -2710,6 +2773,22 @@ func (l *ListC[T]) Marker(m string) *ListC[T] {
 // MarkerStyle sets the style for the marker text.
 func (l *ListC[T]) MarkerStyle(s Style) *ListC[T] {
 	l.markerStyle = s
+	return l
+}
+
+// Hover paints s over the row under the pointer (App.Mouse), on top of the
+// row's own style, selected or not. Set colours replace the row's, or with a
+// mix in (0, 1) wash them toward s's by that amount, so a selected row and
+// anything coloured inside the row stay visible under the highlight. Accepts
+// a Style or a *Style; a pointer is read each frame, so a theme can restyle it
+// in place.
+func (l *ListC[T]) Hover(s any, mix ...float64) *ListC[T] {
+	l.hover = hoverStyle(s)
+	l.hoverMix = hoverMix(mix)
+	if l.cached != nil {
+		l.cached.HoverStyle = l.hover
+		l.cached.HoverMix = l.hoverMix
+	}
 	return l
 }
 
@@ -2791,6 +2870,8 @@ func (l *ListC[T]) toSelectionList() *selectionList {
 		sl.scrollVisiblePtr = l.scrollVisiblePtr
 		sl.scrollTotalPtr = l.scrollTotalPtr
 		sl.easeSpec = l.easeSpec
+		sl.HoverStyle = l.hover
+		sl.HoverMix = l.hoverMix
 		sl.StyleDyn = l.styleDyn
 		sl.SelectedStyleDyn = l.selectedStyleDyn
 		if l.render != nil {
@@ -2801,6 +2882,14 @@ func (l *ListC[T]) toSelectionList() *selectionList {
 		if l.onSelect != nil {
 			fn := l.onSelect
 			sl.onMove = func() {
+				if item := l.Selected(); item != nil {
+					fn(item)
+				}
+			}
+		}
+		if l.onTap != nil {
+			fn := l.onTap
+			sl.onTap = func() {
 				if item := l.Selected(); item != nil {
 					fn(item)
 				}
@@ -3767,6 +3856,7 @@ type InputC struct {
 	externalField *InputState
 	focusGroup    *FocusGroup
 	focusIndex    int
+	keyboard      *Keyboard // on-screen keyboard wanted while focused; nil means plain text
 
 	// value binding
 	boundValue *string
@@ -3983,6 +4073,15 @@ func (i *InputC) ManagedBy(fm *FocusManager) *InputC {
 }
 
 // focusBinding implements focusable.
+// Keyboard declares the on-screen keyboard this input wants while it has
+// focus, for terminals that support OSC 523. Nil means a plain text keyboard.
+func (i *InputC) Keyboard(k Keyboard) *InputC {
+	i.keyboard = &k
+	return i
+}
+
+func (i *InputC) keyboardHint() *Keyboard { return i.keyboard }
+
 func (i *InputC) focusBinding() *textInputBinding {
 	return i.declaredTIB
 }

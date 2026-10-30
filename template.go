@@ -210,6 +210,7 @@ type Template struct {
 	pendingBindings           []binding
 	pendingRouteBindings      []binding
 	pendingModalRouteBindings []binding
+	pendingRouteNoCounts      bool
 	pendingTIB                *textInputBinding
 	pendingLogs               []*LogC       // Logs that need app.RequestRender wiring
 	pendingFocusManager       *FocusManager // Focus manager for multi-input routing
@@ -826,6 +827,9 @@ func (t *Template) collectBindings(node any) {
 func (t *Template) collectRouteBindings(node any) {
 	switch b := node.(type) {
 	case OnC:
+		if b.noCounts {
+			t.pendingRouteNoCounts = true
+		}
 		if b.modal {
 			t.pendingModalRouteBindings = append(t.pendingModalRouteBindings, b.routeBindings()...)
 		} else {
@@ -3381,7 +3385,7 @@ func styleSpans(spans []Span, styleFor func(Style) Style) []Span {
 	}
 	styled := make([]Span, len(spans))
 	for i, span := range spans {
-		styled[i] = Span{Text: span.Text, Style: styleFor(span.Style), OnSelect: span.OnSelect, OnSelectRef: span.OnSelectRef}
+		styled[i] = Span{Text: span.Text, Style: styleFor(span.Style), OnSelect: span.OnSelect, OnSelectRef: span.OnSelectRef, Hover: span.Hover}
 	}
 	return styled
 }
@@ -3632,6 +3636,10 @@ type opJump struct {
 	onSelect        func()
 	onSelectItem    func(unsafe.Pointer)
 	onSelectItemRef func(unsafe.Pointer, NodeRef)
+	onWheel         func(int)
+	tapOnly         bool
+	hover           *Style
+	hoverMix        float32
 	style           Style
 }
 
@@ -5088,7 +5096,7 @@ func (t *Template) compileSparklineC(v SparklineC, parent int16, depth int, elem
 }
 
 func (t *Template) compileJumpC(v JumpC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
-	ext := &opJump{onSelect: v.onSelect, onSelectItem: v.onSelectItem, onSelectItemRef: v.onSelectItemRef, style: v.style}
+	ext := &opJump{onSelect: v.onSelect, onSelectItem: v.onSelectItem, onSelectItemRef: v.onSelectItemRef, onWheel: v.onWheel, tapOnly: v.tapOnly, hover: v.hover, hoverMix: v.hoverMix, style: v.style}
 	idx := t.addOp(Op{
 		Kind:       OpJump,
 		Parent:     parent,
@@ -5658,9 +5666,17 @@ func (t *Template) compileRadioC(v *RadioC, parent int16, depth int) int16 {
 }
 
 func (t *Template) compileInputC(v *InputC, parent int16, depth int, elemBase unsafe.Pointer, elemSize uintptr) int16 {
-	// Convert to TextInput and compile
+	// Convert to TextInput and compile. A managed input is a jump target
+	// whose selection focuses it: a tap or a jump label reaches the field the
+	// way Tab does, FocusManager hooks included.
 	ti := v.toTextInput()
-	idx := t.compile(ti, parent, depth, nil, 0)
+	var idx int16
+	if fm := v.manager; fm != nil {
+		jump := t.compile(JumpC{child: ti, onSelect: func() { fm.focusItem(v) }}, parent, depth, nil, 0)
+		idx = jump + 1 // the input op compiled directly after its wrapper
+	} else {
+		idx = t.compile(ti, parent, depth, nil, 0)
+	}
 	if v.widthCond != nil {
 		if t.ops[idx].Dyn == nil {
 			t.ops[idx].Dyn = &OpDyn{}
@@ -9092,6 +9108,16 @@ func (t *Template) renderLayer(buf *Buffer, op *Op, absX, absY, contentW, conten
 	}
 	ext.ptr.prepare()
 	ext.ptr.blit(buf, int(absX), int(absY), layerW, int(contentH))
+	if t.app != nil && t.app.hitSink != nil {
+		l := ext.ptr
+		t.app.addHit(hitRegion{X: absX, Y: absY, W: int16(layerW), H: contentH, layer: l, wheel: func(d int) {
+			if d > 0 {
+				l.ScrollDown(d)
+			} else {
+				l.ScrollUp(-d)
+			}
+		}})
+	}
 
 	if t.inheritedFill.Mode != ColorDefault {
 		for cy := int(absY); cy < int(absY)+int(contentH) && cy < buf.height; cy++ {
@@ -9781,9 +9807,17 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		defer buf.PopClip()
 	}
 	y := int(absY) - topShift // topShift is 0 unless an eased list is mid-glide
+	fullRows := 0             // rows that fit entirely in the viewport: the wheel scrolls by this window
 	for i := startIdx; i < endIdx; i++ {
 		itemH := int(ext.geoms[i].H)
 		isSelected := i == selectedIdx
+		if t.clipMaxY == 0 || int16(y+itemH) <= t.clipMaxY {
+			fullRows++
+		}
+		if t.app != nil && t.app.hitSink != nil && ext.listPtr != nil && ext.selectedPtr != nil {
+			lp, sel, row := ext.listPtr, ext.selectedPtr, i
+			t.app.addHit(hitRegion{X: absX, Y: int16(y), W: rowW, H: int16(itemH), tap: func() { lp.tapRow(sel, row) }, hover: lp.HoverStyle, hoverMix: lp.HoverMix})
+		}
 
 		// fill item area with selection style (covers full item height)
 		var rowStyle Style
@@ -9912,6 +9946,10 @@ func (t *Template) renderSelectionList(buf *Buffer, op *Op, geom *Geom, absX, ab
 		}
 		y += itemH
 	}
+	if t.app != nil && t.app.hitSink != nil && ext.listPtr != nil && ext.selectedPtr != nil {
+		lp, sel, n, window := ext.listPtr, ext.selectedPtr, visibleLen, fullRows
+		t.app.addHit(hitRegion{X: absX, Y: absY, W: rowW, H: geom.H, wheel: func(d int) { lp.wheel(sel, n, window, d) }})
+	}
 }
 
 // treeVisibleCount returns the number of visible nodes in the tree.
@@ -10027,6 +10065,11 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 		}
 	}
 
+	t.registerJumpHit(op, geom, absX, absY, maxW)
+	if op.Ext.(*opJump).tapOnly {
+		return
+	}
+
 	// If jump mode is active, register this target. Labels are painted by the
 	// app after the final visible frame is composed. Targets outside the
 	// buffer, the active vertical clip, or the jump viewport never drew
@@ -10071,25 +10114,40 @@ func (t *Template) renderJump(buf *Buffer, op *Op, geom *Geom, absX, absY, maxW 
 	}
 }
 
+// richSpanJumpFunc registers a span with OnSelect or OnSelectRef as a jump
+// target while jump mode is active, and as a pointer region while the mouse
+// is on, so a link in rich text is tappable the same way a Jump wrapper is.
+// The region covers the span's width from its first cell; a span that wraps
+// onto a further line is tappable on its first line only.
 func (t *Template) richSpanJumpFunc(buf *Buffer) spanJumpFunc {
-	if t.app == nil || t.app.jumpMode == nil || !t.app.jumpMode.isActive() {
+	jumpActive := t.app != nil && t.app.jumpMode != nil && t.app.jumpMode.isActive()
+	hits := t.app != nil && t.app.hitSink != nil
+	if !jumpActive && !hits {
 		return nil
 	}
 	return func(x, y int, span Span) {
 		if span.OnSelect == nil && span.OnSelectRef == nil {
 			return
 		}
-		x += t.jumpOffsetX
-		y += t.jumpOffsetY
-		if t.jumpMaxY > t.jumpMinY && (y < t.jumpMinY || y >= t.jumpMaxY) {
-			return
-		}
+		// labels and refs want screen positions; the pointer region stays
+		// buffer-local, as a layer translates it on lookup (see hit.go)
+		sx, sy := x+t.jumpOffsetX, y+t.jumpOffsetY
+		w := max(1, StringWidth(span.Text))
 		onSelect := span.OnSelect
 		if span.OnSelectRef != nil {
-			ref := NodeRef{X: x, Y: y, W: max(1, StringWidth(span.Text)), H: 1}
+			ref := NodeRef{X: sx, Y: sy, W: w, H: 1}
 			onSelect = func() { span.OnSelectRef(ref) }
 		}
-		t.app.AddJumpTarget(int16(x), int16(y), onSelect, Style{})
+		if hits {
+			t.app.addHit(hitRegion{X: int16(x), Y: int16(y), W: int16(w), H: 1, tap: onSelect, hover: span.Hover})
+		}
+		if !jumpActive {
+			return
+		}
+		if t.jumpMaxY > t.jumpMinY && (sy < t.jumpMinY || sy >= t.jumpMaxY) {
+			return
+		}
+		t.app.AddJumpTarget(int16(sx), int16(sy), onSelect, Style{})
 	}
 }
 
@@ -10453,6 +10511,9 @@ func (t *Template) renderOverlay(buf *Buffer, op *Op, exiting bool, screenW, scr
 	oldChildRefOpacitySet := childTmpl.refOpacitySet
 	childTmpl.refOpacity = t.currentRefOpacity() * opacity
 	childTmpl.refOpacitySet = true
+	if t.app != nil && t.app.hitSink != nil {
+		t.app.addHit(hitRegion{X: posX, Y: posY, W: overlayW, H: overlayH})
+	}
 	childTmpl.render(buf, posX, posY, overlayW)
 	childTmpl.refOpacity = oldChildRefOpacity
 	childTmpl.refOpacitySet = oldChildRefOpacitySet
@@ -10969,4 +11030,37 @@ func opKindName(k OpKind) string {
 		return name
 	}
 	return fmt.Sprintf("Op(%d)", k)
+}
+
+// registerJumpHit records a Jump, Tap, TapItem or Wheel target as a pointer
+// region for this frame (see hit.go). Coordinates stay buffer-local: a target
+// inside a ScrollView registers against the layer, which translates on lookup.
+func (t *Template) registerJumpHit(op *Op, geom *Geom, absX, absY, maxW int16) {
+	if t.app == nil || t.app.hitSink == nil {
+		return
+	}
+	ext := op.Ext.(*opJump)
+	w := geom.W
+	if maxW < w {
+		w = maxW
+	}
+	r := hitRegion{X: absX, Y: absY, W: w, H: max(1, geom.H), wheel: ext.onWheel, hover: ext.hover, hoverMix: ext.hoverMix}
+	// the SLOT, not the base: for []*T they differ, and the callback's
+	// parameter type is the slice's element type
+	base := t.elemSlot
+	if base == nil {
+		base = t.elemBase
+	}
+	switch {
+	case ext.onSelectItem != nil && base != nil:
+		fn := ext.onSelectItem
+		r.tap = func() { fn(base) }
+	case ext.onSelectItemRef != nil && base != nil:
+		fn := ext.onSelectItemRef
+		ref := NodeRef{X: int(absX) + t.jumpOffsetX, Y: int(absY) + t.jumpOffsetY, W: int(w), H: int(r.H)}
+		r.tap = func() { fn(base, ref) }
+	case ext.onSelect != nil:
+		r.tap = ext.onSelect
+	}
+	t.app.addHit(r)
 }

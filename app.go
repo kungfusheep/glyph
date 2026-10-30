@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/kungfusheep/riffkey"
@@ -60,9 +62,25 @@ type App struct {
 	// running is written by Stop, which is public and callable from any
 	// goroutine (an App.Apply closure runs on the render goroutine), while the
 	// Run loop reads it. Atomic for the same reason as appDirty below.
-	running        atomic.Bool
-	renderMu       sync.Mutex
-	renderChan     chan struct{}
+	running  atomic.Bool
+	renderMu sync.Mutex
+
+	// pointer input (see hit.go): regions build on the render goroutine into
+	// hitBuilding via hitSink and swap into hitRoot under hitMu for the input
+	// goroutine; mouse is the opt-in set by Mouse(true)
+	mouse       bool
+	hitMu       sync.Mutex
+	hitRoot     []hitRegion
+	hitBuilding []hitRegion
+	hitSink     *[]hitRegion
+	// pointer cell and the hover footprint last painted or requested, under
+	// hitMu; hoverFramePending asks for a frame that only restyles hover
+	hoverX, hoverY    int
+	hoverKnown        bool
+	hoverShown        hitRect
+	hoverShownOK      bool
+	hoverFramePending atomic.Bool
+	renderChan        chan struct{}
 	// render generations: reqGen stamps every RequestRender; doneGen records the
 	// latest request generation a completed render covered. The debounce timer
 	// skips only when no request is newer than the last render, so an async
@@ -73,22 +91,22 @@ type App struct {
 	// Apply queue: closures pushed by goroutines, drained at frame top under
 	// the render lock before any reads. Double-buffered for zero
 	// steady-state allocation.
-	applyMu      sync.Mutex
-	applied      []func()
-	applyScratch []func()
+	applyMu        sync.Mutex
+	applied        []func()
+	applyScratch   []func()
 	forceFullFlush bool        // set by Go() to force full redraw on next frame
 	suspended      atomic.Bool // when set, render() is a no-op (terminal handed to an external program, e.g. $EDITOR)
 	effectsActive  bool        // previous frame used post-processing; clear pooled buffers fully
 
 	// cache-effects skip gate (ADR 19): on a frame whose only trigger is an
 	// effect's animation, skip Execute and re-run effects over the cached render.
-	appDirty          atomic.Bool // a RequestRender happened since the last full render — forces a full Execute. Set outside renderMu (any goroutine), cleared in render(); atomic to order those.
+	appDirty           atomic.Bool // a RequestRender happened since the last full render — forces a full Execute. Set outside renderMu (any goroutine), cleared in render(); atomic to order those.
 	effectFramePending atomic.Bool // this frame was requested by an effect's animation (the only case we skip Execute). Set outside renderMu; atomic.
 	animFramePending   atomic.Bool // this frame was requested by a template animation's tick — eligible for the paint-only skip (ExecutePaint). Set outside renderMu; atomic.
 	paintFramesOn      bool        // opt-in (EnablePaintFrames): allow anim ticks to take the paint-only skip. Default off while the skip hardens against real-world compositions.
-	cleanValid        bool    // cleanBuf holds a valid pristine (pre-effects) render
-	cleanBuf          *Buffer // persistent snapshot of the last full render, before effects
-	lastAnimating     bool    // last Execute reported a template animation — don't skip while animating
+	cleanValid         bool        // cleanBuf holds a valid pristine (pre-effects) render
+	cleanBuf           *Buffer     // persistent snapshot of the last full render, before effects
+	lastAnimating      bool        // last Execute reported a template animation — don't skip while animating
 
 	// render pacing (m793): how long the last terminal write (FlushBuffer) took.
 	// when the terminal can't drain as fast as we render, writes back up and a
@@ -109,6 +127,9 @@ type App struct {
 	cursorShape      CursorShape
 	cursorColor      Color
 	cursorColorSet   bool
+
+	// on-screen keyboard control (OSC 523), see softkeyboard.go
+	kb softKeyboard
 
 	// default style for all cells (set via SetDefaultStyle)
 	defaultStyle Style
@@ -144,6 +165,8 @@ type App struct {
 	defaultFG     Color // terminal's default FG (detected via OSC 10)
 	defaultBG     Color // terminal's default BG (detected via OSC 11)
 
+	replyFn func(string) bool // OnTerminalReply: replies the app does not use itself
+
 	// SetView limit (for catching anti-patterns)
 	setViewCount int
 	setViewLimit int // 0 = unlimited
@@ -172,6 +195,8 @@ func NewApp() *App {
 		jumpMode:   &JumpMode{},
 		jumpStyle:  DefaultJumpStyle,
 	}
+	input.OnMouse(app.handleMouse)
+	input.OnReply(app.handleReply)
 
 	return app
 }
@@ -389,6 +414,9 @@ func (a *App) wireBindings(tmpl *Template, router *riffkey.Router) {
 		a.wireBindingList(tmpl.routeModalRouter, tmpl.pendingModalRouteBindings)
 		componentRouter = tmpl.routeModalRouter
 	}
+	if tmpl.pendingRouteNoCounts {
+		componentRouter.NoCounts()
+	}
 	a.wireComponentBindings(tmpl, componentRouter)
 	a.wireChildRouteScopes(tmpl)
 }
@@ -411,6 +439,7 @@ func (a *App) wireComponentBindings(tmpl *Template, router *riffkey.Router) {
 		// each gets pushed on focus and popped on blur.
 		fm.push = func(r *riffkey.Router) { a.PushRouter(r) }
 		fm.pop = func() { a.PopRouter() }
+		fm.onFocus = a.setInputFocused
 		fm.routers = make([]*riffkey.Router, len(fm.items))
 
 		for i, item := range fm.items {
@@ -550,6 +579,9 @@ func (a *App) wireChildRouteScopes(tmpl *Template) {
 		if hasModal {
 			child.routeModalRouter = riffkey.NewRouter().Disable()
 			a.wireBindingList(child.routeModalRouter, child.pendingModalRouteBindings)
+			if child.pendingRouteNoCounts {
+				child.routeModalRouter.NoCounts()
+			}
 			a.wireComponentBindings(child, child.routeModalRouter)
 			if !hasScopedComponents {
 				a.wireComponentBindings(tmpl, child.routeModalRouter)
@@ -676,6 +708,7 @@ func (a *App) Go(name string) {
 	a.currentView = name
 	a.input.SetRouter(a.viewRouters[name])
 	a.activateView(name)
+	a.syncKeyboard()
 	// diff flush handles view switches correctly — every changed cell gets
 	// emitted. FlushFull issues \x1b[2J (clear) which can produce a visible
 	// microflash on some terminals (Ghostty) during a sync-wrapped update.
@@ -693,6 +726,7 @@ func (a *App) activateTemplateFM(tmpl *Template) {
 	a.attachRouteScopes(tmpl)
 	if fm := tmpl.pendingFocusManager; fm != nil {
 		fm.initialPush()
+		a.setInputFocused(len(fm.items) > 0, fm.currentHint())
 	}
 	if tmpl.routeModalRouter != nil && !tmpl.routeModalPushed {
 		tmpl.routeModalRouter.Enable()
@@ -719,6 +753,9 @@ func (a *App) deactivateTemplateFM(tmpl *Template) {
 			fm.pop()
 		}
 		fm.pushed = false
+	}
+	if tmpl.pendingFocusManager != nil {
+		a.setInputFocused(false, nil)
 	}
 }
 
@@ -793,6 +830,7 @@ func (a *App) PushView(name string) {
 		a.viewStack = append(a.viewStack, name)
 		a.input.Push(router)
 		a.activateView(name)
+		a.syncKeyboard()
 		a.RequestRender()
 	}
 }
@@ -811,6 +849,7 @@ func (a *App) PopView() {
 	a.deactivateView(topName)
 	a.viewStack = a.viewStack[:len(a.viewStack)-1]
 	a.input.Pop()
+	a.syncKeyboard()
 	a.RequestRender()
 }
 
@@ -1055,6 +1094,64 @@ func (a *App) requestEffectFrame() {
 	}
 }
 
+// watchTermination turns SIGTERM and SIGHUP into Stop, so run's deferred
+// ExitRawMode hands the terminal back with its modes reset. Returns the
+// function that stops watching. A process killed while mouse reporting is on
+// would otherwise leave the shell flooded with pointer reports.
+func (a *App) watchTermination() (stop func()) {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGTERM, syscall.SIGHUP)
+	done := make(chan struct{})
+	go a.stopOnSignal(ch, done, a.dieBySignal)
+	return func() {
+		signal.Stop(ch)
+		close(done)
+	}
+}
+
+// terminationGrace is how long a signalled app gets to unwind run on its own
+// before the terminal is restored directly and the signal re-raised.
+var terminationGrace = 250 * time.Millisecond
+
+// stopOnSignal asks the app to stop on a termination signal. Closing stdin does
+// not wake a read parked on a tty on macOS, so when run has not unwound within
+// the grace period, escalate restores the terminal and lets the signal take its
+// default course. done closing first means run returned on its own.
+func (a *App) stopOnSignal(ch <-chan os.Signal, done <-chan struct{}, escalate func(os.Signal)) {
+	select {
+	case sig := <-ch:
+		a.Stop()
+		select {
+		case <-done:
+		case <-time.After(terminationGrace):
+			escalate(sig)
+		}
+	case <-done:
+	}
+}
+
+// dieBySignal restores the terminal and re-raises sig with its default
+// disposition, so the process ends the way an unhandled signal would have
+// ended it, with the terminal modes already reset.
+func (a *App) dieBySignal(sig os.Signal) {
+	a.screen.ExitRawMode()
+	signal.Reset(sig)
+	if p, err := os.FindProcess(os.Getpid()); err == nil {
+		p.Signal(sig)
+	}
+}
+
+// requestHoverFrame schedules a frame that only restyles the cells under the
+// pointer over the cached render. App state is untouched, so it never dirties.
+func (a *App) requestHoverFrame() {
+	a.hoverFramePending.Store(true)
+	a.reqGen.Add(1)
+	select {
+	case a.renderChan <- struct{}{}:
+	default:
+	}
+}
+
 // EnablePaintFrames opts in to the paint-only animation fast path: frames driven
 // purely by a template animation's tick skip the geometry passes when the template
 // proves nothing geometric moved. Off by default while the skip hardens against
@@ -1139,6 +1236,9 @@ func (a *App) renderFrom(animFrame bool) {
 	// for (via requestEffectFrame) is eligible to skip Execute. A direct render()
 	// or a RequestRender-driven frame always does a full Execute.
 	effectFrame := a.effectFramePending.Swap(false)
+	// a hover frame restyles the cells under the pointer over the cached render;
+	// it takes the same skip, with or without effects
+	hoverFrame := a.hoverFramePending.Swap(false)
 	// animFrame (parameter) is set only by renderPaced: a frame driven purely by a
 	// template animation's tick may skip the geometry passes if the template proves
 	// nothing moved. Direct render() calls never set it — their frames may carry
@@ -1163,6 +1263,16 @@ func (a *App) renderFrom(animFrame bool) {
 
 	size := a.screen.Size()
 	buf := a.pool.Current()
+	// a resize signal updates the screen size on its own goroutine before
+	// applyResize, which waits for renderMu, grows the pool, so mid-frame the
+	// two can disagree. The buffer is what this frame paints into: render at
+	// its size, and the resize's own RequestRender redraws at the new one.
+	if size.Width > buf.Width() {
+		size.Width = buf.Width()
+	}
+	if size.Height > buf.Height() {
+		size.Height = buf.Height()
+	}
 	if a.effectsActive {
 		buf.Clear()
 	}
@@ -1204,13 +1314,16 @@ func (a *App) renderFrom(animFrame bool) {
 	// re-run the effect pipeline over it instead of re-Executing the whole
 	// template. Conservative — fullscreen only, never while animating a template,
 	// in jump mode, or when a full flush is forced.
-	if effectFrame && !a.appDirty.Load() && a.cleanValid && a.effectsActive && !a.lastAnimating &&
+	if ((effectFrame && a.effectsActive) || hoverFrame) && !a.appDirty.Load() && a.cleanValid && !a.lastAnimating &&
 		!a.inline && !a.forceFullFlush && !DebugFullRedraw && !a.JumpModeActive() &&
 		a.cleanBuf != nil && a.cleanBuf.Width() == size.Width &&
 		a.cleanBuf.Height() == size.Height {
 		a.copyToScreen(a.cleanBuf) // back = pristine cached render
-		a.screen.forceRGB = true
-		a.applyEffects(a.screen.Buffer(), activeTmpl, activeTmpl.ScreenEffects(), size.Width, int(renderHeight))
+		if a.effectsActive {
+			a.screen.forceRGB = true
+			a.applyEffects(a.screen.Buffer(), activeTmpl, activeTmpl.ScreenEffects(), size.Width, int(renderHeight))
+		}
+		a.paintHover(a.screen.Buffer())
 		a.screen.Flush()
 		if a.cursorColorSet {
 			a.screen.BufferCursorColor(a.cursorColor)
@@ -1239,7 +1352,9 @@ func (a *App) renderFrom(animFrame bool) {
 		paintDone = activeTmpl.ExecutePaint(buf, int16(size.Width), renderHeight)
 	}
 	if !paintDone {
+		a.beginHits()
 		activeTmpl.Execute(buf, int16(size.Width), renderHeight)
+		a.commitHits()
 	}
 	if jumpActive {
 		a.jumpMode.AssignLabels() // swap built→Targets + label, atomically
@@ -1301,6 +1416,7 @@ func (a *App) renderFrom(animFrame bool) {
 			lastEffectTime = time.Since(tEffect)
 		}
 	}
+	a.paintHover(buf)
 	if a.JumpModeActive() {
 		a.paintJumpLabels(buf, int(renderHeight))
 	}
@@ -1362,6 +1478,9 @@ func (a *App) copyToScreen(src *Buffer) {
 // another frame if any effect is mid-animation. Shared by the full-render path
 // and the effect-only skip path (ADR 19).
 func (a *App) applyEffects(buf *Buffer, tmpl *Template, treeEffects []Effect, width, height int) {
+	// never run effects past the buffer: a torn resize frame would index off the end
+	width = min(width, buf.Width())
+	height = min(height, buf.Height())
 	// resolve Color16 cells to detected palette RGB before effects run
 	resolveColor16(buf, width, height)
 
@@ -1517,33 +1636,20 @@ func (a *App) run(startView string) error {
 
 	// Handle resize
 	go a.handleResize()
+	defer a.watchTermination()()
 
 	// Handle async render requests (from timers, data updates, etc)
 	go a.handleRenderRequests()
 
-	// Render first so the screen is populated before we block on the color query.
+	// Render first so the screen is populated before anything else goes out.
 	// This eliminates the blank-screen flash between alternate buffer switch and first frame.
 	a.render()
 
-	// Detect terminal's default colours for post-processing and opacity fallback.
-	// Runs after first render so the blank gap is gone; runs before input.Run so
-	// there's no race on stdin.
-	a.defaultFG, a.defaultBG = a.screen.QueryDefaultColors()
-	// Plumb queried colours into the buffer default style so opacity blends and
-	// any other path that reads buf.defaultStyle can lerp toward a concrete BG.
-	// Caller-supplied SetDefaultStyle values still win.
-	if a.defaultStyle.FG.Mode == ColorDefault && a.defaultFG.Mode != ColorDefault {
-		a.defaultStyle.FG = a.defaultFG
-	}
-	if a.defaultStyle.BG.Mode == ColorDefault && a.defaultBG.Mode != ColorDefault {
-		a.defaultStyle.BG = a.defaultBG
-	}
-	if a.pool != nil {
-		for _, buf := range a.pool.buffers {
-			buf.defaultStyle = a.defaultStyle
-		}
-	}
-	a.RequestRender()
+	// Ask the terminal for its default colours and whether it has an
+	// on-screen keyboard. Both are plain writes: the replies come back through
+	// the input loop (handleReply) and the screen repaints when they land.
+	a.screen.QueryDefaultColors()
+	a.startSoftKeyboard()
 
 	// Run riffkey input loop
 	// render immediately on input for zero-latency response;
@@ -1577,10 +1683,11 @@ func (a *App) run(startView string) error {
 
 	// Normal termination via Stop() causes reader to return error
 	if !a.running.Load() {
-		// Reopen stdin for inline apps so subsequent apps can use it
-		if a.inline {
-			reopenStdin()
-		}
+		// Stop() closed stdin to unblock the reader, which closes it for the
+		// whole process. Reopen it so a later app can read input: a program may
+		// run several apps in sequence, inline or full-screen, and the second
+		// one would otherwise fail with "file already closed".
+		reopenStdin()
 		return nil
 	}
 	return err

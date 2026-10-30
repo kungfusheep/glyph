@@ -559,6 +559,9 @@ type selectionList struct {
 	len              int      // cached length for bounds checking
 	offset           int      // scroll offset for windowing
 	onMove           func()   // called after selection index changes
+	onTap            func()   // called after a pointer tap lands on a row (after onMove, if the selection moved)
+	HoverStyle       *Style   // painted over the row under the pointer (List.Hover)
+	HoverMix         float32  // 0 replaces row colours with HoverStyle's; 0 < mix < 1 washes them toward it
 	// ScrollState writeback: when set, renderSelectionList writes its computed window
 	// here each frame so an external Scrollbar (ScrollbarDyn) can track the list.
 	scrollOffsetPtr  *int // window top index
@@ -753,6 +756,7 @@ type Span struct {
 	Style       Style
 	OnSelect    func()
 	OnSelectRef func(NodeRef)
+	Hover       *Style // painted over the span while the pointer rests on it (App.Mouse); shared by pointer so a theme can restyle every link in place
 }
 
 // RichTextNode is inline-styled text: a run of spans that share a line and wrap
@@ -984,4 +988,50 @@ var ThemeMonochrome = ThemeEx{
 	Accent: Style{Attr: AttrBold},
 	Error:  Style{Attr: AttrBold | AttrUnderline},
 	Border: Style{Attr: AttrDim},
+}
+
+// tapRow selects the row under the pointer: onMove fires if the selection
+// moved, as for a key, then onTap fires for the row whether it moved or not. A
+// tap is an action on that row; a move is only a change of selection.
+func (s *selectionList) tapRow(sel *int, row int) {
+	if sel == nil || row < 0 {
+		return
+	}
+	old := *sel
+	*sel = row
+	if *sel != old && s.onMove != nil {
+		s.onMove()
+	}
+	if s.onTap != nil {
+		s.onTap()
+	}
+}
+
+// wheel scrolls the window by delta rows and keeps the selection inside it,
+// so a swipe moves the list rather than racing the highlight: n is the item
+// count, window how many items the last frame showed.
+func (s *selectionList) wheel(sel *int, n, window, delta int) {
+	if sel == nil || n == 0 || window <= 0 {
+		return
+	}
+	maxOffset := n - window
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	s.offset += delta
+	if s.offset < 0 {
+		s.offset = 0
+	}
+	if s.offset > maxOffset {
+		s.offset = maxOffset
+	}
+	old := *sel
+	if *sel < s.offset {
+		*sel = s.offset
+	} else if *sel >= s.offset+window {
+		*sel = s.offset + window - 1
+	}
+	if *sel != old && s.onMove != nil {
+		s.onMove()
+	}
 }
