@@ -10,7 +10,7 @@ cd glyph
 go run ./examples/softkeyboard
 ```
 
-Go 1.25 or later. Nothing else to install.
+Tested with Go 1.27.1 darwin/amd64
 
 ## What to try
 
@@ -28,15 +28,11 @@ go run ./examples/softkeyboard -log /tmp/kb.log
 
 appends the same lines to a file, for reading after a run on a phone.
 
-To capture the raw bytes on any terminal:
-
-```sh
-script -q /tmp/kb.typescript go run ./examples/softkeyboard
-grep -ao $'\e]523;[^\e]*' /tmp/kb.typescript
-```
-
 ## Where the client lives
 
 - `softkeyboard.go` sends the reports: `Keyboard(...)` on a view, `Keyboard(...)` on an `Input`, and `ShowKeyboard` / `HideKeyboard` for overlays. It takes control at startup when the mouse is on and hands it back on exit, including on a signal.
 - `reply.go` reads the terminal's answers through the input loop, so nothing waits on a reply.
 - `focusmanager.go` turns a focus change into a report, and a tap on a managed input focuses it.
+
+
+
