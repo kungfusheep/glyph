@@ -2,6 +2,8 @@
 
 A small touch-first app for trying the [Soft Keyboard Protocol (OSC 523)](https://github.com/kungfusheep/OSC-523) in a terminal that implements it.
 
+  <img width="709" height="380" alt="image" src="https://github.com/user-attachments/assets/edc176a9-2019-408a-98cf-66a4df0db20a" />
+
 ## Run it
 
 ```sh
